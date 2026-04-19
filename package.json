@@ -1,7 +1,7 @@
 {
   "name": "conclave-aegis-discord-core",
-  "version": "9.0.0",
-  "description": "TheConclave Dominion \u2014 AEGIS Discord Bot v10.0 + World-Class Music Runtime",
+  "version": "10.0.0",
+  "description": "TheConclave Dominion \u2014 AEGIS CONCLAVE AEGIS bot.js v10.0 SOVEREIGN EDITION",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js",
