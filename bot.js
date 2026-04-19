@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════
-// CONCLAVE AEGIS BOT — bot.js v8.0 ULTIMATE OMNI
+// CONCLAVE AEGIS BOT — bot.js v9.0 ULTIMATE OMNI + MUSIC RUNTIME
 // ═══════════════════════════════════════════════════════════════
 // Architecture:
 //   ∙ Standalone process · Built-in HTTP health server (:3001)
@@ -23,6 +23,19 @@
 // ═══════════════════════════════════════════════════════════════
 'use strict';
 require('dotenv').config();
+
+// ─── MUSIC RUNTIME ────────────────────────────────────────────────
+let musicRuntime = null;
+if (process.env.MUSIC_RUNTIME_ENABLED !== 'false') {
+  try {
+    musicRuntime = require('./music.js');
+    console.log('🎵 Music runtime loaded');
+  } catch (e) {
+    console.warn('⚠️  Music runtime not loaded:', e.message);
+    console.warn('   Run: npm install @discordjs/voice play-dl @discordjs/opus ffmpeg-static libsodium-wrappers');
+  }
+}
+
 
 const http = require('http');
 const {
@@ -853,6 +866,9 @@ const cmds = [
   new SlashCommandBuilder().setName('clipscore').setDescription('🎬 Submit a clip or screenshot for Clip of the Week')
     .addStringOption(o => o.setName('url').setDescription('Link to your clip or image').setRequired(true))
     .addStringOption(o => o.setName('description').setDescription('Brief description').setRequired(false)),
+
+// Music commands — injected at runtime if enabled
+...(musicRuntime?.MUSIC_COMMANDS || []),
 ].map(c => c.toJSON());
 
 async function registerCommands() {
@@ -941,6 +957,18 @@ bot.on(Events.InteractionCreate, async i => {
   try { await i.deferReply(); } catch { return; }
 
   try {
+
+    // ── MUSIC RUNTIME ──
+    if (musicRuntime) {
+      await i.deferReply().catch(() => {});
+      const handled = await musicRuntime.handleMusicCommand(i, bot).catch(e => {
+        console.error('[Music cmd]', e.message);
+        i.editReply('⚠️ Music error: ' + e.message.slice(0, 120)).catch(() => {});
+        return true;
+      });
+      if (handled) return;
+    }
+
     // ── ECONOMY ──
     if (cmd === 'wallet' || cmd === 'curr') return await handleWallet(i);
 
@@ -1810,6 +1838,8 @@ bot.on(Events.InteractionCreate, async i => {
     console.error(`❌ /${cmd}:`, e.message);
     try { await i.editReply(`⚠️ Something went wrong: ${e.message.slice(0, 200)}`); } catch {}
   }
+});
+
 // ─── BUTTON HANDLERS ───────────────────────────────────────────
 // ── RATES ──────────────────────────────────────────────────────
   if (cmd === 'rates') {
@@ -1906,7 +1936,9 @@ bot.on(Events.InteractionCreate, async i => {
         { name:'Step 2', value:'Open the Terminal → Click **"Travel to Another Server"**', inline:false },
         { name:'Step 3', value:'Select the destination Conclave map from the list', inline:false },
         { name:'Step 4', value:'Upload your survivor + dinos/items (each has a 24h timer)', inline:false },
-        { name:'⚠️ Notes', value:'• Some items/dinos may not transfer between all maps\n• Downloads available at Obelisks on the destination map\n• Transfers enabled across all 10 Conclave servers', inline:false },
+        { name:'⚠️ Notes', value:'• Some items/dinos may not transfer between all maps
+• Downloads available at Obelisks on the destination map
+• Transfers enabled across all 10 Conclave servers', inline:false },
       )
     ], ephemeral: false });
   }
@@ -1918,7 +1950,8 @@ bot.on(Events.InteractionCreate, async i => {
         { name:'🎮 Xbox / Microsoft Store', value:'Search **TheConclave** in the unofficial server browser, or use the IP directly via network settings', inline:false },
         { name:'🎯 PlayStation', value:'Use the in-game unofficial server browser and search **TheConclave**', inline:false },
         { name:'💻 PC (Steam/Epic)', value:'Add as favorite in ARK server browser. All 10 IPs are listed at theconclavedominion.com/ark', inline:false },
-        { name:'📋 Quick IP', value:'**The Island:** 217.114.196.102:5390\nAll server IPs → `/servers`', inline:false },
+        { name:'📋 Quick IP', value:'**The Island:** 217.114.196.102:5390
+All server IPs → `/servers`', inline:false },
         { name:'🔧 Still stuck?', value:'Open a ticket with `/ticket` or ask in #help-desk', inline:false },
       )
     ], ephemeral: false });
@@ -1976,11 +2009,11 @@ bot.on(Events.InteractionCreate, async i => {
   if (cmd === 'tip') {
     const TIPS = [
       'Put points into **Weight** on your first few levels — you can never have too much.',
-      'On our 5× cluster, **imprinting** is 5× faster too. Set timers and don\'t miss a cuddle!',
+      'On our 5× cluster, **imprinting** is 5× faster too. Set timers and don't miss a cuddle!',
       'Use a **Whip** to grab items off the ground while mounted. Huge QoL upgrade.',
       'Baby dinos eat roughly **5× faster** on boosted servers. Always have plenty of food ready.',
       '**Element** is shared across the cluster via transfers. Farm on Extinction, use anywhere.',
-      'The **Aberration** server is PvP — cross over prepared or you\'ll be looted.',
+      'The **Aberration** server is PvP — cross over prepared or you'll be looted.',
       'Amissa is a **Patreon-only** server with extra protections and a dedicated community.',
       'Use `/transfer` to learn how to move your survivor and dinos between all 10 maps.',
       '**Crystal Isles and Lost Colony** are great starter maps — fewer predators near spawn.',
@@ -2014,7 +2047,8 @@ bot.on(Events.InteractionCreate, async i => {
     const embed = base('📍 Coordinates', C.cy)
       .setDescription(`**${location}** on ${map}`)
       .addFields(
-        { name:'📋 Format', value:'In-game: **LAT LON** shown top-right of your HUD\nExample: `52.3 / 48.1` = Lat 52.3, Lon 48.1', inline:false },
+        { name:'📋 Format', value:'In-game: **LAT LON** shown top-right of your HUD
+Example: `52.3 / 48.1` = Lat 52.3, Lon 48.1', inline:false },
         { name:'💡 Sharing Tip', value:'Use `📍` in chat + your coords so tribe/allies can find you fast', inline:false },
         { name:'🗺️ Map Overlays', value:'For detailed maps with POIs, visit **ARK Smart Breeding** or **Dododex** map tool', inline:false },
       );
@@ -2069,8 +2103,18 @@ bot.on(Events.InteractionCreate, async i => {
   }
 
 
-});
 bot.on(Events.InteractionCreate, async i => {
+
+  // ── MUSIC BUTTONS + SELECTS ──
+  if (musicRuntime) {
+    if (i.isButton() && musicRuntime.isMusicButton(i.customId)) {
+      return musicRuntime.handleMusicButton(i, bot);
+    }
+    if (i.isStringSelectMenu() && musicRuntime.isMusicSelect(i.customId)) {
+      return musicRuntime.handleMusicSelect(i, bot);
+    }
+  }
+
   if (!i.isButton()) return;
 
   if (i.customId === 'monitor_refresh') {

@@ -16,8 +16,13 @@ services:
         value: https://api.theconclavedominion.com
       - key: BEACON_CLIENT_ID
         value: eb9ecdff-4048-4a83-8f40-f2e16d2e9a81
-
-      # Fill manually in Render dashboard:
+      - key: MUSIC_RUNTIME_ENABLED
+        value: "true"
+      - key: MUSIC_FALLBACK_ENABLED
+        value: "true"
+      - key: ROOM_PULSE_INTERVAL
+        value: "30000"
+      # Fill in Render dashboard:
       - key: DISCORD_BOT_TOKEN
         sync: false
       - key: DISCORD_CLIENT_ID
@@ -55,4 +60,12 @@ services:
       - key: MONITOR_ACTIVITY_CHANNEL_ID
         sync: false
       - key: MONITOR_MESSAGE_ID
+        sync: false
+      - key: SPOTIFY_CLIENT_ID
+        sync: false
+      - key: SPOTIFY_CLIENT_SECRET
+        sync: false
+      - key: SPOTIFY_REFRESH_TOKEN
+        sync: false
+      - key: YOUTUBE_COOKIE
         sync: false
