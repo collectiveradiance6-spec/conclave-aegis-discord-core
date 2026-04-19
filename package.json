@@ -1,12 +1,12 @@
 {
   "name": "conclave-aegis-discord-core",
   "version": "9.0.0",
-  "description": "TheConclave Dominion \u2014 AEGIS Discord Bot v9.0 + World-Class Music Runtime",
-  "main": "bot.hotfix.js",
+  "description": "TheConclave Dominion \u2014 AEGIS Discord Bot v10.0 + World-Class Music Runtime",
+  "main": "bot.js",
   "scripts": {
-    "start": "node bot.hotfix.js",
-    "dev": "node --watch bot.hotfix.js",
-    "check": "node --check bot.hotfix.js"
+    "start": "node bot.js",
+    "dev": "node --watch bot.js",
+    "check": "node --check bot.js"
   },
   "engines": {
     "node": ">=18.0.0"
