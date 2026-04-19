@@ -1,51 +1,21 @@
-# ═══════════════════════════════════════════════════════════
-# CONCLAVE AEGIS DISCORD CORE — Environment Variables
-# Copy to .env on Render (Environment tab) — NEVER commit .env
-# This is a SEPARATE Render service from the Platform API
-# ═══════════════════════════════════════════════════════════
-
-# ── Bot ──────────────────────────────────────────────────────
-NODE_ENV=production
-BOT_PORT=3001
-
-# ── Discord ───────────────────────────────────────────────────
-DISCORD_BOT_TOKEN=
-DISCORD_CLIENT_ID=
-DISCORD_GUILD_ID=1438103556610723922
-
-# ── Discord Role IDs ─────────────────────────────────────────
-ROLE_OWNER_ID=
-ROLE_ADMIN_ID=
-ROLE_HELPER_ID=
-
-# ── Platform API (talks to server.js for orders, shop, events) ─
-API_URL=https://api.theconclavedominion.com
-ADMIN_TOKEN=
-
-# ── Supabase (SAME project — conclave-aegis) ─────────────────
-# The bot needs direct DB access for the economy engine
-# Use the SERVICE ROLE KEY — this process runs server-side only
-SUPABASE_URL=https://idbexlahxuelfrcbhfqs.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=
-
-# ── Anthropic (AEGIS AI in Discord) ──────────────────────────
-ANTHROPIC_API_KEY=
-
-# ── AEGIS Channel (auto-reply channel ID) ────────────────────
-AEGIS_CHANNEL_ID=
-
-# ── Beacon Sentinel ──────────────────────────────────────────
-BEACON_CLIENT_ID=eb9ecdff-4048-4a83-8f40-f2e16d2e9a81
-BEACON_CLIENT_SECRET=
-BEACON_ACCESS_TOKEN=
-BEACON_REFRESH_TOKEN=
-BEACON_TOKEN_EXPIRES=
-BEACON_GROUP_ID=
-
-# ── Nitrado (direct server status) ───────────────────────────
-NITRADO_API_KEY=
-
-# ── Live Monitor (set after /setup-monitoring runs) ──────────
-MONITOR_STATUS_CHANNEL_ID=
-MONITOR_ACTIVITY_CHANNEL_ID=
-MONITOR_MESSAGE_ID=
+{
+  "name": "conclave-aegis-discord-core",
+  "version": "8.0.0",
+  "description": "TheConclave Dominion — AEGIS Discord Bot v8.0 ULTIMATE OMNI",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "dev":   "node --watch bot.js",
+    "check": "node --check bot.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk":     "^0.39.0",
+    "@supabase/supabase-js": "^2.47.0",
+    "axios":                 "^1.7.0",
+    "discord.js":            "^14.16.0",
+    "dotenv":                "^16.4.0"
+  }
+}
