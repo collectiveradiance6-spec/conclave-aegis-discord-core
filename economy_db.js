@@ -1,3 +1,4 @@
+require('dotenv').config();
 // ═══════════════════════════════════════════════════════════════
 // CONCLAVE AEGIS — CLAVESHARDS ECONOMY DATABASE (Supabase)
 // Wallet + bank balances + immutable ledger
@@ -108,4 +109,63 @@ async function getWalletHistory(discordId, limit=10) {
   return data || [];
 }
 
-module.exports = { ensureWallet, getWallet, depositShards, withdrawShards, grantShards, deductShards, getShardLeaderboard, getWalletHistory };
+
+async function transferShards(fromDiscordId, toDiscordId, amount, actor={}, note='') {
+  amount = toInt(amount);
+  if (amount <= 0) throw new Error('Transfer amount must be greater than zero.');
+  if (fromDiscordId === toDiscordId) throw new Error('Cannot transfer shards to the same wallet.');
+  const fromWallet = await ensureWallet(fromDiscordId, actor.fromTag || '');
+  if (fromWallet.wallet_balance < amount) throw new Error('Not enough shards in wallet.');
+  const toWallet = await ensureWallet(toDiscordId, actor.toTag || '');
+
+  const { data: fromUpdated, error: fromErr } = await supabase
+    .from('aegis_wallets')
+    .update({
+      wallet_balance: fromWallet.wallet_balance - amount,
+      lifetime_spent: toInt(fromWallet.lifetime_spent) + amount,
+      updated_at: nowIso(),
+    })
+    .eq('discord_id', fromDiscordId)
+    .select()
+    .single();
+  if (fromErr) throw fromErr;
+
+  const { data: toUpdated, error: toErr } = await supabase
+    .from('aegis_wallets')
+    .update({
+      wallet_balance: toInt(toWallet.wallet_balance) + amount,
+      lifetime_earned: toInt(toWallet.lifetime_earned) + amount,
+      updated_at: nowIso(),
+    })
+    .eq('discord_id', toDiscordId)
+    .select()
+    .single();
+  if (toErr) throw toErr;
+
+  await writeLedger({
+    discordId: fromDiscordId,
+    action: 'transfer_out',
+    amount,
+    source: 'wallet_transfer',
+    note: note || `Transfer to ${actor.toTag || toDiscordId}`,
+    actorDiscordId: actor.actorDiscordId || fromDiscordId,
+    actorTag: actor.actorTag || '',
+    walletAfter: fromUpdated.wallet_balance,
+    bankAfter: fromUpdated.bank_balance,
+  });
+  await writeLedger({
+    discordId: toDiscordId,
+    action: 'transfer_in',
+    amount,
+    source: 'wallet_transfer',
+    note: note || `Transfer from ${actor.fromTag || fromDiscordId}`,
+    actorDiscordId: actor.actorDiscordId || fromDiscordId,
+    actorTag: actor.actorTag || '',
+    walletAfter: toUpdated.wallet_balance,
+    bankAfter: toUpdated.bank_balance,
+  });
+
+  return { fromUpdated, toUpdated };
+}
+
+module.exports = { ensureWallet, getWallet, depositShards, withdrawShards, grantShards, deductShards, transferShards, getShardLeaderboard, getWalletHistory };

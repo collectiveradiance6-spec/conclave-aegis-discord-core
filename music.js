@@ -13,6 +13,7 @@
 //   ∙ Per-room volume profiles
 // ═══════════════════════════════════════════════════════════════════
 'use strict';
+require('dotenv').config();
 
 const {
   joinVoiceChannel, createAudioPlayer, createAudioResource,
@@ -27,12 +28,12 @@ const {
 } = require('discord.js');
 
 // ─── CONSTANTS ────────────────────────────────────────────────────
-const MAX_ROOMS      = 5;
+const MAX_ROOMS      = parseInt(process.env.MUSIC_MAX_ROOMS || '5', 10);
 const MAX_QUEUE      = 250;
 const PROGRESS_BARS  = 20;
-const LAUNCHPAD_EDIT_INTERVAL = 12000; // ms — edit now-playing embed
-const ROOM_RECONNECT_DELAY    = 5000;
-const ROOM_PULSE_INTERVAL     = 30000; // check mood rooms heartbeat
+const LAUNCHPAD_EDIT_INTERVAL = parseInt(process.env.LAUNCHPAD_EDIT_INTERVAL || '12000', 10); // ms — edit now-playing embed
+const ROOM_RECONNECT_DELAY    = parseInt(process.env.ROOM_RECONNECT_DELAY || '5000', 10);
+const ROOM_PULSE_INTERVAL     = parseInt(process.env.ROOM_PULSE_INTERVAL || '30000', 10); // check mood rooms heartbeat
 
 // ─── MOOD ROOM PRESETS ────────────────────────────────────────────
 const MOOD_PRESETS = {

@@ -3,7 +3,7 @@ services:
     name: conclave-aegis-bot
     runtime: node
     buildCommand: npm install
-    startCommand: node bot.js
+    startCommand: node bot.hotfix.js
     plan: starter
     envVars:
       - key: NODE_ENV
