@@ -746,7 +746,7 @@ const cmds = [
 
   // Music injected below
   ...(musicRuntime?.MUSIC_COMMANDS || []),
-].map(c => c.toJSON());
+].map(c => typeof c.toJSON === 'function' ? c.toJSON() : c);
 
 async function registerCommands() {
   if (!DISCORD_CLIENT_ID || !DISCORD_GUILD_ID) { console.warn('⚠️  CLIENT_ID/GUILD_ID missing'); return; }

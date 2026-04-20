@@ -1,16 +1,14 @@
 {
   "name": "conclave-aegis-discord-core",
   "version": "10.0.0",
-  "description": "TheConclave Dominion \u2014 AEGIS CONCLAVE AEGIS bot.js v10.0 SOVEREIGN EDITION",
+  "description": "TheConclave Dominion — AEGIS Discord Bot v10.0 Sovereign Edition",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js",
     "dev": "node --watch bot.js",
-    "check": "node --check bot.js"
+    "check": "node --check bot.js && node --check music.js"
   },
-  "engines": {
-    "node": ">=18.0.0"
-  },
+  "engines": { "node": ">=18.0.0" },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@discordjs/opus": "^0.9.0",
@@ -22,11 +20,11 @@
     "ffmpeg-static": "^5.2.0",
     "libsodium-wrappers": "^0.7.15",
     "play-dl": "^1.9.7",
-    "prism-media": "^1.3.5",
-    "sodium-native": "^4.1.1"
+    "prism-media": "^1.3.5"
   },
   "optionalDependencies": {
     "bufferutil": "^4.0.8",
+    "sodium-native": "^4.1.1",
     "utf-8-validate": "^6.0.4",
     "zlib-sync": "^0.1.9"
   }

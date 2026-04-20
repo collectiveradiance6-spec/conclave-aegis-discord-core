@@ -22,7 +22,9 @@ services:
         value: "true"
       - key: ROOM_PULSE_INTERVAL
         value: "30000"
-      # Fill in Render dashboard:
+      - key: ROOM_RECONNECT_DELAY
+        value: "5000"
+      # ── Fill in Render Dashboard (sync: false = secret) ──
       - key: DISCORD_BOT_TOKEN
         sync: false
       - key: DISCORD_CLIENT_ID
@@ -67,5 +69,9 @@ services:
         sync: false
       - key: SPOTIFY_REFRESH_TOKEN
         sync: false
+      - key: SOUNDCLOUD_CLIENT_ID
+        sync: false
       - key: YOUTUBE_COOKIE
+        sync: false
+      - key: MUSIC_DJ_ROLE_ID
         sync: false
