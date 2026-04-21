@@ -359,7 +359,6 @@ const ALL_COMMANDS = [
   // Economy
   addWalletSubs(new SlashCommandBuilder().setName('wallet').setDescription('💎 ClaveShard wallet')),
   addWalletSubs(new SlashCommandBuilder().setName('curr').setDescription('💎 ClaveShard wallet (alias)')),
-  new SlashCommandBuilder().setName('theconclavedominion.com/shop').setDescription('🌟·Donations only ($1 = 1 shard'),
   new SlashCommandBuilder().setName('leaderboard').setDescription('🏆 Top 10 ClaveShard holders'),
   new SlashCommandBuilder().setName('give').setDescription('🎁 [ADMIN] Quick grant shards').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     .addUserOption(o=>o.setName('user').setDescription('Player').setRequired(true))
