@@ -588,51 +588,57 @@ async function ensureVC(state, vc, client) {
   if (ex && state.connection === ex) return ex;
 
   const conn = joinVoiceChannel({
-  channelId: vc.id,
-  guildId: state.guildId,
-  adapterCreator: vc.guild.voiceAdapterCreator,
-  selfDeaf: true,
-  selfMute: false,
-});
-  state.connection    = conn;
+    channelId: vc.id,
+    guildId: state.guildId,
+    adapterCreator: vc.guild.voiceAdapterCreator,
+    selfDeaf: true,
+    selfMute: false,
+  });
+
+  state.connection = conn;
   state.voiceChannelId = vc.id;
-  state.client        = client;
+  state.client = client;
 
   if (!state.player) {
-    state.player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Pause } });
+    state.player = createAudioPlayer({
+      behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
+    });
+
     state.player.on(AudioPlayerStatus.Idle, () => {
       clearInterval(state.progressTimer);
       setTimeout(() => playNext(state, client), 300);
     });
-    state.player.on('error', async e => {
-  console.error('[Music] Player err:', e.message);
-  clearInterval(state.progressTimer);
 
-  if (isYouTubeBotGateError(e)) {
-    try {
-      const ch = state.textChannelId ? client.channels.cache.get(state.textChannelId) : null;
-      const now = Date.now();
+    state.player.on('error', async (e) => {
+      console.error('[Music] Player err:', e.message);
+      clearInterval(state.progressTimer);
 
-      if (!state._lastBotGateNoticeAt || now - state._lastBotGateNoticeAt > YT_ERROR_COOLDOWN_MS) {
-        state._lastBotGateNoticeAt = now;
-        if (ch) {
-          await ch.send('⚠️ Playback hit a source verification block. Skipping this track and moving on.');
-        }
+      if (isYouTubeBotGateError(e)) {
+        try {
+          const ch = state.textChannelId
+            ? client.channels.cache.get(state.textChannelId)
+            : null;
+          const now = Date.now();
+
+          if (
+            !state._lastBotGateNoticeAt ||
+            now - state._lastBotGateNoticeAt > YT_ERROR_COOLDOWN_MS
+          ) {
+            state._lastBotGateNoticeAt = now;
+            if (ch) {
+              await ch.send(
+                '⚠️ Playback hit a source verification block. Skipping this track and moving on.'
+              );
+            }
+          }
+        } catch {}
       }
-    } catch {}
+
+      state.current = null;
+      state.paused = false;
+      setTimeout(() => playNext(state, client), YT_FAIL_SKIP_DELAY);
+    });
   }
-
-  state.current = null;
-  state.paused = false;
-  setTimeout(() => playNext(state, client), YT_FAIL_SKIP_DELAY);
-});
-}
-
-conn.subscribe(state.player);
-  state.current = null;
-  state.paused = false;
-  setTimeout(() => playNext(state, client), YT_FAIL_SKIP_DELAY);
-});
 
   conn.subscribe(state.player);
 
@@ -643,15 +649,19 @@ conn.subscribe(state.player);
         entersState(conn, VoiceConnectionStatus.Connecting, 5_000),
       ]);
     } catch {
-      // Global uninterrupted mode — always reconnect for mood/autoplay
       if (state.mood || state.autoplay || permanentRooms.has(state.guildId)) {
         setTimeout(async () => {
           try {
-            const g  = client.guilds.cache.get(state.guildId);
+            const g = client.guilds.cache.get(state.guildId);
             const ch = g?.channels.cache.get(state.voiceChannelId);
+
             if (ch) {
               await ensureVC(state, ch, client);
-              if (!state.current || state.player?.state?.status !== AudioPlayerStatus.Playing) {
+
+              if (
+                !state.current ||
+                state.player?.state?.status !== AudioPlayerStatus.Playing
+              ) {
                 await playNext(state, client);
               }
             }
