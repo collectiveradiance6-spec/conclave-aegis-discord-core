@@ -1,15 +1,32 @@
 // ═══════════════════════════════════════════════════════════════════════
-// CONCLAVE AEGIS BOT — v10.0 SOVEREIGN EDITION
+// CONCLAVE AEGIS BOT — bot.js v10.0 SOVEREIGN EDITION
 // TheConclave Dominion · 5× Crossplay ARK: Survival Ascended
-// Single InteractionCreate handler · Micro-cost AI · Full economy
+// ═══════════════════════════════════════════════════════════════════════
+// Architecture:
+//   ∙ Zero-orphan single InteractionCreate handler
+//   ∙ AEGIS AI — micro-cost outsourced search, token budget tracking
+//   ∙ Music Runtime v2 — full dashboard, search UI, playlist persistence
+//   ∙ ClaveShard Economy — wallet/bank/transfer/ledger/leaderboard
+//   ∙ Beacon Sentinel — tribe/player/ban lookup
+//   ∙ Nitrado Direct — live cluster monitor, sidebar voice channels
+//   ∙ Supabase circuit breaker + knowledge cache
+//   ∙ Per-user conversation memory (12 exchanges)
+//   ∙ Rate limiter with stale cleanup
+//   ∙ Exponential backoff login
+//   ∙ WS watchdog — only exits on 5× consecutive DISCONNECTED
 // ═══════════════════════════════════════════════════════════════════════
 'use strict';
 require('dotenv').config();
 
+// ─── MUSIC RUNTIME ────────────────────────────────────────────────────
 let musicRuntime = null;
 if (process.env.MUSIC_RUNTIME_ENABLED !== 'false') {
-  try { musicRuntime = require('./music.js'); console.log('🎵 Music runtime v3 loaded'); }
-  catch (e) { console.warn('⚠️  Music runtime not loaded:', e.message); }
+  try {
+    musicRuntime = require('./music.js');
+    console.log('🎵 Music runtime v2 loaded');
+  } catch (e) {
+    console.warn('⚠️  Music runtime not loaded:', e.message);
+  }
 }
 
 const http = require('http');
@@ -17,987 +34,1770 @@ const {
   Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder,
   EmbedBuilder, PermissionFlagsBits, Events,
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
-  StringSelectMenuBuilder, ChannelType,
+  StringSelectMenuBuilder, ModalBuilder,
+  TextInputBuilder, TextInputStyle,
 } = require('discord.js');
 const Anthropic = require('@anthropic-ai/sdk');
 const axios     = require('axios');
 const { createClient } = require('@supabase/supabase-js');
 
-// ── ENV ──────────────────────────────────────────────────────────────
+// ─── ENV ───────────────────────────────────────────────────────────────
 const {
   DISCORD_BOT_TOKEN, DISCORD_CLIENT_ID, DISCORD_GUILD_ID,
   ROLE_OWNER_ID, ROLE_ADMIN_ID, ROLE_HELPER_ID,
   ANTHROPIC_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
-  AEGIS_CHANNEL_ID,
+  AEGIS_CHANNEL_ID, ADMIN_TOKEN,
 } = process.env;
 
 if (!DISCORD_BOT_TOKEN) { console.error('❌ DISCORD_BOT_TOKEN missing'); process.exit(1); }
 
-const BOT_PORT    = parseInt(process.env.BOT_PORT || '3001');
-const MODEL_FAST  = 'claude-haiku-4-5-20251001';
-const MODEL_SMART = 'claude-sonnet-4-6';
-const MUSIC_API   = (process.env.MUSIC_API_URL || 'https://api.theconclavedominion.com').replace(/\/$/, '');
+const API_BASE   = (process.env.API_URL || 'https://api.theconclavedominion.com').replace(/\/$/, '');
+const AEGIS_CH   = AEGIS_CHANNEL_ID || '';
+const BOT_PORT   = parseInt(process.env.BOT_PORT || '3002');
 
-const anthropic = ANTHROPIC_API_KEY ? new Anthropic({ apiKey: ANTHROPIC_API_KEY }) : null;
+// AEGIS AI models — tiered for micro-cost optimization
+const MODEL_FAST  = 'claude-haiku-4-5-20251001';   // simple lookups, 1c/1M input
+const MODEL_SMART = 'claude-sonnet-4-6';             // complex, needs reasoning
+
+// ─── CLIENTS ───────────────────────────────────────────────────────────
+const anthropic = ANTHROPIC_API_KEY
+  ? new Anthropic({ apiKey: ANTHROPIC_API_KEY })
+  : null;
+
 const sb = (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY)
-  ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } })
+  ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false },
+      global: { headers: { 'x-application-name': 'conclave-aegis-v10' } },
+    })
   : null;
 
 const bot = new Client({
   intents: [
     GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.DirectMessages, GatewayIntentBits.GuildVoiceStates,
-    GatewayIntentBits.GuildPresences,
+    GatewayIntentBits.DirectMessages, GatewayIntentBits.GuildMessageReactions,
+    GatewayIntentBits.GuildPresences, GatewayIntentBits.GuildVoiceStates,
   ],
   rest: { timeout: 15000 },
-  allowedMentions: { parse: ['users','roles'], repliedUser: false },
+  allowedMentions: { parse: ['users', 'roles'], repliedUser: false },
 });
 
-// ── PERMISSION HELPERS ──────────────────────────────────────────────
+// ─── ROLE HELPERS ──────────────────────────────────────────────────────
 const isOwner = m => m?.roles?.cache?.has(ROLE_OWNER_ID) || m?.permissions?.has(PermissionFlagsBits.Administrator);
 const isAdmin = m => isOwner(m) || m?.roles?.cache?.has(ROLE_ADMIN_ID);
 const isMod   = m => isAdmin(m) || m?.roles?.cache?.has(ROLE_HELPER_ID) || m?.permissions?.has(PermissionFlagsBits.ModerateMembers);
 
-// ── RATE LIMITER ──────────────────────────────────────────────────
+// ─── RATE LIMITER ──────────────────────────────────────────────────────
 const rates = new Map();
-function checkRate(uid, ms=8000) { const l=rates.get(uid)||0,n=Date.now(); if(n-l<ms)return Math.ceil((ms-(n-l))/1000); rates.set(uid,n); return 0; }
-setInterval(()=>{ const cut=Date.now()-120_000; for(const[k,v]of rates)if(v<cut)rates.delete(k); },5*60_000);
+function checkRate(uid, ms = 8000) {
+  const l = rates.get(uid) || 0, n = Date.now();
+  if (n - l < ms) return Math.ceil((ms - (n - l)) / 1000);
+  rates.set(uid, n); return 0;
+}
+setInterval(() => {
+  const cut = Date.now() - 120_000;
+  for (const [k, v] of rates) if (v < cut) rates.delete(k);
+}, 5 * 60_000);
 
-// ── SUPABASE CIRCUIT BREAKER ──────────────────────────────────────
-const CB = { failures:0, openUntil:0, threshold:5, resetMs:60_000 };
-const sbOk  = ()=>Date.now()>=CB.openUntil;
-function sbFail(){CB.failures++;if(CB.failures>=CB.threshold){CB.openUntil=Date.now()+CB.resetMs;console.error('⚡ Supabase CB OPEN');}}
-function sbSucc(){CB.failures=0;CB.openUntil=0;}
-async function sbQuery(fn){if(!sb)throw new Error('Supabase not configured');if(!sbOk())throw new Error('Database temporarily unavailable');try{const r=await fn(sb);sbSucc();return r;}catch(e){sbFail();throw e;}}
-
-// ── AI MODEL ROUTING ──────────────────────────────────────────────
-function pickModel(q){
-  const complex=/explain|analyze|compare|strategy|build|design|how does|why does|write|create|detailed|comprehensive/i.test(q);
-  const search=/latest|current|today|news|update|patch|2025|2026|version|release|announce/i.test(q);
-  return{model:(complex||search)?MODEL_SMART:MODEL_FAST,useSearch:search};
+// ─── SUPABASE CIRCUIT BREAKER ──────────────────────────────────────────
+const CB = { failures: 0, openUntil: 0, threshold: 5, resetMs: 60_000 };
+const sbOk = () => Date.now() >= CB.openUntil;
+function sbFail() {
+  CB.failures++;
+  if (CB.failures >= CB.threshold) { CB.openUntil = Date.now() + CB.resetMs; console.error(`⚡ Supabase CB OPEN`); }
+}
+function sbSucc() { CB.failures = 0; CB.openUntil = 0; }
+async function sbQuery(fn) {
+  if (!sb) throw new Error('Supabase not configured');
+  if (!sbOk()) throw new Error('Database temporarily unavailable');
+  try { const r = await fn(sb); sbSucc(); return r; }
+  catch (e) { sbFail(); throw e; }
 }
 
-// ── KNOWLEDGE CACHE ───────────────────────────────────────────────
-let _kCache=null,_kTs=0;
-async function getKnowledge(){
-  const now=Date.now();if(_kCache!==null&&now-_kTs<90_000)return _kCache;
-  if(!sb||!sbOk()){_kCache='';return '';}
-  try{const{data}=await sb.from('aegis_knowledge').select('category,title,content').neq('category','auto_learned').order('category').limit(80);_kCache=data?.length?'\n\nKNOWLEDGE:\n'+data.map(r=>`[${r.category}] ${r.title}: ${r.content}`).join('\n'):'';_kTs=now;return _kCache;}catch{_kCache='';return '';}
+// ─── AEGIS AI ENGINE (MICRO-COST TIERED) ───────────────────────────────
+// Decides which model to use based on query complexity
+function pickModel(query) {
+  const complex = /explain|analyze|compare|strategy|build|design|how does|why does|help me|write|create|detailed|comprehensive/i.test(query);
+  const timeSearch = /latest|current|today|news|update|patch|new|recent|just|now|2025|2026|version|release|price|announce/i.test(query);
+  if (complex || timeSearch) return { model: MODEL_SMART, useSearch: timeSearch };
+  return { model: MODEL_FAST, useSearch: false };
 }
 
-// ── CORE PROMPT ───────────────────────────────────────────────────
-const CORE = `You are AEGIS — the living intelligence of TheConclave Dominion, a 5× crossplay ARK: Survival Ascended community (Guild ID: 1438103556610723922) run by Tw_ (High Curator/Owner) with co-owners Slothie (Archmaestro) and Sandy (Wildheart).
+// Knowledge cache (90s TTL)
+let _kCache = null, _kTs = 0;
+async function getKnowledge() {
+  const now = Date.now();
+  if (_kCache !== null && now - _kTs < 90_000) return _kCache;
+  if (!sb || !sbOk()) { _kCache = ''; return ''; }
+  try {
+    const { data } = await sb.from('aegis_knowledge')
+      .select('category,title,content').neq('category', 'auto_learned')
+      .order('category').limit(80);
+    _kCache = data?.length ? '\n\nKNOWLEDGE:\n' + data.map(r => `[${r.category}] ${r.title}: ${r.content}`).join('\n') : '';
+    _kTs = now;
+    return _kCache;
+  } catch { _kCache = ''; return ''; }
+}
+
+const CORE = `You are AEGIS — the living intelligence of TheConclave Dominion, a 5× crossplay ARK: Survival Ascended community run by Tw_ (High Curator / Owner) and co-owners Slothie (Archmaestro) and Sandy (Wildheart).
 
 SERVERS (10 maps, all crossplay Xbox·PS·PC):
-The Island 217.114.196.102:5390 · Volcano 217.114.196.59:5050 · Extinction 31.214.196.102:6440
-The Center 31.214.163.71:5120 · Lost Colony 217.114.196.104:5150 · Astraeos 217.114.196.9:5320
-Valguero 85.190.136.141:5090 · Scorched Earth 217.114.196.103:5240
-Aberration 217.114.196.80:5540 (PvP) · Amissa 217.114.196.80:5180 (Patreon-exclusive)
+• The Island    — 217.114.196.102:5390  | 🌿 PvE starter map
+• Volcano       — 217.114.196.59:5050   | 🌋 High resource
+• Extinction    — 31.214.196.102:6440   | 🌑 End-game titans
+• The Center    — 31.214.163.71:5120    | 🏔️ Floating islands
+• Lost Colony   — 217.114.196.104:5150  | 🪐 Custom spawns
+• Astraeos      — 217.114.196.9:5320    | ✨ Celestial rare
+• Valguero      — 85.190.136.141:5090   | 🏞️ Deinonychus
+• Scorched Earth — 217.114.196.103:5240 | ☀️ Wyverns/Manticore
+• Aberration    — 217.114.196.80:5540   | ⚔️ PvP Rock Drakes
+• Amissa        — 217.114.196.80:5180   | ⭐ Patreon-exclusive
 
 RATES: 5× XP/Harvest/Taming/Breeding · 1M weight · No fall damage · Max wild 350
 MODS: Death Inventory Keeper · ARKomatic · Awesome Spyglass · Teleporter
-SHOP: /weekly (3 free shards) · theconclavedominion.com/shop
+ECONOMY: /weekly free shards · /wallet balance · /order to shop
 PAYMENTS: CashApp $TheConclaveDominion · Chime $ANLIKESEF
-MINECRAFT: 134.255.214.44:10090 (Bedrock)
+MINECRAFT: 134.255.214.44:10090 (Bedrock crossplay)
 PATREON: patreon.com/theconclavedominion — Amissa at Elite $20/mo
-COUNCIL: Tw_ · Slothie · Sandy · Jenny · Arbanion · Okami · Rookiereaper · Icyreaper · Jake · CredibleDevil
+LINKS: discord.gg/theconclave | theconclavedominion.com
+COUNCIL (10): Tw_ · Slothie · Sandy · Jenny (Skywarden) · Arbanion (Oracle of Veils) · Okami (Hazeweaver) · Rookiereaper (Gatekeeper) · Icyreaper (Veilcaster) · Jake (ForgeSmith) · CredibleDevil (Iron Vanguard)
 
-CLAVESHARD TIERS:
-💠T1(1)=L600 Vanilla Dino+Max XP+3 Stacks Ammo+Full Coloring+100 Kibble/Cakes/Beer+100% Imprint+500 Non-Tek Structures+Cryofridge+120 Pods+50k EchoCoins+2500 Materials+10 Same-Type Tributes+Boss Artifact+Revival Token(48hr)
-💎T2(2)=Modded L600+60 Dedicated Storage+L600 Yeti+L600 Polar Bear+450 Random Shiny+Shiny Shoulder Variant
-✨T3(3)=Tek Blueprint+Shiny Essence+200% Imprint+450 T1 Special Shiny
-🔥T5(5)=Boss Defeat Command+Bronto/Dread+Saddle+Astral Dino+L1000 Basilisk/Rock Elemental/Karkinos+50 Raw Shiny Essence+450 T2 Shiny+Small Bundle+2500 Imprint Kibble
-⚔T6(6)=Boss Ready Bundle+300% Imprint+Max XP
-🌌T8(8)=Medium Bundle+100k Resources(No Element)
-🛡T10(10)=Tek Suit Set+Platform+Combo Shinies+Dino Color Party+Breeding Pair
-🌠T12(12)=Large Bundle+200k Resources
-👑T15(15)=30k Element+L900 Rhynio/Reaper/Aureliax+XLarge Bundle(300k)
-🏰T20(20)=Behemoth Gate Expansion(10/max)
-💰T30(30)=2 Dedicated Storage Admin Refill+1.6M Resources
-🛡DINO INSURANCE=One Time Use+Must Be Named+One Per Dino
+Respond under 1800 chars for Discord. Be accurate, authoritative, community-warm. Cosmic gravitas — you are the realm's intelligence.`;
 
-Respond under 1800 chars for Discord. Be accurate, community-warm, with cosmic gravitas.`;
-
-// ── CONVERSATION MEMORY ───────────────────────────────────────────
+// Conversation memory per user (12 exchanges)
 const convMem = new Map();
-function getHist(uid){return convMem.get(uid)||[];}
-function addHist(uid,role,content){const h=convMem.get(uid)||[];h.push({role,content:content.slice(0,600)});if(h.length>24)h.splice(0,h.length-24);convMem.set(uid,h);}
-function clearHist(uid){convMem.delete(uid);}
-setInterval(()=>{for(const[k,v]of convMem)if(!v?.length)convMem.delete(k);},30*60_000);
+function getHist(uid) { return convMem.get(uid) || []; }
+function addHist(uid, role, content) {
+  const h = convMem.get(uid) || [];
+  h.push({ role, content: content.slice(0, 600) });
+  if (h.length > 24) h.splice(0, h.length - 24);
+  convMem.set(uid, h);
+}
+function clearHist(uid) { convMem.delete(uid); }
+setInterval(() => { for (const [k, v] of convMem) if (!v?.length) convMem.delete(k); }, 30 * 60_000);
 
-async function askAegis(msg, uid=null, extraCtx='') {
+async function askAegis(msg, uid = null, extraCtx = '') {
   if (!anthropic) return '⚠️ AI not configured.';
   try {
-    const knowledge=await getKnowledge();
-    const system=CORE+knowledge+(extraCtx?'\n\n'+extraCtx:'');
-    const history=uid?getHist(uid):[];
-    const{model,useSearch}=pickModel(msg);
-    const req={model,max_tokens:model===MODEL_FAST?600:900,system,messages:[...history,{role:'user',content:msg}]};
-    if(useSearch)req.tools=[{type:'web_search_20250305',name:'web_search'}];
-    const res=await anthropic.messages.create(req);
-    const text=res.content.filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();
-    const searched=res.content.some(b=>b.type==='tool_use');
-    if(!text)return '⚠️ Empty response.';
-    if(uid){addHist(uid,'user',msg);addHist(uid,'assistant',text);}
-    if(sb&&sbOk())(async()=>{try{await sb.from('aegis_ai_usage').insert({model,input_tokens:res.usage?.input_tokens||0,output_tokens:res.usage?.output_tokens||0,used_search:searched,query_preview:msg.slice(0,120),created_at:new Date().toISOString()});}catch{}})();
-    return(searched?'🔍 *[web search]*\n\n':'')+text;
-  }catch(e){
-    if(e.message?.includes('overloaded'))return '⚠️ AEGIS overloaded. Retry shortly.';
-    return'⚠️ AEGIS error: '+e.message.slice(0,100);
+    const knowledge = await getKnowledge();
+    const system    = CORE + knowledge + (extraCtx ? '\n\n' + extraCtx : '');
+    const history   = uid ? getHist(uid) : [];
+    const { model, useSearch } = pickModel(msg);
+
+    const req = {
+      model, max_tokens: model === MODEL_FAST ? 600 : 900,
+      system,
+      messages: [...history, { role: 'user', content: msg }],
+    };
+    if (useSearch) req.tools = [{ type: 'web_search_20250305', name: 'web_search' }];
+
+    const res  = await anthropic.messages.create(req);
+    const text = res.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+    const searched = res.content.some(b => b.type === 'tool_use');
+
+    if (!text) return '⚠️ Empty response. Try rephrasing.';
+    if (uid) { addHist(uid, 'user', msg); addHist(uid, 'assistant', text); }
+
+    // Log token usage for micro-cost tracking
+    if (sb && sbOk()) {
+      (async () => {
+        try {
+          await sb.from('aegis_ai_usage').insert({
+            model,
+            input_tokens:  res.usage?.input_tokens  || 0,
+            output_tokens: res.usage?.output_tokens || 0,
+            used_search:   searched,
+            query_preview: msg.slice(0, 120),
+            created_at:    new Date().toISOString(),
+          });
+        } catch {}
+      })();
+    }
+
+    // Auto-learn fire-and-forget
+    if (sb && sbOk() && text.length > 120 && msg.length > 20) {
+      (async () => {
+        try {
+          await sb.from('aegis_knowledge').upsert({
+            category:   'auto_learned',
+            key:        `auto_${Date.now().toString(36)}`,
+            title:      msg.slice(0, 120),
+            content:    text.slice(0, 900),
+            added_by:   'AEGIS_BOT',
+            source:     searched ? 'web_search' : 'inference',
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'key', ignoreDuplicates: true });
+        } catch {}
+      })();
+    }
+
+    return (searched ? '🔍 *[web search]*\n\n' : '') + text;
+  } catch (e) {
+    if (e.message?.includes('overloaded')) return '⚠️ AEGIS overloaded. Retry shortly.';
+    if (e.message?.includes('rate'))       return '⚠️ Rate limit. Retry in 30s.';
+    return '⚠️ AEGIS error: ' + e.message.slice(0, 100);
   }
 }
 
-// ══════════════════════════════════════════════════════════════════
-// WALLET ENGINE
-// ══════════════════════════════════════════════════════════════════
-async function getWallet(id,tag){return sbQuery(async sb=>{const{data,error}=await sb.from('aegis_wallets').upsert({discord_id:id,discord_tag:tag,updated_at:new Date().toISOString()},{onConflict:'discord_id',ignoreDuplicates:false}).select().single();if(error)throw new Error('Wallet error: '+error.message);return data;});}
-async function logTx(id,tag,action,amount,balAfter,note='',actorId='',actorTag=''){if(!sb||!sbOk())return;try{await sb.from('aegis_wallet_ledger').insert({discord_id:id,action,amount,balance_wallet_after:balAfter,note:note||null,actor_discord_id:actorId||null,actor_tag:actorTag||null,created_at:new Date().toISOString()});}catch{}}
-async function depositToBank(id,tag,amount){const w=await getWallet(id,tag);if(w.wallet_balance<amount)throw new Error(`Need **${amount}** in wallet. You have **${w.wallet_balance}** 💎.`);return sbQuery(async sb=>{const{data,error}=await sb.from('aegis_wallets').update({wallet_balance:w.wallet_balance-amount,bank_balance:w.bank_balance+amount,updated_at:new Date().toISOString()}).eq('discord_id',id).select().single();if(error)throw new Error(error.message);await logTx(id,tag,'deposit',amount,data.bank_balance,`Deposited ${amount} to bank`,id,tag);return data;});}
-async function withdrawFromBank(id,tag,amount){const w=await getWallet(id,tag);if(w.bank_balance<amount)throw new Error(`Need **${amount}** in bank. You have **${w.bank_balance}** 💎.`);return sbQuery(async sb=>{const{data,error}=await sb.from('aegis_wallets').update({wallet_balance:w.wallet_balance+amount,bank_balance:w.bank_balance-amount,updated_at:new Date().toISOString()}).eq('discord_id',id).select().single();if(error)throw new Error(error.message);await logTx(id,tag,'withdraw',amount,data.wallet_balance,`Withdrew ${amount}`,id,tag);return data;});}
-async function transferShards(fromId,fromTag,toId,toTag,amount){if(fromId===toId)throw new Error('Cannot transfer to yourself.');const sender=await getWallet(fromId,fromTag);if(sender.wallet_balance<amount)throw new Error(`Need **${amount}** in wallet. You have **${sender.wallet_balance}** 💎.`);return sbQuery(async sb=>{await sb.from('aegis_wallets').update({wallet_balance:sender.wallet_balance-amount,lifetime_spent:(sender.lifetime_spent||0)+amount,updated_at:new Date().toISOString()}).eq('discord_id',fromId);await getWallet(toId,toTag);const{data:r}=await sb.from('aegis_wallets').select('wallet_balance,lifetime_earned').eq('discord_id',toId).single();const{data:up}=await sb.from('aegis_wallets').update({wallet_balance:(r.wallet_balance||0)+amount,lifetime_earned:(r.lifetime_earned||0)+amount,updated_at:new Date().toISOString()}).eq('discord_id',toId).select().single();const note=`${fromTag} → ${toTag}`;await logTx(fromId,fromTag,'transfer_out',amount,sender.wallet_balance-amount,note,fromId,fromTag);await logTx(toId,toTag,'transfer_in',amount,up.wallet_balance,note,fromId,fromTag);return{sent:sender.wallet_balance-amount,received:up.wallet_balance};});}
-async function grantShards(toId,toTag,amount,reason,actorId,actorTag){await getWallet(toId,toTag);return sbQuery(async sb=>{const{data:curr}=await sb.from('aegis_wallets').select('wallet_balance,lifetime_earned').eq('discord_id',toId).single();const{data,error}=await sb.from('aegis_wallets').update({wallet_balance:(curr.wallet_balance||0)+amount,lifetime_earned:(curr.lifetime_earned||0)+amount,updated_at:new Date().toISOString()}).eq('discord_id',toId).select().single();if(error)throw new Error(error.message);await logTx(toId,toTag,'grant',amount,data.wallet_balance,reason||'Admin grant',actorId,actorTag);return data;});}
-async function deductShards(fromId,fromTag,amount,reason,actorId,actorTag){const w=await getWallet(fromId,fromTag);const nb=Math.max(0,(w.wallet_balance||0)-amount);return sbQuery(async sb=>{const{data,error}=await sb.from('aegis_wallets').update({wallet_balance:nb,lifetime_spent:(w.lifetime_spent||0)+amount,updated_at:new Date().toISOString()}).eq('discord_id',fromId).select().single();if(error)throw new Error(error.message);await logTx(fromId,fromTag,'deduct',amount,data.wallet_balance,reason||'Admin deduct',actorId,actorTag);return data;});}
-async function setBalance(targetId,targetTag,amount,reason,actorId,actorTag){return sbQuery(async sb=>{const{data,error}=await sb.from('aegis_wallets').update({wallet_balance:amount,updated_at:new Date().toISOString()}).eq('discord_id',targetId).select().single();if(error)throw new Error(error.message);await logTx(targetId,targetTag,'admin_set',amount,amount,reason||'Admin set',actorId,actorTag);return data;});}
-async function getTxHistory(id,limit=15){return sbQuery(async sb=>{const{data,error}=await sb.from('aegis_wallet_ledger').select('action,amount,balance_wallet_after,note,actor_tag,created_at').eq('discord_id',id).order('created_at',{ascending:false}).limit(limit);if(error)throw new Error(error.message);return data||[];});}
-async function getLeaderboard(limit=10){return sbQuery(async sb=>{const{data}=await sb.from('aegis_wallets').select('discord_id,discord_tag,wallet_balance,bank_balance,lifetime_earned').order('wallet_balance',{ascending:false}).limit(limit);return data||[];});}
-async function getSupply(){return sbQuery(async sb=>{const{data}=await sb.from('aegis_wallets').select('wallet_balance,bank_balance');if(!data?.length)return{walletTotal:0,bankTotal:0,holders:0};return{walletTotal:data.reduce((s,r)=>s+(r.wallet_balance||0),0),bankTotal:data.reduce((s,r)=>s+(r.bank_balance||0),0),holders:data.length};});}
-async function claimWeekly(id,tag){return sbQuery(async sb=>{const{data:w}=await sb.from('aegis_wallets').select('*').eq('discord_id',id).single().catch(()=>({data:null}));if(!w){await getWallet(id,tag);return claimWeekly(id,tag);}const now=new Date(),last=w.last_daily_claim?new Date(w.last_daily_claim):null;const diff=last?(now-last)/(1000*60*60):999;if(diff<168){const next=new Date(last.getTime()+168*60*60*1000);throw new Error(`⏳ Already claimed. Next: <t:${Math.floor(next/1000)}:R>`);}const amount=3,streak=(w.daily_streak||0)+1;const{data,error}=await sb.from('aegis_wallets').update({wallet_balance:(w.wallet_balance||0)+amount,lifetime_earned:(w.lifetime_earned||0)+amount,last_daily_claim:now.toISOString(),daily_streak:streak,updated_at:now.toISOString()}).eq('discord_id',id).select().single();if(error)throw new Error(error.message);await logTx(id,tag,'daily_claim',amount,data.wallet_balance,`Week ${streak} claim`,'SYSTEM','AEGIS');return{data,amount,streak};});}
-
-// ══════════════════════════════════════════════════════════════════
-// WARN ENGINE
-// ══════════════════════════════════════════════════════════════════
-async function addWarn(guildId,targetId,targetTag,reason,actorId,actorTag){if(!sb)return null;try{const{data}=await sb.from('aegis_warns').insert({guild_id:guildId,discord_id:targetId,discord_tag:targetTag,reason,issued_by:actorId,issued_by_tag:actorTag,created_at:new Date().toISOString()}).select().single();return data;}catch(e){console.error('Warn insert:',e.message);return null;}}
-async function getWarns(guildId,targetId){if(!sb)return[];try{const{data}=await sb.from('aegis_warns').select('*').eq('guild_id',guildId).eq('discord_id',targetId).order('created_at',{ascending:false});return data||[];}catch{return[];}}
-
-// ══════════════════════════════════════════════════════════════════
-// GIVEAWAY ENGINE
-// ══════════════════════════════════════════════════════════════════
-const activeGiveaways = new Map();
-async function drawGiveaway(msgId,guildId,client){
-  const gw=activeGiveaways.get(msgId);if(!gw)return;
-  const entries=[...gw.entries];
-  if(!entries.length){try{const ch=client.channels.cache.get(gw.channelId);const msg=await ch?.messages.fetch(msgId);if(msg)await msg.edit({embeds:[new EmbedBuilder().setColor(0xFF4500).setTitle('🎉 Giveaway Ended').setDescription(`**${gw.prize}**\n\nNo valid entries.`).setFooter(FT)],components:[]});}catch{}activeGiveaways.delete(msgId);return;}
-  const winners=[];for(let w=0;w<Math.min(gw.winnersCount,entries.length);w++){const idx=Math.floor(Math.random()*entries.length);winners.push(entries.splice(idx,1)[0]);}
-  const winMentions=winners.map(w=>`<@${w}>`).join(' ');
-  try{const ch=client.channels.cache.get(gw.channelId);const msg=await ch?.messages.fetch(msgId);if(msg)await msg.edit({embeds:[new EmbedBuilder().setColor(0xFFD700).setTitle('🎉 Giveaway Ended!').setDescription(`**${gw.prize}**\n\n🏆 **Winners:** ${winMentions}`).setFooter(FT)],components:[]});if(ch)await ch.send(`🎉 Giveaway over! ${winMentions} won **${gw.prize}**!`);}catch{}
-  activeGiveaways.delete(msgId);
+// ─── WALLET ENGINE ─────────────────────────────────────────────────────
+async function getWallet(id, tag) {
+  return sbQuery(async sb => {
+    const { data, error } = await sb.from('aegis_wallets')
+      .upsert({ discord_id: id, discord_tag: tag, updated_at: new Date().toISOString() },
+        { onConflict: 'discord_id', ignoreDuplicates: false })
+      .select().single();
+    if (error) throw new Error('Wallet error: ' + error.message);
+    return data;
+  });
 }
 
-// ══════════════════════════════════════════════════════════════════
-// SERVER MONITOR
-// ══════════════════════════════════════════════════════════════════
-const monitorState = new Map();
-const MONITOR_SERVERS = [
-  {id:'island',    name:'The Island',    nitradoId:18266152, emoji:'🌿', ip:'217.114.196.102',port:5390, pvp:false,patreon:false},
-  {id:'volcano',   name:'Volcano',       nitradoId:18094678, emoji:'🌋', ip:'217.114.196.59', port:5050, pvp:false,patreon:false},
-  {id:'extinction',name:'Extinction',    nitradoId:18106633, emoji:'🌑', ip:'31.214.196.102', port:6440, pvp:false,patreon:false},
-  {id:'center',    name:'The Center',    nitradoId:18182839, emoji:'🏔️', ip:'31.214.163.71',  port:5120, pvp:false,patreon:false},
-  {id:'lostcolony',name:'Lost Colony',   nitradoId:18307276, emoji:'🪐', ip:'217.114.196.104',port:5150, pvp:false,patreon:false},
-  {id:'astraeos',  name:'Astraeos',      nitradoId:18393892, emoji:'✨', ip:'217.114.196.9',  port:5320, pvp:false,patreon:false},
-  {id:'valguero',  name:'Valguero',      nitradoId:18509341, emoji:'🏞️', ip:'85.190.136.141', port:5090, pvp:false,patreon:false},
-  {id:'scorched',  name:'Scorched Earth',nitradoId:18598049, emoji:'☀️', ip:'217.114.196.103',port:5240, pvp:false,patreon:false},
-  {id:'aberration',name:'Aberration',    nitradoId:18655529, emoji:'⚔️', ip:'217.114.196.80', port:5540, pvp:true, patreon:false},
-  {id:'amissa',    name:'Amissa',        nitradoId:18680162, emoji:'⭐', ip:'217.114.196.80', port:5180, pvp:false,patreon:true},
-];
-const EXISTING_STATUS_CHANNELS = {
-  aberration:'1491714622959390830',amissa:'1491714743797416056',astraeos:'1491714926862008320',
-  center:'1491715233847316590',extinction:'1491715612911861790',lostcolony:'1491715764678299670',
-  scorched:'1491717247083876435',island:'1491715445659799692',valguero:'1491715929586008075',volcano:'1491716283857633290',
-};
-async function fetchNitradoServer(nitradoId){if(!process.env.NITRADO_API_KEY)return null;try{const res=await axios.get(`https://api.nitrado.net/services/${nitradoId}/gameservers`,{headers:{Authorization:`Bearer ${process.env.NITRADO_API_KEY}`},timeout:10000});const gs=res.data?.data?.gameserver;if(!gs)return null;return{status:gs.status==='started'?'online':'offline',players:gs.query?.player_current??0,maxPlayers:gs.query?.player_max??20};}catch{return null;}}
-async function fetchServerStatuses(){if(!process.env.NITRADO_API_KEY)return MONITOR_SERVERS.map(s=>({...s,status:'unknown',players:0,maxPlayers:20}));const results=[];await Promise.all(MONITOR_SERVERS.map(async srv=>{const data=srv.nitradoId?await fetchNitradoServer(srv.nitradoId):null;results.push({...srv,status:data?.status??'unknown',players:data?.players??0,maxPlayers:data?.maxPlayers??20});}));return results;}
-function buildMonitorEmbed(servers){const online=servers.filter(s=>s.status==='online'),offline=servers.filter(s=>s.status!=='online'),total=online.reduce((sum,s)=>sum+s.players,0);const lines=[...online.map(s=>`🟢 **${s.emoji} ${s.name}**${s.pvp?' ⚔️':s.patreon?' ⭐':''} \`${s.players}/${s.maxPlayers}\``), ...offline.map(s=>`🔴 **${s.emoji} ${s.name}** · Offline`)].join('\n');return new EmbedBuilder().setTitle('⚔️ TheConclave — Live Cluster Monitor').setColor(total>0?0x35ED7E:0xFF4500).setDescription(lines||'No server data.').addFields({name:'🟢 Online',value:`${online.length}/${servers.length}`,inline:true},{name:'👥 Players',value:`${total}`,inline:true},{name:'⏰ Updated',value:`<t:${Math.floor(Date.now()/1000)}:R>`,inline:true}).setFooter({text:'TheConclave Dominion • Auto-refreshes every 5 min',iconURL:'https://theconclavedominion.com/conclave-badge.png'}).setTimestamp();}
-async function updateExistingStatusChannels(guild,statuses){for(const srv of statuses){const chId=EXISTING_STATUS_CHANNELS[srv.id];if(!chId)continue;try{const ch=await guild.channels.fetch(chId).catch(()=>null);if(!ch)continue;const name=srv.status==='online'?`🟢${srv.pvp?'⚔️':srv.patreon?'⭐':''}・${srv.name}-${srv.players}p`:`🔴・${srv.name}-offline`;if(ch.name!==name){await ch.setName(name);await new Promise(r=>setTimeout(r,600));}}catch{}}}
-
-setInterval(async()=>{
-  if(DISCORD_GUILD_ID){try{const g=await bot.guilds.fetch(DISCORD_GUILD_ID).catch(()=>null);if(g){const s=await fetchServerStatuses();await updateExistingStatusChannels(g,s);for(const[gid,state]of monitorState){if(!state.statusChannelId||!state.messageId)continue;try{const guild=await bot.guilds.fetch(gid).catch(()=>null);if(!guild)continue;const ch=await guild.channels.fetch(state.statusChannelId).catch(()=>null);if(!ch)continue;const embed=buildMonitorEmbed(s);const msg=await ch.messages.fetch(state.messageId).catch(()=>null);if(msg)await msg.edit({embeds:[embed]});else{const nm=await ch.send({embeds:[embed]});state.messageId=nm.id;}}catch{}}}}catch{}}
-},5*60_000);
-
-// ══════════════════════════════════════════════════════════════════
-// MUSIC NEXUS SYNC — push session state to API
-// ══════════════════════════════════════════════════════════════════
-async function syncMusicState(guildId) {
-  if (!musicRuntime) return;
+async function logTx(id, tag, action, amount, balAfter, note = '', actorId = '', actorTag = '') {
+  if (!sb || !sbOk()) return;
   try {
-    const state = musicRuntime.getState(guildId);
-    if (!state?.current) return;
-    await axios.post(`${MUSIC_API}/api/music/session`, {
-      guild_id:    guildId,
-      now_playing: state.current,
-      queue_count: state.queue.length,
-      mood:        state.mood || null,
-      volume:      state.volume,
-      loop:        state.loop,
-      shuffle:     state.shuffle,
-      autoplay:    state.autoplay,
-      updated_at:  new Date().toISOString(),
-    }, { timeout: 5000 });
+    await sb.from('aegis_wallet_ledger').insert({
+      discord_id: id, action, amount,
+      balance_wallet_after: balAfter,
+      note: note || null, actor_discord_id: actorId || null, actor_tag: actorTag || null,
+      created_at: new Date().toISOString(),
+    });
   } catch {}
 }
-setInterval(()=>{ for(const[gid]of(musicRuntime?new Map([[DISCORD_GUILD_ID,1]]):new Map()))syncMusicState(gid); },15_000);
 
-// ══════════════════════════════════════════════════════════════════
-// EMBED HELPERS
-// ══════════════════════════════════════════════════════════════════
-const C={gold:0xFFB800,pl:0x7B2FFF,cy:0x00D4FF,gr:0x35ED7E,rd:0xFF4500,pk:0xFF4CD2};
-const FT={text:'TheConclave Dominion • 5× Crossplay • 10 Maps',iconURL:'https://theconclavedominion.com/conclave-badge.png'};
-const base=(title,color=C.pl)=>new EmbedBuilder().setTitle(title).setColor(color).setFooter(FT).setTimestamp();
-const TX_ICO={deposit:'🏦',withdraw:'💸',transfer_out:'➡️',transfer_in:'⬅️',grant:'🎁',deduct:'⬇️',daily_claim:'🌟',admin_set:'🔧'};
-
-function walletEmbed(title,w,color=C.pl){
-  const total=(w.wallet_balance||0)+(w.bank_balance||0);
-  return base(title,color).setDescription(`**${w.discord_tag||w.discord_id}**`).addFields(
-    {name:'💎 Wallet',value:`**${(w.wallet_balance||0).toLocaleString()}**`,inline:true},
-    {name:'🏦 Bank',  value:`**${(w.bank_balance||0).toLocaleString()}**`,  inline:true},
-    {name:'📊 Total', value:`**${total.toLocaleString()}**`,                  inline:true},
-    {name:'📈 Earned',value:`${(w.lifetime_earned||0).toLocaleString()}`,     inline:true},
-    {name:'📉 Spent', value:`${(w.lifetime_spent||0).toLocaleString()}`,      inline:true},
-    {name:'🔥 Streak',value:`Week ${w.daily_streak||0}`,                      inline:true},
-  );
+async function depositToBank(id, tag, amount) {
+  const w = await getWallet(id, tag);
+  if (w.wallet_balance < amount) throw new Error(`Need **${amount}** in wallet. You have **${w.wallet_balance}** 💎.`);
+  return sbQuery(async sb => {
+    const { data, error } = await sb.from('aegis_wallets')
+      .update({ wallet_balance: w.wallet_balance - amount, bank_balance: w.bank_balance + amount, updated_at: new Date().toISOString() })
+      .eq('discord_id', id).select().single();
+    if (error) throw new Error(error.message);
+    await logTx(id, tag, 'deposit', amount, data.bank_balance, `Deposited ${amount} to bank`, id, tag);
+    return data;
+  });
 }
 
-// ══════════════════════════════════════════════════════════════════
-// SHOP TIER DATA
-// ══════════════════════════════════════════════════════════════════
-const SHOP_TIERS = [
-  {shards:1,  emoji:'💠',name:'1 Clave Shard',   items:['Level 600 Vanilla Dino (Tameable)','Max XP','3 Stacks Ammo','Full Dino Coloring','100 Kibble / Cakes / Beer','100% Imprint','500 Non-Tek Structures','Cryofridge + 120 Pods','50,000 Echo Coins','2,500 Materials','10 Same-Type Tributes','Boss Artifact + Tribute (1 Run)','Non-Tek Blueprint','Dino Revival Token (48hr limit)']},
-  {shards:2,  emoji:'💎',name:'2 Clave Shards',  items:['Modded Level 600 Dino','60 Dedicated Storage','Level 600 Yeti','Level 600 Polar Bear','450 Random Shiny','Random Shiny Shoulder Variant']},
-  {shards:3,  emoji:'✨',name:'3 Clave Shards',  items:['Tek Blueprint','1 Shiny Essence','200% Imprint','450 T1 Special Shiny']},
-  {shards:5,  emoji:'🔥',name:'5 Clave Shards',  items:['Boss Defeat Command','Bronto or Dread + Saddle','Astral Dino','Level 1000 Basilisk','Level 1000 Rock Elemental','Level 1000 Karkinos','50 Raw Shiny Essence','450 T2 Special Shiny','Small Resource Bundle','2,500 Imprint Kibble']},
-  {shards:6,  emoji:'⚔️',name:'6 Clave Shards',  items:['Boss Ready Dino Bundle','300% Imprint','Max XP']},
-  {shards:8,  emoji:'🌌',name:'8 Clave Shards',  items:['Medium Resource Bundle','100,000 Resources (No Element)']},
-  {shards:10, emoji:'🛡️',name:'10 Clave Shards', items:['Tek Suit Blueprint Set','Floating Platform','Combo Shinies','Dino Color Party','Breeding Pair']},
-  {shards:12, emoji:'🌠',name:'12 Clave Shards', items:['Large Resource Bundle','200,000 Resources']},
-  {shards:15, emoji:'👑',name:'15 Clave Shards', items:['30,000 Element','Level 900 Rhyniognatha','Reaper','Aureliax','XLarge Bundle (300k Resources)']},
-  {shards:20, emoji:'🏰',name:'20 Clave Shards', items:['1x1 Behemoth Gate Expansion (10/max)']},
-  {shards:30, emoji:'💰',name:'30 Clave Shards', items:['2 Dedicated Storage Admin Refill','1.6 Million Total Resources']},
-  {shards:0,  emoji:'🛡',name:'Dino Insurance',  items:['One Time Use','Must Be Named','Backup May Not Save','May Require Respawn','One Time Per Dino']},
+async function withdrawFromBank(id, tag, amount) {
+  const w = await getWallet(id, tag);
+  if (w.bank_balance < amount) throw new Error(`Need **${amount}** in bank. You have **${w.bank_balance}** 💎.`);
+  return sbQuery(async sb => {
+    const { data, error } = await sb.from('aegis_wallets')
+      .update({ wallet_balance: w.wallet_balance + amount, bank_balance: w.bank_balance - amount, updated_at: new Date().toISOString() })
+      .eq('discord_id', id).select().single();
+    if (error) throw new Error(error.message);
+    await logTx(id, tag, 'withdraw', amount, data.wallet_balance, `Withdrew ${amount} from bank`, id, tag);
+    return data;
+  });
+}
+
+async function transferShards(fromId, fromTag, toId, toTag, amount) {
+  if (fromId === toId) throw new Error('Cannot transfer to yourself.');
+  const sender = await getWallet(fromId, fromTag);
+  if (sender.wallet_balance < amount) throw new Error(`Need **${amount}** in wallet. You have **${sender.wallet_balance}** 💎.`);
+  return sbQuery(async sb => {
+    await sb.from('aegis_wallets').update({ wallet_balance: sender.wallet_balance - amount, lifetime_spent: (sender.lifetime_spent || 0) + amount, updated_at: new Date().toISOString() }).eq('discord_id', fromId);
+    await getWallet(toId, toTag);
+    const { data: r } = await sb.from('aegis_wallets').select('wallet_balance,lifetime_earned').eq('discord_id', toId).single();
+    const { data: up } = await sb.from('aegis_wallets').update({ wallet_balance: (r.wallet_balance || 0) + amount, lifetime_earned: (r.lifetime_earned || 0) + amount, updated_at: new Date().toISOString() }).eq('discord_id', toId).select().single();
+    const note = `${fromTag} → ${toTag}`;
+    await logTx(fromId, fromTag, 'transfer_out', amount, sender.wallet_balance - amount, note, fromId, fromTag);
+    await logTx(toId, toTag, 'transfer_in', amount, up.wallet_balance, note, fromId, fromTag);
+    return { sent: sender.wallet_balance - amount, received: up.wallet_balance };
+  });
+}
+
+async function grantShards(toId, toTag, amount, reason, actorId, actorTag) {
+  await getWallet(toId, toTag);
+  return sbQuery(async sb => {
+    const { data: curr } = await sb.from('aegis_wallets').select('wallet_balance,lifetime_earned').eq('discord_id', toId).single();
+    const { data, error } = await sb.from('aegis_wallets').update({ wallet_balance: (curr.wallet_balance || 0) + amount, lifetime_earned: (curr.lifetime_earned || 0) + amount, updated_at: new Date().toISOString() }).eq('discord_id', toId).select().single();
+    if (error) throw new Error(error.message);
+    await logTx(toId, toTag, 'grant', amount, data.wallet_balance, reason || 'Admin grant', actorId, actorTag);
+    return data;
+  });
+}
+
+async function deductShards(fromId, fromTag, amount, reason, actorId, actorTag) {
+  const w = await getWallet(fromId, fromTag);
+  const nb = Math.max(0, (w.wallet_balance || 0) - amount);
+  return sbQuery(async sb => {
+    const { data, error } = await sb.from('aegis_wallets').update({ wallet_balance: nb, lifetime_spent: (w.lifetime_spent || 0) + amount, updated_at: new Date().toISOString() }).eq('discord_id', fromId).select().single();
+    if (error) throw new Error(error.message);
+    await logTx(fromId, fromTag, 'deduct', amount, data.wallet_balance, reason || 'Admin deduct', actorId, actorTag);
+    return data;
+  });
+}
+
+async function getHistory(id, limit = 15) {
+  return sbQuery(async sb => {
+    const { data, error } = await sb.from('aegis_wallet_ledger')
+      .select('action,amount,balance_wallet_after,note,actor_tag,created_at')
+      .eq('discord_id', id).order('created_at', { ascending: false }).limit(limit);
+    if (error) throw new Error(error.message);
+    return data || [];
+  });
+}
+
+async function getLeaderboard(limit = 10) {
+  return sbQuery(async sb => {
+    const { data } = await sb.from('aegis_wallets')
+      .select('discord_id,discord_tag,wallet_balance,bank_balance,lifetime_earned')
+      .order('wallet_balance', { ascending: false }).limit(limit);
+    return data || [];
+  });
+}
+
+async function getSupply() {
+  return sbQuery(async sb => {
+    const { data } = await sb.from('aegis_wallets').select('wallet_balance,bank_balance');
+    if (!data?.length) return { walletTotal: 0, bankTotal: 0, holders: 0 };
+    return { walletTotal: data.reduce((s, r) => s + (r.wallet_balance || 0), 0), bankTotal: data.reduce((s, r) => s + (r.bank_balance || 0), 0), holders: data.length };
+  });
+}
+
+async function claimWeekly(id, tag) {
+  return sbQuery(async sb => {
+    const { data: w } = await sb.from('aegis_wallets').select('*').eq('discord_id', id).single().catch(() => ({ data: null }));
+    if (!w) { await getWallet(id, tag); return claimWeekly(id, tag); }
+    const now = new Date();
+    const last = w.last_daily_claim ? new Date(w.last_daily_claim) : null;
+    const diff = last ? (now - last) / (1000 * 60 * 60) : 999;
+    if (diff < 168) {
+      const next = new Date(last.getTime() + 168 * 60 * 60 * 1000);
+      throw new Error(`⏳ Already claimed this week. Next: <t:${Math.floor(next / 1000)}:R>`);
+    }
+    const amount = 3;
+    const streak = (w.daily_streak || 0) + 1;
+    const { data, error } = await sb.from('aegis_wallets').update({
+      wallet_balance: (w.wallet_balance || 0) + amount, lifetime_earned: (w.lifetime_earned || 0) + amount,
+      last_daily_claim: now.toISOString(), daily_streak: streak, updated_at: now.toISOString(),
+    }).eq('discord_id', id).select().single();
+    if (error) throw new Error(error.message);
+    await logTx(id, tag, 'daily_claim', amount, data.wallet_balance, `Week ${streak} claim`, 'SYSTEM', 'AEGIS');
+    return { data, amount, streak };
+  });
+}
+
+// ─── LIVE MONITOR ENGINE ───────────────────────────────────────────────
+const monitorState = new Map();
+
+const MONITOR_SERVERS = [
+  { id: 'island',     name: 'The Island',    fullName: 'TheConclave-TheIsland-5xCrossplay',      nitradoId: 18266152, emoji: '🌿', ip: '217.114.196.102', port: 5390, pvp: false, patreon: false },
+  { id: 'volcano',    name: 'Volcano',        fullName: 'TheConclave-Volcano-5xCrossplay',        nitradoId: 18094678, emoji: '🌋', ip: '217.114.196.59',  port: 5050, pvp: false, patreon: false },
+  { id: 'extinction', name: 'Extinction',     fullName: 'TheConclave-Extinction-5Xcrossplay',     nitradoId: 18106633, emoji: '🌑', ip: '31.214.196.102',  port: 6440, pvp: false, patreon: false },
+  { id: 'center',     name: 'The Center',     fullName: 'TheConclave-Center-5xCrossplay',         nitradoId: 18182839, emoji: '🏔️', ip: '31.214.163.71',  port: 5120, pvp: false, patreon: false },
+  { id: 'lostcolony', name: 'Lost Colony',    fullName: 'TheConclave-LostColony-5xCrossplay',     nitradoId: 18307276, emoji: '🪐', ip: '217.114.196.104', port: 5150, pvp: false, patreon: false },
+  { id: 'astraeos',   name: 'Astraeos',       fullName: 'TheConclave-Astreos-5xCrossplay',        nitradoId: 18393892, emoji: '✨', ip: '217.114.196.9',   port: 5320, pvp: false, patreon: false },
+  { id: 'valguero',   name: 'Valguero',       fullName: 'TheConclave-Valguero-5xCrossplay',       nitradoId: 18509341, emoji: '🏞️', ip: '85.190.136.141', port: 5090, pvp: false, patreon: false },
+  { id: 'scorched',   name: 'Scorched Earth', fullName: 'TheConclave-Scorched-5xCrossplay',       nitradoId: 18598049, emoji: '☀️', ip: '217.114.196.103', port: 5240, pvp: false, patreon: false },
+  { id: 'aberration', name: 'Aberration',     fullName: 'TheConclave-Aberration-5xCrossplay',     nitradoId: 18655529, emoji: '⚔️', ip: '217.114.196.80',  port: 5540, pvp: true,  patreon: false },
+  { id: 'amissa',     name: 'Amissa',         fullName: 'TheConclave-Amissa-Patreon-5xCrossplay', nitradoId: 18680162, emoji: '⭐', ip: '217.114.196.80',  port: 5180, pvp: false, patreon: true  },
 ];
 
-// ══════════════════════════════════════════════════════════════════
-// MAP DATA
-// ══════════════════════════════════════════════════════════════════
-const MAP_INFO = {
-  island:     {name:'The Island',     ip:'217.114.196.102:5390',emoji:'🌿',desc:'Classic starter map. Lush biomes, all original boss arenas.',pvp:false,patreon:false},
-  volcano:    {name:'Volcano',        ip:'217.114.196.59:5050', emoji:'🌋',desc:'Dramatic volcanic biomes with rich resources.',pvp:false,patreon:false},
-  extinction: {name:'Extinction',     ip:'31.214.196.102:6440', emoji:'🌑',desc:'Post-apocalyptic Earth. Titans, OSD drops, Element farming.',pvp:false,patreon:false},
-  center:     {name:'The Center',     ip:'31.214.163.71:5120',  emoji:'🏔️',desc:'Floating islands, underground ocean, great endgame bases.',pvp:false,patreon:false},
-  lostcolony: {name:'Lost Colony',    ip:'217.114.196.104:5150',emoji:'🪐',desc:'Space-themed ascended map with unique creatures.',pvp:false,patreon:false},
-  astraeos:   {name:'Astraeos',       ip:'217.114.196.9:5320',  emoji:'✨',desc:'Custom Ascended map blending multiple terrains and rare creatures.',pvp:false,patreon:false},
-  valguero:   {name:'Valguero',       ip:'85.190.136.141:5090', emoji:'🏞️',desc:'Rolling meadows, the Great Trench, and Deinonychus nesting.',pvp:false,patreon:false},
-  scorched:   {name:'Scorched Earth', ip:'217.114.196.103:5240',emoji:'☀️',desc:'Desert survival: Wyverns, Rock Elementals, Manticore boss.',pvp:false,patreon:false},
-  aberration: {name:'Aberration',     ip:'217.114.196.80:5540', emoji:'⚔️',desc:'Underground PvP — Rock Drakes, Reapers, Nameless. Bring your best.',pvp:true, patreon:false},
-  amissa:     {name:'Amissa',         ip:'217.114.196.80:5180', emoji:'⭐',desc:'Patreon-exclusive map for Elite tier patrons. Premium server.',pvp:false,patreon:true},
+const EXISTING_STATUS_CHANNELS = {
+  aberration: '1491714622959390830', amissa: '1491714743797416056', astraeos: '1491714926862008320',
+  center: '1491715233847316590', extinction: '1491715612911861790', lostcolony: '1491715764678299670',
+  scorched: '1491717247083876435', island: '1491715445659799692', valguero: '1491715929586008075',
+  volcano: '1491716283857633290',
 };
 
-// ══════════════════════════════════════════════════════════════════
-// SLASH COMMAND DEFINITIONS
-// ══════════════════════════════════════════════════════════════════
-function addWalletSubs(b){
-  return b
-    .addSubcommand(s=>s.setName('balance').setDescription('💎 Check wallet').addUserOption(o=>o.setName('user').setDescription('Member (blank = you)').setRequired(false)))
-    .addSubcommand(s=>s.setName('deposit').setDescription('🏦 Wallet → Bank').addIntegerOption(o=>o.setName('amount').setDescription('Amount').setRequired(true).setMinValue(1)))
-    .addSubcommand(s=>s.setName('withdraw').setDescription('💸 Bank → Wallet').addIntegerOption(o=>o.setName('amount').setDescription('Amount').setRequired(true).setMinValue(1)))
-    .addSubcommand(s=>s.setName('transfer').setDescription('➡️ Send shards').addUserOption(o=>o.setName('user').setDescription('Recipient').setRequired(true)).addIntegerOption(o=>o.setName('amount').setDescription('Amount').setRequired(true).setMinValue(1)).addStringOption(o=>o.setName('note').setDescription('Message').setRequired(false)))
-    .addSubcommand(s=>s.setName('history').setDescription('🧾 Transaction log').addUserOption(o=>o.setName('user').setDescription('Member').setRequired(false)).addIntegerOption(o=>o.setName('count').setDescription('Entries (max 25)').setRequired(false).setMinValue(1).setMaxValue(25)))
-    .addSubcommand(s=>s.setName('leaderboard').setDescription('🏆 Top holders'))
-    .addSubcommand(s=>s.setName('supply').setDescription('📊 Economy supply'))
-    .addSubcommand(s=>s.setName('grant').setDescription('🎁 [ADMIN] Grant shards').addUserOption(o=>o.setName('user').setDescription('Recipient').setRequired(true)).addIntegerOption(o=>o.setName('amount').setDescription('Amount').setRequired(true).setMinValue(1)).addStringOption(o=>o.setName('reason').setDescription('Reason').setRequired(false)))
-    .addSubcommand(s=>s.setName('deduct').setDescription('⬇️ [ADMIN] Deduct shards').addUserOption(o=>o.setName('user').setDescription('Target').setRequired(true)).addIntegerOption(o=>o.setName('amount').setDescription('Amount').setRequired(true).setMinValue(1)).addStringOption(o=>o.setName('reason').setDescription('Reason').setRequired(false)));
+const NITRADO_API = 'https://api.nitrado.net';
+
+async function fetchNitradoServer(nitradoId) {
+  if (!process.env.NITRADO_API_KEY) return null;
+  try {
+    const res = await axios.get(`${NITRADO_API}/services/${nitradoId}/gameservers`, {
+      headers: { Authorization: `Bearer ${process.env.NITRADO_API_KEY}` }, timeout: 10000,
+    });
+    const gs = res.data?.data?.gameserver;
+    if (!gs) return null;
+    return {
+      status:     gs.status === 'started' ? 'online' : 'offline',
+      players:    gs.query?.player_current  ?? 0,
+      maxPlayers: gs.query?.player_max      ?? 20,
+      version:    gs.game_specific?.version ?? null,
+    };
+  } catch { return null; }
 }
 
-const ALL_COMMANDS = [
-  // Economy
-  addWalletSubs(new SlashCommandBuilder().setName('wallet').setDescription('💎 ClaveShard wallet')),
-  addWalletSubs(new SlashCommandBuilder().setName('curr').setDescription('💎 ClaveShard wallet (alias)')),
+async function fetchNitradoStatus(servers) {
+  const results = [];
+  await Promise.all(servers.map(async srv => {
+    const data = srv.nitradoId ? await fetchNitradoServer(srv.nitradoId) : null;
+    results.push({ ...srv, status: data?.status ?? 'unknown', players: data?.players ?? 0, maxPlayers: data?.maxPlayers ?? 20, playerNames: [] });
+  }));
+  return results;
+}
+
+async function fetchServerStatus(servers) {
+  if (process.env.NITRADO_API_KEY) return fetchNitradoStatus(servers);
+  return servers.map(s => ({ ...s, status: 'unknown', players: 0, maxPlayers: 20 }));
+}
+
+function buildMonitorEmbed(servers) {
+  const online = servers.filter(s => s.status === 'online');
+  const offline = servers.filter(s => s.status !== 'online');
+  const total = online.reduce((sum, s) => sum + s.players, 0);
+  const lines = [
+    ...online.map(s => {
+      const tag = s.pvp ? ' ⚔️' : s.patreon ? ' ⭐' : '';
+      return `🟢 **${s.emoji} ${s.name}**${tag} \`${s.players}/${s.maxPlayers}\``;
+    }),
+    ...offline.map(s => `🔴 **${s.emoji} ${s.name}** · Offline`),
+  ].join('\n');
+  return new EmbedBuilder()
+    .setTitle('⚔️ TheConclave — Live Cluster Monitor')
+    .setColor(total > 0 ? 0x35ED7E : 0xFF4500)
+    .setDescription(lines || 'No servers configured.')
+    .addFields(
+      { name: '🟢 Online',        value: `${online.length}/${servers.length}`, inline: true },
+      { name: '👥 Total Players', value: `${total}`, inline: true },
+      { name: '⏰ Updated',       value: `<t:${Math.floor(Date.now()/1000)}:R>`, inline: true },
+    )
+    .setFooter({ text: 'TheConclave Dominion • Auto-refreshes every 5 min', iconURL: 'https://theconclavedominion.com/conclave-badge.png' })
+    .setTimestamp();
+}
+
+async function updateExistingStatusChannels(guild, statuses) {
+  for (const srv of statuses) {
+    const chId = EXISTING_STATUS_CHANNELS[srv.id];
+    if (!chId) continue;
+    try {
+      const ch = await guild.channels.fetch(chId).catch(() => null);
+      if (!ch) continue;
+      const tag  = srv.pvp ? '⚔️' : srv.patreon ? '⭐' : '';
+      const name = srv.status === 'online' ? `🟢${tag}・${srv.name}-${srv.players}p` : `🔴・${srv.name}-offline`;
+      if (ch.name !== name) { await ch.setName(name); await new Promise(r => setTimeout(r, 600)); }
+    } catch {}
+  }
+}
+
+async function refreshMonitor(guild) {
+  const state = monitorState.get(guild.id);
+  if (!state?.statusChannelId || !state?.messageId) return;
+  try {
+    const ch      = await guild.channels.fetch(state.statusChannelId).catch(() => null);
+    if (!ch) return;
+    const servers  = state.servers?.length ? state.servers : MONITOR_SERVERS;
+    const statuses = await fetchServerStatus(servers);
+    const embed    = buildMonitorEmbed(statuses);
+    const msg      = await ch.messages.fetch(state.messageId).catch(() => null);
+    if (msg) await msg.edit({ embeds: [embed] });
+    else { const nm = await ch.send({ embeds: [embed] }); state.messageId = nm.id; }
+    await updateExistingStatusChannels(guild, statuses);
+    state.prevStatuses = statuses;
+  } catch (e) { console.error('❌ Monitor refresh:', e.message); }
+}
+
+setInterval(async () => {
+  if (DISCORD_GUILD_ID) {
+    try {
+      const guild = await bot.guilds.fetch(DISCORD_GUILD_ID).catch(() => null);
+      if (guild) { const s = await fetchServerStatus(MONITOR_SERVERS); await updateExistingStatusChannels(guild, s); }
+    } catch {}
+  }
+  for (const [guildId, state] of monitorState) {
+    if (!state.statusChannelId || !state.messageId) continue;
+    try { const g = await bot.guilds.fetch(guildId).catch(() => null); if (g) await refreshMonitor(g); } catch {}
+  }
+}, 5 * 60_000);
+
+// ─── BEACON SENTINEL ───────────────────────────────────────────────────
+const beaconState = { access: null, refresh: null, expiresAt: 0, groupId: null, deviceSessions: new Map() };
+
+async function beaconEnsureToken() {
+  if (!beaconState.access) return null;
+  const now = Math.floor(Date.now() / 1000);
+  if (beaconState.expiresAt && now >= beaconState.expiresAt - 300) {
+    try {
+      const r = await axios.post('https://api.usebeacon.app/v4/login', {
+        client_id: process.env.BEACON_CLIENT_ID || 'eb9ecdff-4048-4a83-8f40-f2e16d2e9a81',
+        client_secret: process.env.BEACON_CLIENT_SECRET,
+        grant_type: 'refresh_token', refresh_token: beaconState.refresh,
+        scope: 'common sentinel:read sentinel:write',
+      }, { timeout: 10000 });
+      beaconState.access = r.data.access_token; beaconState.refresh = r.data.refresh_token; beaconState.expiresAt = r.data.access_token_expiration;
+    } catch { return null; }
+  }
+  return beaconState.access;
+}
+
+async function beaconFetch(path, params = {}) {
+  const token = await beaconEnsureToken();
+  if (!token) return null;
+  try {
+    const qs = Object.keys(params).length ? '?' + new URLSearchParams(params).toString() : '';
+    const r  = await axios.get(`https://api.usebeacon.app${path}${qs}`, { headers: { Authorization: `Bearer ${token}` }, timeout: 12000 });
+    return r.data;
+  } catch { return null; }
+}
+
+async function sentinelOnlinePlayers() { if (!beaconState.access) return []; const d = await beaconFetch('/v4/sentinel/characters', { online: 'true', pageSize: 250 }); return d?.results || []; }
+async function sentinelTribes(filter) { if (!beaconState.access) return []; const d = await beaconFetch('/v4/sentinel/tribes', { pageSize: 250 }); let t = d?.results || []; if (filter) t = t.filter(x => (x.serviceName||'').toLowerCase().includes(filter.toLowerCase())); return t; }
+async function sentinelBans() { if (!beaconState.access) return []; const d = await beaconFetch('/v4/sentinel/bans', { pageSize: 100 }); return d?.results || []; }
+async function sentinelPlayer(name) { if (!beaconState.access) return null; const d = await beaconFetch('/v4/sentinel/players', { search: name, pageSize: 5 }); return d?.results?.[0] || null; }
+
+if (process.env.BEACON_ACCESS_TOKEN) {
+  beaconState.access    = process.env.BEACON_ACCESS_TOKEN;
+  beaconState.refresh   = process.env.BEACON_REFRESH_TOKEN || null;
+  beaconState.expiresAt = parseInt(process.env.BEACON_TOKEN_EXPIRES || '0');
+  beaconState.groupId   = process.env.BEACON_GROUP_ID || null;
+  console.log('📡 Beacon Sentinel: token loaded from env');
+}
+
+// ─── EMBED HELPERS ─────────────────────────────────────────────────────
+const C = { gold: 0xFFB800, pl: 0x7B2FFF, cy: 0x00D4FF, gr: 0x35ED7E, rd: 0xFF4500, pk: 0xFF4CD2, bl: 0x5865F2, mag: 0xAA00FF };
+const FT = { text: 'TheConclave Dominion • 5× Crossplay • 10 Maps', iconURL: 'https://theconclavedominion.com/conclave-badge.png' };
+const base = (title, color = C.pl) => new EmbedBuilder().setTitle(title).setColor(color).setFooter(FT).setTimestamp();
+const TX_ICO = { deposit: '🏦', withdraw: '💸', transfer_out: '➡️', transfer_in: '⬅️', grant: '🎁', deduct: '⬇️', daily_claim: '🌟', spend: '🛒', earn: '✨', admin_set: '🔧', warn: '⚠️' };
+
+function walletEmbed(title, w, color = C.pl) {
+  const total = (w.wallet_balance || 0) + (w.bank_balance || 0);
+  return base(title, color)
+    .setDescription(`**${w.discord_tag || w.discord_id}**`)
+    .addFields(
+      { name: '💎 Wallet', value: `**${(w.wallet_balance || 0).toLocaleString()}**`, inline: true },
+      { name: '🏦 Bank',   value: `**${(w.bank_balance   || 0).toLocaleString()}**`, inline: true },
+      { name: '📊 Total',  value: `**${total.toLocaleString()}**`, inline: true },
+      { name: '📈 Earned', value: `${(w.lifetime_earned || 0).toLocaleString()}`, inline: true },
+      { name: '📉 Spent',  value: `${(w.lifetime_spent  || 0).toLocaleString()}`, inline: true },
+      { name: '🔥 Streak', value: `Week ${w.daily_streak || 0}`, inline: true },
+    );
+}
+
+// ─── WALLET SUBCOMMAND BUILDER ──────────────────────────────────────────
+function wSub(b) {
+  return b
+    .addSubcommand(s => s.setName('balance').setDescription('💎 Check wallet').addUserOption(o => o.setName('user').setDescription('Member (blank = you)').setRequired(false)))
+    .addSubcommand(s => s.setName('deposit').setDescription('🏦 Wallet → Bank').addIntegerOption(o => o.setName('amount').setDescription('Amount').setRequired(true).setMinValue(1)))
+    .addSubcommand(s => s.setName('withdraw').setDescription('💸 Bank → Wallet').addIntegerOption(o => o.setName('amount').setDescription('Amount').setRequired(true).setMinValue(1)))
+    .addSubcommand(s => s.setName('transfer').setDescription('➡️ Send shards')
+      .addUserOption(o => o.setName('user').setDescription('Recipient').setRequired(true))
+      .addIntegerOption(o => o.setName('amount').setDescription('Amount').setRequired(true).setMinValue(1))
+      .addStringOption(o => o.setName('note').setDescription('Message').setRequired(false)))
+    .addSubcommand(s => s.setName('history').setDescription('🧾 Transaction log')
+      .addUserOption(o => o.setName('user').setDescription('Member').setRequired(false))
+      .addIntegerOption(o => o.setName('count').setDescription('Entries (max 25)').setRequired(false).setMinValue(1).setMaxValue(25)))
+    .addSubcommand(s => s.setName('leaderboard').setDescription('🏆 Top holders'))
+    .addSubcommand(s => s.setName('supply').setDescription('📊 Economy supply'))
+    .addSubcommand(s => s.setName('grant').setDescription('🎁 [ADMIN] Grant shards')
+      .addUserOption(o => o.setName('user').setDescription('Recipient').setRequired(true))
+      .addIntegerOption(o => o.setName('amount').setDescription('Amount').setRequired(true).setMinValue(1))
+      .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)))
+    .addSubcommand(s => s.setName('deduct').setDescription('⬇️ [ADMIN] Deduct shards')
+      .addUserOption(o => o.setName('user').setDescription('Target').setRequired(true))
+      .addIntegerOption(o => o.setName('amount').setDescription('Amount').setRequired(true).setMinValue(1))
+      .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)));
+}
+
+// ─── COMMAND DEFINITIONS ────────────────────────────────────────────────
+const cmds = [
+  // ── ECONOMY ──
+  wSub(new SlashCommandBuilder().setName('wallet').setDescription('💎 ClaveShard wallet — balance, transfer, history')),
+  wSub(new SlashCommandBuilder().setName('curr').setDescription('💎 ClaveShard wallet (alias)')),
+
   new SlashCommandBuilder().setName('weekly').setDescription('🌟 Claim your weekly 3 ClaveShard reward'),
+
+  new SlashCommandBuilder().setName('clvsd').setDescription('💠 Admin economy tools')
+    .addSubcommand(s => s.setName('grant').setDescription('🎁 Grant').addUserOption(o => o.setName('user').setDescription('Recipient').setRequired(true)).addIntegerOption(o => o.setName('amount').setDescription('Amount').setRequired(true).setMinValue(1)).addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)))
+    .addSubcommand(s => s.setName('deduct').setDescription('⬇️ Deduct').addUserOption(o => o.setName('user').setDescription('Target').setRequired(true)).addIntegerOption(o => o.setName('amount').setDescription('Amount').setRequired(true).setMinValue(1)).addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)))
+    .addSubcommand(s => s.setName('check').setDescription('🔍 Check wallet').addUserOption(o => o.setName('user').setDescription('Member').setRequired(true)))
+    .addSubcommand(s => s.setName('set').setDescription('🔧 Set balance').addUserOption(o => o.setName('user').setDescription('Target').setRequired(true)).addIntegerOption(o => o.setName('amount').setDescription('New balance').setRequired(true).setMinValue(0)).addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)))
+    .addSubcommand(s => s.setName('top').setDescription('🏆 Top 15 holders'))
+    .addSubcommand(s => s.setName('stats').setDescription('📊 Full economy stats'))
+    .addSubcommand(s => s.setName('usage').setDescription('🧠 AEGIS AI token usage stats')),
+
+  new SlashCommandBuilder().setName('order').setDescription('📦 Submit a ClaveShard shop order')
+    .addIntegerOption(o => o.setName('tier').setDescription('Tier 1-30').setRequired(true).setMinValue(1).setMaxValue(30))
+    .addStringOption(o => o.setName('platform').setDescription('Platform').setRequired(true).addChoices({name:'Xbox',value:'Xbox'},{name:'PlayStation',value:'PlayStation'},{name:'PC',value:'PC'}))
+    .addStringOption(o => o.setName('server').setDescription('Which server?').setRequired(true))
+    .addStringOption(o => o.setName('notes').setDescription('Special requests').setRequired(false)),
+
+  new SlashCommandBuilder().setName('fulfill').setDescription('✅ [ADMIN] Mark order fulfilled').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+    .addStringOption(o => o.setName('ref').setDescription('Order ref').setRequired(true))
+    .addStringOption(o => o.setName('note').setDescription('Note to player').setRequired(false)),
+
+  new SlashCommandBuilder().setName('shard').setDescription('💠 View ClaveShard tier list & pricing'),
+  new SlashCommandBuilder().setName('shop').setDescription('🛍️ Browse live ClaveShard catalog'),
   new SlashCommandBuilder().setName('leaderboard').setDescription('🏆 Top 10 ClaveShard holders'),
   new SlashCommandBuilder().setName('give').setDescription('🎁 [ADMIN] Quick grant shards').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
-    .addUserOption(o=>o.setName('user').setDescription('Player').setRequired(true))
-    .addIntegerOption(o=>o.setName('amount').setDescription('Shards').setRequired(true).setMinValue(1))
-    .addStringOption(o=>o.setName('reason').setDescription('Reason').setRequired(false)),
-  new SlashCommandBuilder().setName('clvsd').setDescription('💠 Admin economy tools').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
-    .addSubcommand(s=>s.setName('grant').setDescription('🎁 Grant').addUserOption(o=>o.setName('user').setDescription('Recipient').setRequired(true)).addIntegerOption(o=>o.setName('amount').setDescription('Amount').setRequired(true).setMinValue(1)).addStringOption(o=>o.setName('reason').setDescription('Reason').setRequired(false)))
-    .addSubcommand(s=>s.setName('deduct').setDescription('⬇️ Deduct').addUserOption(o=>o.setName('user').setDescription('Target').setRequired(true)).addIntegerOption(o=>o.setName('amount').setDescription('Amount').setRequired(true).setMinValue(1)).addStringOption(o=>o.setName('reason').setDescription('Reason').setRequired(false)))
-    .addSubcommand(s=>s.setName('check').setDescription('🔍 Check wallet').addUserOption(o=>o.setName('user').setDescription('Member').setRequired(true)))
-    .addSubcommand(s=>s.setName('set').setDescription('🔧 Set balance').addUserOption(o=>o.setName('user').setDescription('Target').setRequired(true)).addIntegerOption(o=>o.setName('amount').setDescription('New balance').setRequired(true).setMinValue(0)).addStringOption(o=>o.setName('reason').setDescription('Reason').setRequired(false)))
-    .addSubcommand(s=>s.setName('top').setDescription('🏆 Top 15 holders'))
-    .addSubcommand(s=>s.setName('stats').setDescription('📊 Economy stats'))
-    .addSubcommand(s=>s.setName('usage').setDescription('🧠 AI token usage + cost')),
-  // Shop
-  new SlashCommandBuilder().setName('order').setDescription('📦 Submit ClaveShard shop order')
-    .addIntegerOption(o=>o.setName('tier').setDescription('Tier shards').setRequired(true).setMinValue(1).setMaxValue(30))
-    .addStringOption(o=>o.setName('platform').setDescription('Platform').setRequired(true).addChoices({name:'Xbox',value:'Xbox'},{name:'PlayStation',value:'PlayStation'},{name:'PC',value:'PC'}))
-    .addStringOption(o=>o.setName('server').setDescription('Which server?').setRequired(true))
-    .addStringOption(o=>o.setName('notes').setDescription('Special requests or dino name').setRequired(false)),
-  new SlashCommandBuilder().setName('fulfill').setDescription('✅ [ADMIN] Mark order fulfilled').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
-    .addStringOption(o=>o.setName('ref').setDescription('Order reference').setRequired(true))
-    .addStringOption(o=>o.setName('note').setDescription('Note to player').setRequired(false)),
-  new SlashCommandBuilder().setName('shard').setDescription('💠 View complete ClaveShard tier list'),
-  new SlashCommandBuilder().setName('shop').setDescription('🛍️ Browse ClaveShard catalog'),
-  // AI
-  new SlashCommandBuilder().setName('aegis').setDescription('🧠 Ask AEGIS AI').addStringOption(o=>o.setName('question').setDescription('Your question').setRequired(true)),
-  new SlashCommandBuilder().setName('ask').setDescription('🧠 Ask AEGIS anything').addStringOption(o=>o.setName('question').setDescription('Your question').setRequired(true)),
+    .addUserOption(o => o.setName('user').setDescription('Player').setRequired(true))
+    .addIntegerOption(o => o.setName('amount').setDescription('Shards').setRequired(true).setMinValue(1))
+    .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)),
+
+  // ── AI / INFO ──
+  new SlashCommandBuilder().setName('aegis').setDescription('🧠 Ask AEGIS AI — the Dominion intelligence').addStringOption(o => o.setName('question').setDescription('Your question').setRequired(true)),
+  new SlashCommandBuilder().setName('ask').setDescription('🧠 Ask AEGIS anything').addStringOption(o => o.setName('question').setDescription('Your question').setRequired(true)),
   new SlashCommandBuilder().setName('forget').setDescription('🧹 Clear your AEGIS conversation history'),
-  new SlashCommandBuilder().setName('ai-cost').setDescription('💸 [ADMIN] AI cost dashboard').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
-  // Servers
-  new SlashCommandBuilder().setName('servers').setDescription('🗺️ Live ARK cluster status').addStringOption(o=>o.setName('map').setDescription('Filter by map').setRequired(false)),
-  new SlashCommandBuilder().setName('map').setDescription('🗺️ Detailed info for a specific map').addStringOption(o=>o.setName('name').setDescription('Map').setRequired(true).addChoices({name:'The Island',value:'island'},{name:'Volcano',value:'volcano'},{name:'Extinction',value:'extinction'},{name:'The Center',value:'center'},{name:'Lost Colony',value:'lostcolony'},{name:'Astraeos',value:'astraeos'},{name:'Valguero',value:'valguero'},{name:'Scorched Earth',value:'scorched'},{name:'Aberration (PvP)',value:'aberration'},{name:'Amissa (Patreon)',value:'amissa'})),
-  new SlashCommandBuilder().setName('monitor').setDescription('📡 [ADMIN] Post live server status monitor').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages).addChannelOption(o=>o.setName('channel').setDescription('Channel to post in').setRequired(true)),
-  // Info
-  new SlashCommandBuilder().setName('info').setDescription('ℹ️ Server info and getting-started guide'),
+  new SlashCommandBuilder().setName('ai-cost').setDescription('💸 [ADMIN] AEGIS AI cost dashboard').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
+
+  new SlashCommandBuilder().setName('servers').setDescription('🗺️ Live ARK cluster status').addStringOption(o => o.setName('map').setDescription('Filter by map name').setRequired(false)),
+  new SlashCommandBuilder().setName('map').setDescription('🗺️ Detailed info for a specific ARK map').addStringOption(o => o.setName('name').setDescription('Map').setRequired(true).addChoices(
+    {name:'The Island',value:'island'},{name:'Volcano',value:'volcano'},{name:'Extinction',value:'extinction'},
+    {name:'The Center',value:'center'},{name:'Lost Colony',value:'lostcolony'},{name:'Astraeos',value:'astraeos'},
+    {name:'Valguero',value:'valguero'},{name:'Scorched Earth',value:'scorched'},{name:'Aberration (PvP)',value:'aberration'},
+    {name:'Amissa (Patreon)',value:'amissa'},
+  )),
+  new SlashCommandBuilder().setName('info').setDescription('ℹ️ Server info, rates, and getting-started guide'),
   new SlashCommandBuilder().setName('rules').setDescription('📜 Dominion Codex rules'),
-  new SlashCommandBuilder().setName('rates').setDescription('📈 All 5× boost rates'),
-  new SlashCommandBuilder().setName('mods').setDescription('🔧 Active cluster mods'),
-  new SlashCommandBuilder().setName('wipe').setDescription('📅 Wipe schedule'),
+  new SlashCommandBuilder().setName('rates').setDescription('📈 View all 5× boost rates'),
+  new SlashCommandBuilder().setName('mods').setDescription('🔧 List active cluster mods'),
+  new SlashCommandBuilder().setName('wipe').setDescription('📅 Wipe schedule information'),
   new SlashCommandBuilder().setName('transfer-guide').setDescription('🔄 Cross-ARK transfer guide'),
-  new SlashCommandBuilder().setName('crossplay').setDescription('🎮 Crossplay connection guide'),
-  new SlashCommandBuilder().setName('patreon').setDescription('⭐ Patreon perks and Amissa access'),
+  new SlashCommandBuilder().setName('crossplay').setDescription('🎮 Crossplay connection guide (Xbox·PS·PC)'),
+  new SlashCommandBuilder().setName('patreon').setDescription('⭐ View Patreon perks and Amissa access'),
+  new SlashCommandBuilder().setName('forums').setDescription('🗂️ Forum panel quick-nav'),
   new SlashCommandBuilder().setName('tip').setDescription('💡 Random ARK survival tip'),
-  new SlashCommandBuilder().setName('dino').setDescription('🦕 ARK dino lookup').addStringOption(o=>o.setName('name').setDescription('Dino name').setRequired(true)),
+  new SlashCommandBuilder().setName('dino').setDescription('🦕 ARK dino info + tame guide').addStringOption(o => o.setName('name').setDescription('Dino name (e.g. Rex, Giga, Wyvern)').setRequired(true)),
   new SlashCommandBuilder().setName('help').setDescription('📖 Full command reference'),
   new SlashCommandBuilder().setName('ping').setDescription('🏓 Bot latency and status'),
-  // Community
-  new SlashCommandBuilder().setName('profile').setDescription('🎖️ View Dominion profile').addUserOption(o=>o.setName('user').setDescription('Member').setRequired(false)),
-  new SlashCommandBuilder().setName('rank').setDescription('📊 Your ClaveShard rank'),
-  new SlashCommandBuilder().setName('rep').setDescription('⭐ Give reputation to a member').addUserOption(o=>o.setName('user').setDescription('Who to rep').setRequired(true)).addStringOption(o=>o.setName('reason').setDescription('Why?').setRequired(false)),
-  new SlashCommandBuilder().setName('trade').setDescription('🤝 Post a trade request').addStringOption(o=>o.setName('offering').setDescription('What you offer').setRequired(true)).addStringOption(o=>o.setName('looking-for').setDescription('What you want').setRequired(true)).addStringOption(o=>o.setName('server').setDescription('Which server').setRequired(false)),
-  new SlashCommandBuilder().setName('online').setDescription('👥 Who is online across the cluster'),
-  new SlashCommandBuilder().setName('clipscore').setDescription('🎬 Submit a clip for Clip of the Week').addStringOption(o=>o.setName('url').setDescription('Link to clip').setRequired(true)).addStringOption(o=>o.setName('description').setDescription('Description').setRequired(false)),
-  new SlashCommandBuilder().setName('coords').setDescription('📍 Share in-game coordinates').addStringOption(o=>o.setName('location').setDescription('Location or coords').setRequired(true)).addStringOption(o=>o.setName('map').setDescription('Which map').setRequired(false)),
-  new SlashCommandBuilder().setName('whois').setDescription('🔍 Look up a Discord member').addUserOption(o=>o.setName('user').setDescription('Member').setRequired(true)),
-  new SlashCommandBuilder().setName('serverinfo').setDescription('🏠 Server statistics'),
-  new SlashCommandBuilder().setName('report').setDescription('🚨 Report a player or issue').addStringOption(o=>o.setName('issue').setDescription('Describe the issue').setRequired(true)).addStringOption(o=>o.setName('player').setDescription('Player involved (if any)').setRequired(false)),
-  // Admin/Events
-  new SlashCommandBuilder().setName('announce').setDescription('📢 [ADMIN] Send formatted announcement').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
-    .addStringOption(o=>o.setName('title').setDescription('Title').setRequired(true))
-    .addStringOption(o=>o.setName('message').setDescription('Body').setRequired(true))
-    .addBooleanOption(o=>o.setName('ping').setDescription('Ping @everyone?').setRequired(false)),
-  new SlashCommandBuilder().setName('event').setDescription('📅 [ADMIN] Create event announcement').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
-    .addStringOption(o=>o.setName('title').setDescription('Event title').setRequired(true))
-    .addStringOption(o=>o.setName('description').setDescription('Details').setRequired(true))
-    .addStringOption(o=>o.setName('date').setDescription('Date & time').setRequired(false))
-    .addBooleanOption(o=>o.setName('ping').setDescription('Ping @everyone?').setRequired(false)),
-  new SlashCommandBuilder().setName('giveaway').setDescription('🎉 [ADMIN] Start a giveaway').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
-    .addStringOption(o=>o.setName('prize').setDescription('Prize').setRequired(true))
-    .addIntegerOption(o=>o.setName('duration').setDescription('Duration in minutes').setRequired(true).setMinValue(1).setMaxValue(10080))
-    .addIntegerOption(o=>o.setName('winners').setDescription('Number of winners').setRequired(false).setMinValue(1).setMaxValue(10)),
-  new SlashCommandBuilder().setName('endgiveaway').setDescription('🎉 [ADMIN] End giveaway early').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
-    .addStringOption(o=>o.setName('messageid').setDescription('Message ID of giveaway').setRequired(true)),
-  // Moderation
-  new SlashCommandBuilder().setName('warn').setDescription('⚠️ [MOD] Issue formal warning').setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
-    .addUserOption(o=>o.setName('user').setDescription('Member').setRequired(true))
-    .addStringOption(o=>o.setName('reason').setDescription('Reason').setRequired(true)),
-  new SlashCommandBuilder().setName('warn-history').setDescription('📋 [MOD] View member warnings').setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
-    .addUserOption(o=>o.setName('user').setDescription('Member').setRequired(true)),
-  new SlashCommandBuilder().setName('ban').setDescription('🔨 [MOD] Ban a member').setDefaultMemberPermissions(PermissionFlagsBits.BanMembers)
-    .addUserOption(o=>o.setName('user').setDescription('Member').setRequired(true))
-    .addStringOption(o=>o.setName('reason').setDescription('Reason').setRequired(true)),
-  new SlashCommandBuilder().setName('timeout').setDescription('⏰ [MOD] Timeout a member').setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
-    .addUserOption(o=>o.setName('user').setDescription('Member').setRequired(true))
-    .addStringOption(o=>o.setName('duration').setDescription('Duration').setRequired(true).addChoices({name:'5 min',value:'5m'},{name:'1 hour',value:'1h'},{name:'6 hours',value:'6h'},{name:'24 hours',value:'24h'},{name:'7 days',value:'7d'}))
-    .addStringOption(o=>o.setName('reason').setDescription('Reason').setRequired(false)),
-  new SlashCommandBuilder().setName('role').setDescription('🎭 [ADMIN] Add/remove role').setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
-    .addUserOption(o=>o.setName('user').setDescription('Member').setRequired(true))
-    .addRoleOption(o=>o.setName('role').setDescription('Role').setRequired(true))
-    .addStringOption(o=>o.setName('action').setDescription('Action').setRequired(true).addChoices({name:'Add',value:'add'},{name:'Remove',value:'remove'})),
-  new SlashCommandBuilder().setName('ticket').setDescription('🎫 [ADMIN] Post support ticket panel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
-  new SlashCommandBuilder().setName('purge').setDescription('🗑️ [ADMIN] Delete messages in bulk').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
-    .addIntegerOption(o=>o.setName('count').setDescription('Number of messages (max 100)').setRequired(true).setMinValue(1).setMaxValue(100))
-    .addUserOption(o=>o.setName('user').setDescription('Only purge from this user').setRequired(false)),
-  new SlashCommandBuilder().setName('slowmode').setDescription('🐌 [ADMIN] Set channel slowmode').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
-    .addIntegerOption(o=>o.setName('seconds').setDescription('Seconds (0=disable)').setRequired(true).setMinValue(0).setMaxValue(21600)),
-  new SlashCommandBuilder().setName('lock').setDescription('🔒 [ADMIN] Lock/unlock channel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
-    .addStringOption(o=>o.setName('action').setDescription('Action').setRequired(true).addChoices({name:'Lock',value:'lock'},{name:'Unlock',value:'unlock'}))
-    .addStringOption(o=>o.setName('reason').setDescription('Reason').setRequired(false)),
-  // Knowledge
-  new SlashCommandBuilder().setName('know').setDescription('📚 [ADMIN] Manage AEGIS knowledge base').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
-    .addSubcommand(s=>s.setName('add').setDescription('➕ Add entry').addStringOption(o=>o.setName('category').setDescription('Category').setRequired(true)).addStringOption(o=>o.setName('title').setDescription('Title').setRequired(true)).addStringOption(o=>o.setName('content').setDescription('Content').setRequired(true)))
-    .addSubcommand(s=>s.setName('list').setDescription('📋 List entries').addStringOption(o=>o.setName('category').setDescription('Filter by category').setRequired(false)))
-    .addSubcommand(s=>s.setName('delete').setDescription('🗑️ Delete entry').addStringOption(o=>o.setName('key').setDescription('Entry key').setRequired(true))),
-  // Utils
-  new SlashCommandBuilder().setName('roll').setDescription('🎲 Roll dice').addStringOption(o=>o.setName('dice').setDescription('Notation (2d6, d20)').setRequired(false)),
-  new SlashCommandBuilder().setName('coinflip').setDescription('🪙 Flip a coin'),
-  new SlashCommandBuilder().setName('calc').setDescription('🔢 Calculate expression').addStringOption(o=>o.setName('expression').setDescription('Math expression').setRequired(true)),
-  new SlashCommandBuilder().setName('remind').setDescription('⏰ Set a reminder').addStringOption(o=>o.setName('message').setDescription('What to remind you').setRequired(true)).addStringOption(o=>o.setName('time').setDescription('When (30m, 2h, 1d)').setRequired(true)),
-  new SlashCommandBuilder().setName('poll').setDescription('📊 [ADMIN] Create a poll').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
-    .addStringOption(o=>o.setName('question').setDescription('Question').setRequired(true))
-    .addStringOption(o=>o.setName('options').setDescription('Options separated by |').setRequired(true)),
-];
 
-// ══════════════════════════════════════════════════════════════════
-// COMMAND REGISTRATION
-// ══════════════════════════════════════════════════════════════════
+  // ── SOCIAL / PROFILE ──
+  new SlashCommandBuilder().setName('profile').setDescription('🎖️ View Dominion profile').addUserOption(o => o.setName('user').setDescription('Member (blank = you)').setRequired(false)),
+  new SlashCommandBuilder().setName('rank').setDescription('📊 Your ClaveShard rank and standing'),
+  new SlashCommandBuilder().setName('rep').setDescription('⭐ Give reputation to a community member')
+    .addUserOption(o => o.setName('user').setDescription('Who to rep').setRequired(true))
+    .addStringOption(o => o.setName('reason').setDescription('Why?').setRequired(false)),
+  new SlashCommandBuilder().setName('trade').setDescription('🤝 Post a trade request')
+    .addStringOption(o => o.setName('offering').setDescription('What you offer').setRequired(true))
+    .addStringOption(o => o.setName('looking-for').setDescription('What you want').setRequired(true))
+    .addStringOption(o => o.setName('server').setDescription('Which server').setRequired(false)),
+  new SlashCommandBuilder().setName('online').setDescription('👥 Who is online across the cluster'),
+  new SlashCommandBuilder().setName('clipscore').setDescription('🎬 Submit a clip for Clip of the Week')
+    .addStringOption(o => o.setName('url').setDescription('Link to clip/image').setRequired(true))
+    .addStringOption(o => o.setName('description').setDescription('Brief description').setRequired(false)),
+  new SlashCommandBuilder().setName('coords').setDescription('📍 Share or look up in-game coordinates')
+    .addStringOption(o => o.setName('location').setDescription('Location or coords').setRequired(true))
+    .addStringOption(o => o.setName('map').setDescription('Which map').setRequired(false)),
+
+  // ── MODERATION ──
+  new SlashCommandBuilder().setName('announce').setDescription('📢 [ADMIN] Send formatted announcement').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+    .addStringOption(o => o.setName('title').setDescription('Title').setRequired(true))
+    .addStringOption(o => o.setName('message').setDescription('Body').setRequired(true))
+    .addBooleanOption(o => o.setName('ping').setDescription('Ping @everyone?').setRequired(false)),
+  new SlashCommandBuilder().setName('event').setDescription('📅 [ADMIN] Create server event').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+    .addStringOption(o => o.setName('title').setDescription('Event title').setRequired(true))
+    .addStringOption(o => o.setName('description').setDescription('Event details').setRequired(true))
+    .addStringOption(o => o.setName('date').setDescription('Date & time').setRequired(false))
+    .addBooleanOption(o => o.setName('ping').setDescription('Ping @everyone?').setRequired(false)),
+  new SlashCommandBuilder().setName('warn').setDescription('⚠️ [MOD] Issue formal warning').setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+    .addUserOption(o => o.setName('user').setDescription('Member').setRequired(true))
+    .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(true)),
+  new SlashCommandBuilder().setName('ban').setDescription('🔨 [MOD] Ban a member').setDefaultMemberPermissions(PermissionFlagsBits.BanMembers)
+    .addUserOption(o => o.setName('user').setDescription('Member').setRequired(true))
+    .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(true)),
+  new SlashCommandBuilder().setName('timeout').setDescription('⏰ [MOD] Timeout a member').setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+    .addUserOption(o => o.setName('user').setDescription('Member').setRequired(true))
+    .addStringOption(o => o.setName('duration').setDescription('Duration').setRequired(true).addChoices({name:'5 min',value:'5m'},{name:'1 hour',value:'1h'},{name:'6 hours',value:'6h'},{name:'24 hours',value:'24h'},{name:'7 days',value:'7d'}))
+    .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)),
+  new SlashCommandBuilder().setName('role').setDescription('🎭 [ADMIN] Add/remove role').setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
+    .addUserOption(o => o.setName('user').setDescription('Member').setRequired(true))
+    .addRoleOption(o => o.setName('role').setDescription('Role').setRequired(true))
+    .addStringOption(o => o.setName('action').setDescription('Action').setRequired(true).addChoices({name:'Add',value:'add'},{name:'Remove',value:'remove'})),
+  new SlashCommandBuilder().setName('ticket').setDescription('🎫 [ADMIN] Post support ticket panel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+  new SlashCommandBuilder().setName('report').setDescription('🚨 Report a player or issue to Council')
+    .addStringOption(o => o.setName('reason').setDescription('What happened?').setRequired(true))
+    .addUserOption(o => o.setName('player').setDescription('Player to report').setRequired(false))
+    .addStringOption(o => o.setName('server').setDescription('Which server?').setRequired(false)),
+  new SlashCommandBuilder().setName('warn-history').setDescription('📋 [MOD] View warning history for a member').setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+    .addUserOption(o => o.setName('user').setDescription('Member').setRequired(true)),
+  new SlashCommandBuilder().setName('purge').setDescription('🗑️ [ADMIN] Delete messages in bulk').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+    .addIntegerOption(o => o.setName('count').setDescription('Number of messages (max 100)').setRequired(true).setMinValue(1).setMaxValue(100))
+    .addUserOption(o => o.setName('user').setDescription('Only purge from this user').setRequired(false)),
+  new SlashCommandBuilder().setName('slowmode').setDescription('🐌 [ADMIN] Set channel slowmode').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
+    .addIntegerOption(o => o.setName('seconds').setDescription('0 to disable, max 21600').setRequired(true).setMinValue(0).setMaxValue(21600)),
+  new SlashCommandBuilder().setName('lock').setDescription('🔒 [ADMIN] Lock/unlock a channel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
+    .addStringOption(o => o.setName('action').setDescription('Lock or unlock').setRequired(true).addChoices({name:'Lock',value:'lock'},{name:'Unlock',value:'unlock'}))
+    .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)),
+
+  // ── TOOLS ──
+  new SlashCommandBuilder().setName('poll').setDescription('📊 [ADMIN] Create a poll').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+    .addStringOption(o => o.setName('question').setDescription('Question').setRequired(true))
+    .addStringOption(o => o.setName('options').setDescription('Options separated by |').setRequired(true)),
+  new SlashCommandBuilder().setName('giveaway').setDescription('🎁 [ADMIN] Start a giveaway').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+    .addStringOption(o => o.setName('prize').setDescription('Prize').setRequired(true))
+    .addStringOption(o => o.setName('duration').setDescription('Duration').setRequired(true).addChoices({name:'30 min',value:'1800'},{name:'1 hour',value:'3600'},{name:'6 hours',value:'21600'},{name:'24 hours',value:'86400'},{name:'7 days',value:'604800'}))
+    .addIntegerOption(o => o.setName('winners').setDescription('Winners').setRequired(false).setMinValue(1).setMaxValue(10))
+    .addRoleOption(o => o.setName('required_role').setDescription('Required role to enter').setRequired(false)),
+  new SlashCommandBuilder().setName('remind').setDescription('⏰ Set a reminder')
+    .addStringOption(o => o.setName('message').setDescription('What to remind you').setRequired(true))
+    .addStringOption(o => o.setName('time').setDescription('When (30m, 2h, 1d)').setRequired(true)),
+  new SlashCommandBuilder().setName('roll').setDescription('🎲 Roll dice').addStringOption(o => o.setName('dice').setDescription('Notation (2d6, d20, 3d8+5)').setRequired(false)),
+  new SlashCommandBuilder().setName('coinflip').setDescription('🪙 Flip a coin'),
+  new SlashCommandBuilder().setName('calc').setDescription('🔢 Calculate expression').addStringOption(o => o.setName('expression').setDescription('Math expression').setRequired(true)),
+  new SlashCommandBuilder().setName('whois').setDescription('🔍 Look up a Discord member').addUserOption(o => o.setName('user').setDescription('Member').setRequired(true)),
+  new SlashCommandBuilder().setName('serverinfo').setDescription('🏠 Server statistics and info'),
+
+  // ── MONITORING ──
+  new SlashCommandBuilder().setName('setup-monitoring').setDescription('⚙️ [ADMIN] Deploy full live cluster monitor').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+  new SlashCommandBuilder().setName('monitor-refresh').setDescription('🔄 [ADMIN] Force refresh cluster stats').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+  new SlashCommandBuilder().setName('monitor-add').setDescription('➕ [ADMIN] Add server to monitor').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
+    .addStringOption(o => o.setName('name').setDescription('Display name').setRequired(true))
+    .addStringOption(o => o.setName('ip').setDescription('Server IP').setRequired(true))
+    .addIntegerOption(o => o.setName('port').setDescription('Port').setRequired(true))
+    .addStringOption(o => o.setName('emoji').setDescription('Emoji').setRequired(false))
+    .addBooleanOption(o => o.setName('pvp').setDescription('PvP?').setRequired(false))
+    .addBooleanOption(o => o.setName('patreon').setDescription('Patreon-only?').setRequired(false)),
+
+  // ── BEACON SENTINEL ──
+  new SlashCommandBuilder().setName('beacon-setup').setDescription('🔐 [ADMIN] Authenticate with Beacon Sentinel').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+  new SlashCommandBuilder().setName('tribes').setDescription('🏛️ List all tribes across the cluster').addStringOption(o => o.setName('server').setDescription('Filter by server name').setRequired(false)),
+  new SlashCommandBuilder().setName('player-lookup').setDescription('🔍 [MOD] Look up player in Beacon').setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers).addStringOption(o => o.setName('name').setDescription('Player name').setRequired(true)),
+  new SlashCommandBuilder().setName('sentinel-bans').setDescription('🚫 [ADMIN] Beacon Sentinel ban list').setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
+
+  // Music injected below
+  ...(musicRuntime?.MUSIC_COMMANDS || []),
+].map(c => typeof c.toJSON === 'function' ? c.toJSON() : c);
+
 async function registerCommands() {
-  if (!DISCORD_CLIENT_ID) { console.warn('⚠️  DISCORD_CLIENT_ID missing — skipping registration'); return; }
-  const rest = new REST().setToken(DISCORD_BOT_TOKEN);
-  const musicCmds = musicRuntime?.MUSIC_COMMANDS || [];
-  const allJson   = [...ALL_COMMANDS.map(c=>c.toJSON()), ...musicCmds];
+  if (!DISCORD_CLIENT_ID || !DISCORD_GUILD_ID) { console.warn('⚠️  CLIENT_ID/GUILD_ID missing'); return; }
   try {
-    console.log(`📡 Registering ${allJson.length} slash commands...`);
-    if (DISCORD_GUILD_ID) {
-      await rest.put(Routes.applicationGuildCommands(DISCORD_CLIENT_ID,DISCORD_GUILD_ID),{body:allJson});
-      console.log(`✅ Guild commands registered (${allJson.length})`);
-    } else {
-      await rest.put(Routes.applicationCommands(DISCORD_CLIENT_ID),{body:allJson});
-      console.log(`✅ Global commands registered (${allJson.length})`);
-    }
-  } catch(e) { console.error('❌ Registration failed:',e.message); }
+    const rest = new REST({ version: '10' }).setToken(DISCORD_BOT_TOKEN);
+    await rest.put(Routes.applicationGuildCommands(DISCORD_CLIENT_ID, DISCORD_GUILD_ID), { body: cmds });
+    console.log(`✅ ${cmds.length} commands registered`);
+  } catch (e) { console.error('❌ Command reg:', e.message); }
 }
 
-// ══════════════════════════════════════════════════════════════════
-// SINGLE INTERACTION HANDLER
-// ══════════════════════════════════════════════════════════════════
-bot.on(Events.InteractionCreate, async interaction => {
+// ─── WALLET HANDLER ────────────────────────────────────────────────────
+async function handleWallet(i) {
+  const sub    = i.options.getSubcommand();
+  const target = i.options.getUser('user');
+  const amount = i.options.getInteger('amount') || 0;
+  const reason = i.options.getString('reason') || '';
+  const note   = i.options.getString('note')   || '';
+  const count  = i.options.getInteger('count') || 15;
+  const me     = i.user;
 
-  // ── MUSIC BUTTONS ──
-  if (interaction.isButton() && musicRuntime?.isMusicButton(interaction.customId)) {
-    return musicRuntime.handleMusicButton(interaction, bot);
+  if (sub === 'balance') {
+    const who = target || me;
+    const w   = await getWallet(who.id, who.username);
+    return i.editReply({ embeds: [walletEmbed(`💎 ${who.username}'s Wallet`, w, C.gold).setThumbnail(who.displayAvatarURL())] });
   }
-  // ── MUSIC SELECT ──
-  if (interaction.isStringSelectMenu() && musicRuntime?.isMusicSelect(interaction.customId)) {
-    return musicRuntime.handleMusicSelect(interaction, bot);
+  if (sub === 'deposit') {
+    const w = await depositToBank(me.id, me.username, amount);
+    return i.editReply({ embeds: [walletEmbed(`🏦 Deposited ${amount.toLocaleString()} 💎`, w, C.gr).setDescription(`Moved **${amount.toLocaleString()}** shards wallet → bank.`)] });
   }
-  // ── GIVEAWAY BUTTON ──
-  if (interaction.isButton() && interaction.customId === 'giveaway_enter') {
-    const gw = activeGiveaways.get(interaction.message.id);
-    if (!gw) return interaction.reply({content:'⚠️ Giveaway no longer active.',ephemeral:true});
-    if (Date.now() > gw.endTime) return interaction.reply({content:'⏰ Giveaway has ended.',ephemeral:true});
-    if (gw.entries.has(interaction.user.id)) return interaction.reply({content:'✅ Already entered!',ephemeral:true});
-    gw.entries.add(interaction.user.id);
-    return interaction.reply({content:`🎉 You entered the **${gw.prize}** giveaway! Good luck!`,ephemeral:true});
+  if (sub === 'withdraw') {
+    const w = await withdrawFromBank(me.id, me.username, amount);
+    return i.editReply({ embeds: [walletEmbed(`💸 Withdrew ${amount.toLocaleString()} 💎`, w, C.cy)] });
   }
-  // ── TICKET BUTTON OPEN ──
-  if (interaction.isButton() && interaction.customId === 'ticket_open') {
-    await interaction.deferReply({ephemeral:true});
-    const safeName = interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g,'-').slice(0,20);
-    const existing = interaction.guild.channels.cache.find(c=>c.name===`ticket-${safeName}`);
-    if (existing) return interaction.editReply(`⚠️ You already have an open ticket: ${existing}`);
-    try {
-      const ch = await interaction.guild.channels.create({
-        name:`ticket-${safeName}`, type:ChannelType.GuildText,
-        permissionOverwrites:[
-          {id:interaction.guild.roles.everyone, deny:[PermissionFlagsBits.ViewChannel]},
-          {id:interaction.user.id, allow:[PermissionFlagsBits.ViewChannel,PermissionFlagsBits.SendMessages,PermissionFlagsBits.ReadMessageHistory]},
-          {id:interaction.guild.members.me.id, allow:[PermissionFlagsBits.ViewChannel,PermissionFlagsBits.SendMessages,PermissionFlagsBits.ManageChannels]},
-          ...(ROLE_ADMIN_ID?[{id:ROLE_ADMIN_ID,allow:[PermissionFlagsBits.ViewChannel,PermissionFlagsBits.SendMessages]}]:[]),
-          ...(ROLE_HELPER_ID?[{id:ROLE_HELPER_ID,allow:[PermissionFlagsBits.ViewChannel,PermissionFlagsBits.SendMessages]}]:[]),
-        ],
-      });
-      await ch.send({
-        embeds:[base('🎫 Support Ticket',C.cy).setDescription(`Hello ${interaction.user}! A staff member will assist you shortly.\n\nDescribe your issue in detail.`).setFooter(FT)],
-        components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('ticket_close').setLabel('🔒 Close Ticket').setStyle(ButtonStyle.Danger))],
-      });
-      return interaction.editReply({content:`✅ Ticket created: ${ch}`});
-    } catch(e) { return interaction.editReply(`⚠️ Error: ${e.message}`); }
+  if (sub === 'transfer') {
+    if (!target) return i.editReply('⚠️ Specify a recipient.');
+    const r = await transferShards(me.id, me.username, target.id, target.username, amount);
+    return i.editReply({ embeds: [base(`➡️ Transferred ${amount.toLocaleString()} 💎`, C.cy)
+      .setDescription(`Sent **${amount.toLocaleString()}** to **${target.username}**${note ? `\n📝 *"${note}"*` : ''}`)
+      .addFields({name:'Your wallet',value:`${r.sent.toLocaleString()} 💎`,inline:true},{name:`${target.username}'s wallet`,value:`${r.received.toLocaleString()} 💎`,inline:true})] });
   }
-  // ── TICKET CLOSE ──
-  if (interaction.isButton() && interaction.customId === 'ticket_close') {
-    if (!isMod(interaction.member)) return interaction.reply({content:'⛔ Staff only.',ephemeral:true});
-    await interaction.reply('🔒 Closing ticket in 5 seconds...');
-    setTimeout(()=>interaction.channel.delete().catch(()=>{}),5000);
+  if (sub === 'history') {
+    const who = target || me;
+    if (target && target.id !== me.id && !isAdmin(i.member)) return i.editReply('⛔ Admins only can view others.');
+    const rows = await getHistory(who.id, count);
+    if (!rows.length) return i.editReply(`📭 No history for **${who.username}** yet.`);
+    const lines = rows.map(r => {
+      const ico  = TX_ICO[r.action] || '💠';
+      const sign = ['transfer_in','grant','earn','daily_claim'].includes(r.action) ? '+' : '-';
+      const ts   = `<t:${Math.floor(new Date(r.created_at).getTime()/1000)}:R>`;
+      return `${ico} **${sign}${r.amount.toLocaleString()}** · ${r.note || r.action} · ${ts}`;
+    }).join('\n');
+    return i.editReply({ embeds: [base(`🧾 ${who.username}'s History`, C.pl).setDescription(lines.slice(0,3900))] });
+  }
+  if (sub === 'leaderboard') {
+    const rows = await getLeaderboard(10);
+    if (!rows.length) return i.editReply('📭 No wallets yet.');
+    const med   = ['🥇','🥈','🥉'];
+    const lines = rows.map((r,idx) => {
+      const total = (r.wallet_balance||0)+(r.bank_balance||0);
+      return `${med[idx]||`**${idx+1}.**`} **${r.discord_tag||r.discord_id}** — **${total.toLocaleString()}**`;
+    }).join('\n');
+    return i.editReply({ embeds: [base('🏆 ClaveShard Leaderboard', C.gold).setDescription(lines)] });
+  }
+  if (sub === 'supply') {
+    const s = await getSupply();
+    return i.editReply({ embeds: [base('📊 Supply', C.pk).addFields({name:'💎 Wallets',value:s.walletTotal.toLocaleString(),inline:true},{name:'🏦 Banks',value:s.bankTotal.toLocaleString(),inline:true},{name:'∑ Total',value:(s.walletTotal+s.bankTotal).toLocaleString(),inline:true},{name:'👥 Holders',value:s.holders+'',inline:true})] });
+  }
+  if (sub === 'grant') {
+    if (!isAdmin(i.member)) return i.editReply('⛔ Admins only.');
+    if (!target) return i.editReply('⚠️ Specify target.');
+    const w = await grantShards(target.id, target.username, amount, reason||'Admin grant', me.id, me.username);
+    try { await target.send({ embeds: [base('💎 ClaveShard Received!',C.gr).setDescription(`**${me.username}** granted you **${amount.toLocaleString()} 💎**\n📝 *${reason||'Admin grant'}*`)] }); } catch {}
+    return i.editReply({ embeds: [walletEmbed(`🎁 Granted ${amount.toLocaleString()} to ${target.username}`,w,C.gr).addFields({name:'📝 Reason',value:reason||'No reason'})] });
+  }
+  if (sub === 'deduct') {
+    if (!isAdmin(i.member)) return i.editReply('⛔ Admins only.');
+    if (!target) return i.editReply('⚠️ Specify target.');
+    const w = await deductShards(target.id, target.username, amount, reason||'Admin deduct', me.id, me.username);
+    return i.editReply({ embeds: [walletEmbed(`⬇️ Deducted ${amount.toLocaleString()} from ${target.username}`,w,C.rd).addFields({name:'📝 Reason',value:reason||'No reason'})] });
+  }
+}
+
+// ─── MAIN INTERACTION HANDLER — ZERO ORPHANS ───────────────────────────
+bot.on(Events.InteractionCreate, async i => {
+
+  // ── MUSIC BUTTONS + SELECTS ──
+  if (musicRuntime) {
+    if (i.isButton() && musicRuntime.isMusicButton(i.customId)) return musicRuntime.handleMusicButton(i, bot);
+    if (i.isStringSelectMenu() && musicRuntime.isMusicSelect(i.customId)) return musicRuntime.handleMusicSelect(i, bot);
+  }
+
+  // ── BUTTON HANDLERS ──
+  if (i.isButton()) {
+    if (i.customId === 'monitor_refresh') {
+      await i.deferReply({ ephemeral: true });
+      const state = monitorState.get(i.guild.id);
+      if (!state) return i.editReply('⚠️ No monitor. Run `/setup-monitoring` first.');
+      await refreshMonitor(i.guild);
+      return i.editReply('✅ Cluster stats refreshed.');
+    }
+
+    if (i.customId === 'monitor_players') {
+      await i.deferReply({ ephemeral: true });
+      const statuses = await fetchServerStatus(MONITOR_SERVERS);
+      const active   = statuses.filter(s => s.status === 'online' && s.players > 0);
+      if (!active.length) return i.editReply('👻 No players online right now.');
+      const total  = active.reduce((sum,s) => sum+s.players, 0);
+      const fields = active.map(s => ({name:`${s.emoji} ${s.name}`,value:`${s.players}/${s.maxPlayers} online`,inline:true}));
+      return i.editReply({ embeds: [base(`👥 ${total} Online`, C.cy).addFields(...fields.slice(0,25)).setTimestamp()] });
+    }
+
+    if (i.customId === 'open_ticket') {
+      try {
+        await i.deferReply({ ephemeral: true });
+        const name = `ticket-${i.user.username.toLowerCase().replace(/[^a-z0-9]/g,'-')}-${Date.now().toString(36)}`;
+        const ch   = await i.guild.channels.create({
+          name, topic: `Support — ${i.user.tag} — Opened <t:${Math.floor(Date.now()/1000)}:F>`,
+          permissionOverwrites: [
+            { id: i.guild.roles.everyone, deny: [PermissionFlagsBits.ViewChannel] },
+            { id: i.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles] },
+            ...(ROLE_ADMIN_ID ? [{ id: ROLE_ADMIN_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }] : []),
+            ...(ROLE_OWNER_ID ? [{ id: ROLE_OWNER_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }] : []),
+          ],
+        });
+        const closeRow = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('close_ticket').setLabel('🔒 Close Ticket').setStyle(ButtonStyle.Danger));
+        await ch.send({ content: `<@${i.user.id}> Welcome! Describe your issue below.`, embeds: [base(`🎫 Ticket — ${i.user.username}`,C.gr).addFields({name:'⏰ Opened',value:`<t:${Math.floor(Date.now()/1000)}:F>`,inline:true},{name:'⚡ Response',value:'Within 24 hours',inline:true})], components: [closeRow] });
+        return i.editReply({ content: `✅ Ticket: ${ch}` });
+      } catch (e) { try { await i.editReply({ content: `⚠️ ${e.message}` }); } catch {} }
+    }
+
+    if (i.customId === 'close_ticket') {
+      if (!isMod(i.member)) { await i.reply({ content: '⛔ Moderators only.', ephemeral: true }); return; }
+      await i.reply({ content: '🔒 Closing in 5 seconds...' });
+      setTimeout(() => i.channel.delete().catch(() => {}), 5000);
+    }
     return;
   }
 
-  if (!interaction.isChatInputCommand()) return;
-  const { commandName: cmd } = interaction;
-
-  // ── MUSIC COMMANDS ──
-  if ((cmd==='music'||cmd==='setup-music') && musicRuntime) {
-    await interaction.deferReply();
-    return musicRuntime.handleMusicCommand(interaction, bot);
-  }
-
-  await interaction.deferReply();
+  if (!i.isChatInputCommand()) return;
+  const cmd = i.commandName;
+  try { await i.deferReply(); } catch { return; }
 
   try {
-    // ──────────────────────────────────────────────────────────────
-    // ECONOMY COMMANDS
-    // ──────────────────────────────────────────────────────────────
-    if (cmd==='wallet'||cmd==='curr') {
-      const sub=interaction.options.getSubcommand();
-      const target=interaction.options.getUser('user');
-      const amount=interaction.options.getInteger('amount')||0;
-      const reason=interaction.options.getString('reason')||'';
-      const note=interaction.options.getString('note')||'';
-      const count=interaction.options.getInteger('count')||15;
-      const me=interaction.user;
+
+    // ── MUSIC COMMANDS ──
+    if (musicRuntime) {
+      const handled = await musicRuntime.handleMusicCommand(i, bot).catch(e => {
+        console.error('[Music cmd]', e.message);
+        i.editReply('⚠️ Music error: ' + e.message.slice(0,120)).catch(() => {});
+        return true;
+      });
+      if (handled) return;
+    }
+
+    // ── ECONOMY ──
+    if (cmd === 'wallet' || cmd === 'curr') return await handleWallet(i);
+
+    if (cmd === 'clvsd') {
+      if (!isAdmin(i.member)) return i.editReply('⛔ Admins only.');
+      const sub    = i.options.getSubcommand();
+      const target = i.options.getUser('user');
+      const amount = i.options.getInteger('amount') || 0;
+      const reason = i.options.getString('reason') || 'Admin action';
+      const me     = i.user;
+
+      if (sub === 'grant') {
+        const w = await grantShards(target.id, target.username, amount, reason, me.id, me.username);
+        try { await target.send({ embeds: [base('💎 Shards Received!',C.gr).setDescription(`**${me.username}** granted you **${amount.toLocaleString()} 💎**\n📝 *${reason}*`)] }); } catch {}
+        return i.editReply({ embeds: [walletEmbed(`🎁 Granted ${amount.toLocaleString()} to ${target.username}`,w,C.gr).addFields({name:'📝 Reason',value:reason,inline:true},{name:'👮 By',value:me.username,inline:true})] });
+      }
+      if (sub === 'deduct') {
+        const w = await deductShards(target.id, target.username, amount, reason, me.id, me.username);
+        return i.editReply({ embeds: [walletEmbed(`⬇️ Deducted ${amount.toLocaleString()} from ${target.username}`,w,C.rd)] });
+      }
+      if (sub === 'check') {
+        const w    = await getWallet(target.id, target.username);
+        const rows = await getHistory(target.id, 5);
+        const emb  = walletEmbed(`🔍 Admin — ${target.username}`,w,C.cy).setThumbnail(target.displayAvatarURL());
+        if (rows.length) emb.addFields({name:'🕓 Last 5',value:rows.map(r=>`${TX_ICO[r.action]||'💠'} **${['transfer_in','grant','earn','daily_claim'].includes(r.action)?'+':'-'}${r.amount.toLocaleString()}** · ${r.note||r.action}`).join('\n')});
+        return i.editReply({ embeds: [emb] });
+      }
+      if (sub === 'set') {
+        await getWallet(target.id, target.username);
+        const { data: cur } = await sb.from('aegis_wallets').select('wallet_balance').eq('discord_id', target.id).single();
+        const prev = cur?.wallet_balance || 0;
+        const { data, error } = await sb.from('aegis_wallets').update({ wallet_balance: amount, updated_at: new Date().toISOString() }).eq('discord_id', target.id).select().single();
+        if (error) return i.editReply(`⚠️ ${error.message}`);
+        await logTx(target.id, target.username, 'admin_set', Math.abs(amount-prev), amount, `Set to ${amount} — ${reason}`, me.id, me.username);
+        return i.editReply({ embeds: [base(`🔧 Wallet Set — ${target.username}`,C.pk).addFields({name:'⬅️ Previous',value:`${prev.toLocaleString()} 💎`,inline:true},{name:'➡️ New',value:`${amount.toLocaleString()} 💎`,inline:true},{name:'📝 Reason',value:reason})] });
+      }
+      if (sub === 'top') {
+        const rows = await getLeaderboard(15);
+        const med  = ['🥇','🥈','🥉'];
+        const lines = rows.map((r,idx) => `${med[idx]||`**${idx+1}.**`} **${r.discord_tag||r.discord_id}** — **${((r.wallet_balance||0)+(r.bank_balance||0)).toLocaleString()}**`).join('\n');
+        return i.editReply({ embeds: [base('🏆 Top 15 Holders',C.gold).setDescription(lines||'No wallets yet.')] });
+      }
+      if (sub === 'stats') {
+        const s = await getSupply();
+        const { data: recent } = await sb.from('aegis_wallet_ledger').select('action,amount,created_at').order('created_at',{ascending:false}).limit(5);
+        const emb = base('📊 Economy Stats',C.pk).addFields({name:'💎 Wallets',value:s.walletTotal.toLocaleString(),inline:true},{name:'🏦 Banks',value:s.bankTotal.toLocaleString(),inline:true},{name:'∑ Total',value:(s.walletTotal+s.bankTotal).toLocaleString(),inline:true},{name:'👥 Holders',value:s.holders+'',inline:true});
+        if (recent?.length) emb.addFields({name:'🕓 Recent',value:recent.map(r=>`${TX_ICO[r.action]||'💠'} **${r.action}** · ${r.amount.toLocaleString()}`).join('\n')});
+        return i.editReply({ embeds: [emb] });
+      }
+      if (sub === 'usage') {
+        if (!sb || !sbOk()) return i.editReply('⚠️ Database unavailable.');
+        const { data } = await sb.from('aegis_ai_usage').select('model,input_tokens,output_tokens,used_search,created_at').order('created_at',{ascending:false}).limit(50);
+        if (!data?.length) return i.editReply('📭 No AI usage logged yet.');
+        const totIn  = data.reduce((s,r)=>s+(r.input_tokens||0),0);
+        const totOut = data.reduce((s,r)=>s+(r.output_tokens||0),0);
+        const haiku  = data.filter(r=>r.model?.includes('haiku'));
+        const sonnet = data.filter(r=>r.model?.includes('sonnet'));
+        const searched = data.filter(r=>r.used_search).length;
+        // Approximate cost (Haiku: $0.80/$4 per 1M; Sonnet: $3/$15 per 1M)
+        const haikuCost  = ((haiku.reduce((s,r)=>s+(r.input_tokens||0),0)*0.80 + haiku.reduce((s,r)=>s+(r.output_tokens||0),0)*4) / 1_000_000);
+        const sonnetCost = ((sonnet.reduce((s,r)=>s+(r.input_tokens||0),0)*3 + sonnet.reduce((s,r)=>s+(r.output_tokens||0),0)*15) / 1_000_000);
+        return i.editReply({ embeds: [base('🧠 AEGIS AI Usage (last 50)',C.cy)
+          .addFields(
+            {name:'📊 Total Calls',value:`${data.length}`,inline:true},
+            {name:'🔤 Input Tokens',value:totIn.toLocaleString(),inline:true},
+            {name:'📝 Output Tokens',value:totOut.toLocaleString(),inline:true},
+            {name:'⚡ Haiku Calls',value:`${haiku.length} (~$${haikuCost.toFixed(4)})`,inline:true},
+            {name:'🧠 Sonnet Calls',value:`${sonnet.length} (~$${sonnetCost.toFixed(4)})`,inline:true},
+            {name:'🔍 With Search',value:`${searched}`,inline:true},
+            {name:'💰 Est. Cost',value:`~$${(haikuCost+sonnetCost).toFixed(4)}`,inline:true},
+          )] });
+      }
+    }
+
+    if (cmd === 'weekly') {
       try {
-        if(sub==='balance'){const who=target||me;const w=await getWallet(who.id,who.tag||who.username);return interaction.editReply({embeds:[walletEmbed(`💎 ${who.username}'s Wallet`,w,C.gold)]});}
-        if(sub==='deposit'){const w=await depositToBank(me.id,me.tag||me.username,amount);return interaction.editReply({embeds:[walletEmbed(`🏦 Deposited ${amount} 💎`,w,C.gr).setDescription(`Moved **${amount}** shards wallet → bank.`)]});}
-        if(sub==='withdraw'){const w=await withdrawFromBank(me.id,me.tag||me.username,amount);return interaction.editReply({embeds:[walletEmbed(`💸 Withdrew ${amount} 💎`,w,C.cy)]});}
-        if(sub==='transfer'){if(!target)return interaction.editReply('⚠️ Specify a recipient.');const r=await transferShards(me.id,me.tag||me.username,target.id,target.tag||target.username,amount);return interaction.editReply({embeds:[base(`➡️ Transferred ${amount} 💎`,C.cy).setDescription(`Sent **${amount}** to **${target.username}**${note?`\n📝 *"${note}"*`:''}`).addFields({name:'Your wallet',value:`${r.sent.toLocaleString()} 💎`,inline:true},{name:`${target.username}'s wallet`,value:`${r.received.toLocaleString()} 💎`,inline:true})]});}
-        if(sub==='history'){const who=target||me;if(target&&target.id!==me.id&&!isAdmin(interaction.member))return interaction.editReply('⛔ Admins only for other users.');const rows=await getTxHistory(who.id,count);if(!rows.length)return interaction.editReply(`📭 No history for **${who.username}** yet.`);const lines=rows.map(r=>`${TX_ICO[r.action]||'💠'} **${['transfer_in','grant','daily_claim'].includes(r.action)?'+':'-'}${r.amount.toLocaleString()}** · ${r.note||r.action} · <t:${Math.floor(new Date(r.created_at).getTime()/1000)}:R>`).join('\n');return interaction.editReply({embeds:[base(`🧾 ${who.username}'s History`,C.pl).setDescription(lines.slice(0,3900))]});}
-        if(sub==='leaderboard'){const rows=await getLeaderboard(10);if(!rows.length)return interaction.editReply('📭 No wallets yet.');const med=['🥇','🥈','🥉'];const lines=rows.map((r,i)=>`${med[i]||`**${i+1}.**`} **${r.discord_tag||r.discord_id}** — **${((r.wallet_balance||0)+(r.bank_balance||0)).toLocaleString()}** 💎`).join('\n');return interaction.editReply({embeds:[base('🏆 ClaveShard Leaderboard',C.gold).setDescription(lines)]});}
-        if(sub==='supply'){const s=await getSupply();return interaction.editReply({embeds:[base('📊 Supply',C.pk).addFields({name:'💎 Wallets',value:s.walletTotal.toLocaleString(),inline:true},{name:'🏦 Banks',value:s.bankTotal.toLocaleString(),inline:true},{name:'∑ Total',value:(s.walletTotal+s.bankTotal).toLocaleString(),inline:true},{name:'👥 Holders',value:s.holders+'',inline:true})]});}
-        if(sub==='grant'){if(!isAdmin(interaction.member))return interaction.editReply('⛔ Admins only.');if(!target)return interaction.editReply('⚠️ Specify target.');const w=await grantShards(target.id,target.tag||target.username,amount,reason||'Admin grant',me.id,me.tag||me.username);try{await target.send({embeds:[base('💎 ClaveShard Received!',C.gr).setDescription(`**${me.username}** granted you **${amount.toLocaleString()} 💎**\n📝 *${reason||'Admin grant'}*`)]});}catch{}return interaction.editReply({embeds:[walletEmbed(`🎁 Granted ${amount} to ${target.username}`,w,C.gr)]});}
-        if(sub==='deduct'){if(!isAdmin(interaction.member))return interaction.editReply('⛔ Admins only.');if(!target)return interaction.editReply('⚠️ Specify target.');const w=await deductShards(target.id,target.tag||target.username,amount,reason||'Admin deduct',me.id,me.tag||me.username);return interaction.editReply({embeds:[walletEmbed(`⬇️ Deducted ${amount} from ${target.username}`,w,C.rd)]});}
-      } catch(e){return interaction.editReply(`⚠️ ${e.message}`);}
+        const { data: w, amount, streak } = await claimWeekly(i.user.id, i.user.username);
+        return i.editReply({ embeds: [base('🌟 Weekly ClaveShard Claimed!',C.gold)
+          .setThumbnail(i.user.displayAvatarURL())
+          .setDescription(`**${i.user.username}** claimed their weekly reward!`)
+          .addFields({name:'💎 Claimed',value:`**+${amount.toLocaleString()} shards**`,inline:true},{name:'🔥 Streak',value:`Week ${streak}`,inline:true},{name:'💰 Balance',value:`${(w.wallet_balance||0).toLocaleString()} shards`,inline:true})
+          .setFooter({text:`Week ${streak} · Next claim in 7 days!`})] });
+      } catch (e) { return i.editReply(e.message); }
     }
 
-    if (cmd==='weekly') {
-      try{const r=await claimWeekly(interaction.user.id,interaction.user.tag||interaction.user.username);return interaction.editReply({embeds:[base('🌟 Weekly ClaveShard Claimed!',C.gold).setDescription(`**${interaction.user.username}** claimed their weekly reward!`).addFields({name:'💎 Claimed',value:`**+${r.amount}**`,inline:true},{name:'🔥 Streak',value:`Week ${r.streak}`,inline:true},{name:'💰 Balance',value:`${(r.data.wallet_balance||0).toLocaleString()}`,inline:true})]});}
-      catch(e){return interaction.editReply(`⚠️ ${e.message}`);}
+    if (cmd === 'leaderboard') {
+      if (!sb) return i.editReply('⚠️ Economy offline.');
+      const rows = await getLeaderboard(10);
+      if (!rows?.length) return i.editReply({ embeds: [base('🏆 Leaderboard',C.gold).setDescription('No data yet!')] });
+      const medals = ['🥇','🥈','🥉','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟'];
+      const lines  = rows.map((r,idx) => `${medals[idx]} **${r.discord_tag||'Unknown'}** — **${((r.wallet_balance||0)+(r.bank_balance||0)).toLocaleString()}** 💎`).join('\n');
+      return i.editReply({ embeds: [base('🏆 ClaveShard Leaderboard',C.gold).setDescription(lines)] });
     }
 
-    if (cmd==='leaderboard') {
-      try{const lb=await getLeaderboard(10);return interaction.editReply({embeds:[base('🏆 ClaveShard Leaderboard',C.gold).setDescription(lb.map((w,i)=>`${['🥇','🥈','🥉'][i]||`**${i+1}.**`} ${w.discord_tag||w.discord_id} — **${(w.wallet_balance||0).toLocaleString()}** 💎`).join('\n'))]});}
-      catch{return interaction.editReply({embeds:[base('🏆 Leaderboard',C.gold).setDescription('_Leaderboard unavailable._')]});}
+    if (cmd === 'give') {
+      if (!isAdmin(i.member)) return i.editReply('⛔ Admins only.');
+      const target = i.options.getUser('user');
+      const amount = i.options.getInteger('amount');
+      const reason = i.options.getString('reason') || 'Admin grant';
+      const w = await grantShards(target.id, target.username, amount, reason, i.user.id, i.user.username);
+      return i.editReply({ embeds: [base(`✅ Gave ${amount.toLocaleString()} 💎 to ${target.username}`,C.gr).setDescription(`Reason: ${reason}`)] });
     }
 
-    if (cmd==='give') {
-      if(!isAdmin(interaction.member))return interaction.editReply('⛔ Admin only.');
-      try{const target=interaction.options.getUser('user'),amount=interaction.options.getInteger('amount'),reason=interaction.options.getString('reason')||'Admin grant';const w=await grantShards(target.id,target.tag||target.username,amount,reason,interaction.user.id,interaction.user.tag||interaction.user.username);return interaction.editReply({embeds:[walletEmbed(`🎁 Granted to ${target.username}`,w,C.gr).setDescription(`+**${amount}** 💎 · ${reason}`)]});}
-      catch(e){return interaction.editReply(`⚠️ ${e.message}`);}
+    if (cmd === 'order') {
+      const tier = i.options.getInteger('tier'), plat = i.options.getString('platform'), srv = i.options.getString('server'), notes = i.options.getString('notes') || 'None';
+      await axios.post(`${API_BASE}/orders`, { username: i.user.username, discordId: i.user.id, discordTag: i.user.username, item: `Tier ${tier} ClaveShard Pack`, cost: 'See website', mapName: srv, specifics: `Platform: ${plat}\n${notes}` }).catch(() => {});
+      return i.editReply({ embeds: [base('📦 Order Received!',C.gold)
+        .setDescription(`Your Tier **${tier}** order is in the Council queue.`)
+        .addFields({name:'🎮 Platform',value:plat,inline:true},{name:'🗺️ Server',value:srv,inline:true},{name:'📝 Notes',value:notes},{name:'💳 Payment',value:'**$TheConclaveDominion** CashApp\n**$ANLIKESEF** Chime\n\nInclude your username in the payment note!'},{name:'⏱️ Fulfillment',value:'Council fulfills within 24-72 hours.'})
+      ] });
     }
 
-    if (cmd==='clvsd') {
-      if(!isAdmin(interaction.member))return interaction.editReply('⛔ Admin only.');
-      const sub=interaction.options.getSubcommand();
-      try{
-        if(sub==='grant'){const t=interaction.options.getUser('user'),a=interaction.options.getInteger('amount'),r=interaction.options.getString('reason')||'';const w=await grantShards(t.id,t.tag||t.username,a,r,interaction.user.id,interaction.user.tag||interaction.user.username);return interaction.editReply({embeds:[walletEmbed(`🎁 +${a} → ${t.username}`,w,C.gr)]});}
-        if(sub==='deduct'){const t=interaction.options.getUser('user'),a=interaction.options.getInteger('amount'),r=interaction.options.getString('reason')||'';const w=await deductShards(t.id,t.tag||t.username,a,r,interaction.user.id,interaction.user.tag||interaction.user.username);return interaction.editReply({embeds:[walletEmbed(`⬇️ -${a} from ${t.username}`,w,C.rd)]});}
-        if(sub==='check'){const t=interaction.options.getUser('user');const w=await getWallet(t.id,t.tag||t.username);return interaction.editReply({embeds:[walletEmbed(`🔍 ${t.username}'s Wallet`,w)]});}
-        if(sub==='set'){const t=interaction.options.getUser('user'),a=interaction.options.getInteger('amount'),r=interaction.options.getString('reason')||'Admin set';await getWallet(t.id,t.tag||t.username);const w=await setBalance(t.id,t.tag||t.username,a,r,interaction.user.id,interaction.user.tag||interaction.user.username);return interaction.editReply({embeds:[walletEmbed(`🔧 Set ${t.username} to ${a} 💎`,w,C.cy)]});}
-        if(sub==='top'){const lb=await getLeaderboard(15);return interaction.editReply({embeds:[base('🏆 Top 15 Holders',C.gold).setDescription(lb.map((w,i)=>`**${i+1}.** ${w.discord_tag||w.discord_id} · **${((w.wallet_balance||0)+(w.bank_balance||0)).toLocaleString()}**`).join('\n'))]});}
-        if(sub==='stats'){const s=await getSupply();return interaction.editReply({embeds:[base('📊 Economy Stats',C.cy).addFields({name:'💎 Wallet Total',value:s.walletTotal.toLocaleString(),inline:true},{name:'🏦 Bank Total',value:s.bankTotal.toLocaleString(),inline:true},{name:'📦 Grand Total',value:(s.walletTotal+s.bankTotal).toLocaleString(),inline:true},{name:'👥 Holders',value:`${s.holders}`,inline:true})]});}
-        if(sub==='usage'){if(!sb)return interaction.editReply('⚠️ Supabase not configured.');const{data}=await sb.from('aegis_ai_usage').select('model,input_tokens,output_tokens,used_search,created_at').order('created_at',{ascending:false}).limit(200);const total=data?.length||0;const inp=data?.reduce((s,r)=>s+(r.input_tokens||0),0)||0;const out=data?.reduce((s,r)=>s+(r.output_tokens||0),0)||0;const cost=((inp/1_000_000)*0.80+(out/1_000_000)*4.00).toFixed(4);return interaction.editReply({embeds:[base('🧠 AEGIS AI Usage',C.cy).addFields({name:'🔢 Requests',value:`${total}`,inline:true},{name:'📥 Input',value:inp.toLocaleString(),inline:true},{name:'📤 Output',value:out.toLocaleString(),inline:true},{name:'💸 Est. Cost',value:`$${cost}`,inline:true},{name:'🔍 Searches',value:`${data?.filter(r=>r.used_search).length||0}`,inline:true})]});}
-      }catch(e){return interaction.editReply(`⚠️ ${e.message}`);}
+    if (cmd === 'fulfill') {
+      if (!isAdmin(i.member)) return i.editReply('⛔ Admins only.');
+      const ref = i.options.getString('ref').toUpperCase();
+      try {
+        await axios.post(`${API_BASE}/api/orders/${ref}/fulfill`, { note: i.options.getString('note')||'Fulfilled' }, { headers: { Authorization: `Bearer ${ADMIN_TOKEN||''}` } });
+        return i.editReply(`✅ Order **${ref}** marked as fulfilled.`);
+      } catch { return i.editReply(`⚠️ Could not update **${ref}** — check admin panel.`); }
     }
 
-    // ── SHOP ──
-    if (cmd==='order') {
-      const shards=interaction.options.getInteger('tier'),platform=interaction.options.getString('platform'),server=interaction.options.getString('server'),notes=interaction.options.getString('notes')||'None';
-      const tier=SHOP_TIERS.find(t=>t.shards===shards&&t.shards>0);
-      if(!tier)return interaction.editReply(`⚠️ No tier for **${shards}** shards. Valid: 1,2,3,5,6,8,10,12,15,20,30`);
-      const ref=`ORD-${Date.now().toString(36).toUpperCase()}`;
-      const emb=base(`📦 Order Submitted — ${tier.emoji} ${tier.name}`,C.gold)
-        .addFields({name:'📋 Ref',value:`\`${ref}\``,inline:true},{name:'💎 Cost',value:`${tier.shards} shard${tier.shards!==1?'s':''}`,inline:true},{name:'🎮 Platform',value:platform,inline:true},{name:'🗺️ Server',value:server,inline:true},{name:'📝 Notes',value:notes,inline:false},{name:'📦 Includes',value:tier.items.map(i=>`• ${i}`).join('\n').slice(0,1000),inline:false},{name:'💳 Payment',value:'CashApp **$TheConclaveDominion** · Chime **$ANLIKESEF**\nInclude your Discord username in the payment note.',inline:false});
-      if(sb&&sbOk())try{await sb.from('aegis_orders').insert({ref,guild_id:interaction.guildId,discord_id:interaction.user.id,discord_tag:interaction.user.tag||interaction.user.username,tier:tier.name,shards,platform,server,notes,status:'pending',created_at:new Date().toISOString()});}catch{}
-      // Post to orders channel if configured
-      const orderChannel=process.env.ORDERS_CHANNEL_ID;
-      if(orderChannel){try{const ch=bot.channels.cache.get(orderChannel);if(ch)await ch.send({embeds:[emb.setFooter({...FT,text:`Order from ${interaction.user.username} (${interaction.user.id})`})]});}catch{}}
-      return interaction.editReply({embeds:[emb]});
-    }
+    if (cmd === 'shard') return i.editReply({ embeds: [base('💠 ClaveShard Shop Tiers',C.gold)
+      .setDescription('Each tier costs its tier number in ClaveShard.\nPay via **$TheConclaveDominion** CashApp or **$ANLIKESEF** Chime, then use `/order`.')
+      .addFields(
+        {name:'💠 T1 · 1 CLVSD',value:'L600 Vanilla Dino · Max XP · 3 Stacks Ammo · Full Dino Coloring · 100 Kibble/Cakes · 100% Imprint · 500 Structures · Cryofridge+120 Pods · Revival Token 48hr',inline:false},
+        {name:'💎 T2 · 2 CLVSD',value:'Modded L600 Dino · L600 Allowed Dino · L500 Random Shiny · L500 Shiny Shoulder · 60 Dedicated Storage',inline:false},
+        {name:'✨ T3 · 3 CLVSD',value:'Tek Blueprint · 1 Shiny Essence · 200% Imprint · L600 T1 Special Shiny',inline:false},
+        {name:'🔥 T5 · 5 CLVSD',value:'Boss Defeat Command · Bronto/Dread+Saddle · L1000 Dino · L100 Shiny Essence · L800 T2 Shiny · Small Bundle 250k Resources',inline:false},
+        {name:'⚔️ T6–T8',value:'T6: Boss Ready Bundle · L1250 Breeding Pair · 250% Imprint\nT8: Medium Bundle 100k Resources',inline:false},
+        {name:'🛡️ T10–T12',value:'T10: Tek Suit Set · Floating Platform · Combo Shiny Essence\nT12: Large Bundle 200k Resources',inline:false},
+        {name:'👑 T15–T20–T30',value:'T15: 30k Element · L1500 Rare Dinos · XL Bundle 300k\nT20: Behemoth Gate Expansion\nT30: Dedicated Storage Refill · 1.6M Resources',inline:false},
+        {name:'🛡️ Dino Insurance',value:'One-time use · Must be named · Open a ticket to activate',inline:false},
+      )
+    ] });
 
-    if (cmd==='fulfill') {
-      if(!isAdmin(interaction.member))return interaction.editReply('⛔ Admin only.');
-      const ref=interaction.options.getString('ref'),note=interaction.options.getString('note')||'Your order is ready!';
-      if(sb&&sbOk())try{await sb.from('aegis_orders').update({status:'fulfilled',fulfilled_at:new Date().toISOString(),fulfillment_note:note}).eq('ref',ref);}catch{}
-      return interaction.editReply({embeds:[base(`✅ Order Fulfilled`,C.gr).addFields({name:'📋 Ref',value:`\`${ref}\``,inline:true},{name:'📝 Note',value:note,inline:false})]});
-    }
-
-    if (cmd==='shard') {
-      const emb=base('💠 ClaveShard Tier List',C.gold).setDescription('Shop: **theconclavedominion.com/shop** | `/order` to submit\nCashApp **$TheConclaveDominion** · Chime **$ANLIKESEF**');
-      for(const tier of SHOP_TIERS.filter(t=>t.shards>0))emb.addFields({name:`${tier.emoji} ${tier.name}`,value:tier.items.slice(0,6).map(i=>`• ${i}`).join('\n'),inline:true});
-      emb.addFields({name:'🛡 Dino Insurance',value:SHOP_TIERS.find(t=>t.shards===0).items.map(i=>`• ${i}`).join('\n'),inline:false});
-      return interaction.editReply({embeds:[emb]});
-    }
-
-    if (cmd==='shop') {
-      const select=new StringSelectMenuBuilder().setCustomId('shop_tier_view').setPlaceholder('💎 View a tier...').addOptions(SHOP_TIERS.filter(t=>t.shards>0).map(t=>({label:`${t.emoji} ${t.name}`,value:`${t.shards}`,description:t.items[0]})));
-      return interaction.editReply({embeds:[base('🛍️ ClaveShard Shop',C.gold).setDescription('Select a tier below to view full contents.\n\nUse `/order` to submit your order.\n\n💳 CashApp **$TheConclaveDominion** · Chime **$ANLIKESEF**\n\n🔗 Full catalog: **theconclavedominion.com/shop**')],components:[new ActionRowBuilder().addComponents(select)]});
+    if (cmd === 'shop') {
+      try {
+        const r = await axios.get(`${API_BASE}/api/shop`, { timeout: 6000 });
+        const items = r.data.items || [];
+        if (!items.length) return i.editReply({ embeds: [base('🛍️ ClaveShard Shop',C.gold).setDescription('Shop being stocked. Visit theconclavedominion.com/shop.html or use `/shard`.')] });
+        const fields = items.slice(0,10).map(item => ({name:`${item.image_emoji||'💎'} ${item.name}`,value:`${(item.description||'').slice(0,60)}\n**${item.price_label||(item.price===0?'Free':'$'+item.price)}**`,inline:true}));
+        return i.editReply({ embeds: [base('🛍️ ClaveShard Shop',C.gold).setDescription('Full catalog: theconclavedominion.com/shop.html').addFields(...fields)] });
+      } catch { return i.editReply({ embeds: [base('🛍️ ClaveShard Shop',C.gold).setDescription('Use `/shard` for tier list or visit theconclavedominion.com/shop.html')] }); }
     }
 
     // ── AI ──
-    if (cmd==='aegis'||cmd==='ask') {
-      const q=interaction.options.getString('question');
-      const wait=checkRate(interaction.user.id,6000);if(wait)return interaction.editReply(`⏳ Please wait ${wait}s.`);
-      const resp=await askAegis(q,interaction.user.id);
-      return interaction.editReply({embeds:[base('🧠 AEGIS',C.cy).setDescription(resp.slice(0,4000)).setFooter({...FT,text:`AEGIS AI · Haiku/Sonnet routing`})]});
+    if (cmd === 'aegis' || cmd === 'ask') {
+      const w = checkRate(i.user.id, 6000);
+      if (w) return i.editReply(`⏳ Slow down, Survivor. Retry in ${w}s.`);
+      const r = await askAegis(i.options.getString('question'), i.user.id);
+      return i.editReply(r.slice(0,1990));
     }
 
-    if (cmd==='forget') { clearHist(interaction.user.id); return interaction.editReply('🧹 Conversation history cleared.'); }
+    if (cmd === 'forget') { clearHist(i.user.id); return i.editReply('🧹 AEGIS conversation history cleared. Fresh start, Survivor.'); }
 
-    if (cmd==='ai-cost') {
-      if(!isAdmin(interaction.member))return interaction.editReply('⛔ Admin only.');
-      if(!sb)return interaction.editReply('⚠️ Supabase not configured.');
-      try{const{data}=await sb.from('aegis_ai_usage').select('model,input_tokens,output_tokens,used_search').order('created_at',{ascending:false}).limit(500);const total=data?.length||0;const inp=data?.reduce((s,r)=>s+(r.input_tokens||0),0)||0;const out=data?.reduce((s,r)=>s+(r.output_tokens||0),0)||0;const haiku=data?.filter(r=>r.model?.includes('haiku'))||[];const sonnet=data?.filter(r=>r.model?.includes('sonnet'))||[];const hCost=((haiku.reduce((s,r)=>s+(r.input_tokens||0),0)*0.80+haiku.reduce((s,r)=>s+(r.output_tokens||0),0)*4)/1_000_000);const sCost=((sonnet.reduce((s,r)=>s+(r.input_tokens||0),0)*3+sonnet.reduce((s,r)=>s+(r.output_tokens||0),0)*15)/1_000_000);return interaction.editReply({embeds:[base('💸 AEGIS AI Cost Dashboard',C.cy).addFields({name:'Requests',value:`${total}`,inline:true},{name:'Input Tokens',value:inp.toLocaleString(),inline:true},{name:'Output Tokens',value:out.toLocaleString(),inline:true},{name:'Haiku',value:`${haiku.length} · $${hCost.toFixed(4)}`,inline:true},{name:'Sonnet',value:`${sonnet.length} · $${sCost.toFixed(4)}`,inline:true},{name:'Total Cost',value:`**~$${(hCost+sCost).toFixed(4)}**`,inline:true},{name:'Searches',value:`${data?.filter(r=>r.used_search).length||0}`,inline:true})]});}
-      catch(e){return interaction.editReply(`⚠️ ${e.message}`);}
+    if (cmd === 'ai-cost') {
+      if (!isAdmin(i.member)) return i.editReply('⛔ Admins only.');
+      if (!sb || !sbOk()) return i.editReply('⚠️ Database unavailable.');
+      const { data } = await sb.from('aegis_ai_usage').select('model,input_tokens,output_tokens,used_search').order('created_at',{ascending:false}).limit(500);
+      if (!data?.length) return i.editReply('📭 No usage data yet.');
+      const haiku  = data.filter(r=>r.model?.includes('haiku'));
+      const sonnet = data.filter(r=>r.model?.includes('sonnet'));
+      const hIn  = haiku.reduce((s,r)=>s+(r.input_tokens||0),0);
+      const hOut = haiku.reduce((s,r)=>s+(r.output_tokens||0),0);
+      const sIn  = sonnet.reduce((s,r)=>s+(r.input_tokens||0),0);
+      const sOut = sonnet.reduce((s,r)=>s+(r.output_tokens||0),0);
+      const hCost = (hIn*0.80+hOut*4)/1_000_000;
+      const sCost = (sIn*3+sOut*15)/1_000_000;
+      return i.editReply({ embeds: [base('💸 AEGIS AI Cost Dashboard',C.mag)
+        .addFields(
+          {name:'📊 Total Requests',value:`${data.length}`,inline:true},
+          {name:'🔍 With Web Search',value:`${data.filter(r=>r.used_search).length}`,inline:true},
+          {name:'',value:'',inline:false},
+          {name:'⚡ Haiku (fast)',value:`${haiku.length} calls\n${hIn.toLocaleString()} in / ${hOut.toLocaleString()} out\n~$${hCost.toFixed(4)}`,inline:true},
+          {name:'🧠 Sonnet (smart)',value:`${sonnet.length} calls\n${sIn.toLocaleString()} in / ${sOut.toLocaleString()} out\n~$${sCost.toFixed(4)}`,inline:true},
+          {name:'💰 Total Estimated',value:`**~$${(hCost+sCost).toFixed(4)}**`,inline:false},
+        )] });
     }
 
-    // ── SERVERS ──
-    if (cmd==='servers') {
-      const filter=interaction.options.getString('map');
-      let servers=await fetchServerStatuses().catch(()=>MONITOR_SERVERS.map(s=>({...s,status:'unknown',players:0,maxPlayers:20})));
-      if(filter)servers=servers.filter(s=>s.name.toLowerCase().includes(filter.toLowerCase())||s.id.includes(filter.toLowerCase()));
-      return interaction.editReply({embeds:[buildMonitorEmbed(servers)]});
+    // ── SERVERS / INFO ──
+    if (cmd === 'servers') {
+      const statuses = await fetchServerStatus(MONITOR_SERVERS);
+      const filter   = i.options.getString('map')?.toLowerCase();
+      const list     = filter ? statuses.filter(s => s.name.toLowerCase().includes(filter)) : statuses;
+      if (!list.length) return i.editReply('⚠️ No results.');
+      const on  = list.filter(s => s.status === 'online');
+      const off = list.filter(s => s.status !== 'online');
+      const lines = [
+        ...on.map(s => `🟢 **${s.emoji} ${s.name}** · \`${s.players}/${s.maxPlayers}\` · \`${s.ip}:${s.port}\`${s.pvp?' ⚔️':s.patreon?' ⭐':''}`),
+        ...off.map(s => `🔴 **${s.emoji} ${s.name}** · Offline`),
+      ].join('\n');
+      return i.editReply({ embeds: [base('⚔️ TheConclave — Live Cluster',C.gold).setDescription(lines).addFields({name:'✅ Online',value:`${on.length}/${list.length}`,inline:true},{name:'⏰ Updated',value:`<t:${Math.floor(Date.now()/1000)}:R>`,inline:true})] });
     }
 
-    if (cmd==='map') {
-      const id=interaction.options.getString('name'),m=MAP_INFO[id];
-      if(!m)return interaction.editReply('⚠️ Map not found.');
-      return interaction.editReply({embeds:[base(`${m.emoji} ${m.name}`,C.cy).setDescription(m.desc).addFields({name:'📡 IP',value:`\`${m.ip}\``,inline:true},{name:'⚔️ PvP',value:m.pvp?'Yes':'No',inline:true},{name:'⭐ Patreon',value:m.patreon?'Elite+':'Open',inline:true})]});
+    if (cmd === 'map') {
+      const MAPS = {
+        island:     {title:'🌿 The Island',ip:'217.114.196.102:5390',desc:'Classic ARK. Beginner-friendly, all biomes, starter bosses.',tags:'Beginner · All Resources · Boss Arenas',pvp:false,patreon:false},
+        volcano:    {title:'🌋 Volcano',ip:'217.114.196.59:5050',desc:'High-resource volcanic biome. Rich minerals and challenging terrain.',tags:'Intermediate · High Resources',pvp:false,patreon:false},
+        extinction: {title:'🌑 Extinction',ip:'31.214.196.102:6440',desc:'End-game. Titan bosses, corrupted dinos, Element farming.',tags:'End-Game · Titans · Element',pvp:false,patreon:false},
+        center:     {title:'🏔️ The Center',ip:'31.214.163.71:5120',desc:'Floating islands and vast ocean caves.',tags:'Mid-Game · Unique Biomes',pvp:false,patreon:false},
+        lostcolony: {title:'🪐 Lost Colony',ip:'217.114.196.104:5150',desc:'Post-colony world with unique loot and aberrant creatures.',tags:'Custom · Unique Spawns',pvp:false,patreon:false},
+        astraeos:   {title:'✨ Astraeos',ip:'217.114.196.9:5320',desc:'Celestial landscape with rare crystal resources.',tags:'Custom · Rare Resources',pvp:false,patreon:false},
+        valguero:   {title:'🏞️ Valguero',ip:'85.190.136.141:5090',desc:'Aberration zones, Deinonychus nests, beautiful landscape.',tags:'Mid-Game · Deinonychus · Aberration Zone',pvp:false,patreon:false},
+        scorched:   {title:'☀️ Scorched Earth',ip:'217.114.196.103:5240',desc:'Harsh desert. Wyverns, Manticore boss, dust storms.',tags:'Wyverns · Desert · Manticore',pvp:false,patreon:false},
+        aberration: {title:'⚔️ Aberration',ip:'217.114.196.80:5540',desc:'Underground PvP. Rock Drakes, Reapers, highest risk/reward.',tags:'⚔️ PvP · Rock Drakes · Reapers',pvp:true,patreon:false},
+        amissa:     {title:'⭐ Amissa',ip:'217.114.196.80:5180',desc:'Exclusive Patreon-only map. Premium experience, small community.',tags:'⭐ Patreon Exclusive · Premium',pvp:false,patreon:true},
+      };
+      const m = MAPS[i.options.getString('name')];
+      if (!m) return i.editReply('⚠️ Map not found.');
+      const emb = base(m.title, m.pvp ? C.rd : m.patreon ? C.gold : C.cy)
+        .addFields({name:'🌐 Connect',value:`\`${m.ip}\``,inline:true},{name:'🏷️ Type',value:m.tags,inline:true},{name:'📝 About',value:m.desc},{name:'🔗 How to Join',value:'ARK → Sessions → Join by IP → paste the IP above.'});
+      if (m.pvp)     emb.addFields({name:'⚠️ PvP Notice',value:'PvP is enabled. Highest risk in the cluster.'});
+      if (m.patreon) emb.addFields({name:'⭐ Patreon Required',value:'Elite Patron ($20/mo). Visit patreon.com/theconclavedominion'});
+      return i.editReply({ embeds: [emb] });
     }
 
-    if (cmd==='monitor') {
-      if(!isAdmin(interaction.member))return interaction.editReply('⛔ Admin only.');
-      const ch=interaction.options.getChannel('channel');
-      const servers=await fetchServerStatuses().catch(()=>MONITOR_SERVERS.map(s=>({...s,status:'unknown',players:0,maxPlayers:20})));
-      const msg=await ch.send({embeds:[buildMonitorEmbed(servers)]});
-      monitorState.set(interaction.guildId,{statusChannelId:ch.id,messageId:msg.id});
-      return interaction.editReply(`✅ Live monitor posted in ${ch}. Auto-refreshes every 5 min.`);
+    if (cmd === 'info') return i.editReply({ embeds: [base('⚔️ TheConclave Dominion',C.pl)
+      .setDescription('5× crossplay ARK: Survival Ascended — all platforms, all maps, one community.')
+      .addFields(
+        {name:'🌍 Crossplay',value:'Xbox · PlayStation · PC',inline:true},
+        {name:'⚡ Rates',value:'5× XP · Harvest · Taming · Breed',inline:true},
+        {name:'⚙️ Config',value:'1M Weight · No Fall Dmg · Max Dino 350',inline:true},
+        {name:'🗺️ 10 Maps',value:'Island · Volcano · Extinction · Center · Lost Colony · Astraeos · Valguero · Scorched · Aberration (PvP) · Amissa (Patreon)'},
+        {name:'🔧 Mods',value:'Death Inventory Keeper · ARKomatic · Awesome Spyglass · Teleporter'},
+        {name:'💎 Economy',value:'`/weekly` 3 free shards/week · `/wallet balance` · `/order` to shop'},
+        {name:'🌐 Links',value:'[Website](https://theconclavedominion.com) · [Discord](https://discord.gg/theconclave) · [Patreon](https://patreon.com/theconclavedominion)'},
+      )
+    ] });
+
+    if (cmd === 'rules') return i.editReply({ embeds: [base('📜 TheConclave Codex',C.pl)
+      .setDescription('All members must follow these rules. Violations: Warning → Timeout → Ban.')
+      .addFields(
+        {name:'1. Respect',value:'No harassment, hate speech, racism, or toxic targeting.'},
+        {name:'2. No Griefing',value:'No destroying or stealing on PvE maps. PvP = Aberration only.'},
+        {name:'3. No Cheating',value:'No mesh builds, duplication, or exploit abuse. Instant permanent ban.'},
+        {name:'4. Limits',value:'Max 500 tamed dinos per tribe. Reasonable base footprint. Abandoned structures demolished after 2 weeks.'},
+        {name:'5. Staff Final',value:'Council rulings are final. Disputes go to #support-tickets.'},
+        {name:'6. No Advertising',value:'No other server promotion without explicit Council approval.'},
+        {name:'⚠️ Penalties',value:'Warning → 24h Timeout → 7d Timeout → Permanent Ban\nCheating/hate speech = immediate permanent ban.'},
+        {name:'🌐 Full Codex',value:'theconclavedominion.com/terms.html'},
+      )
+    ] });
+
+    if (cmd === 'rates') return i.editReply({ embeds: [base('📈 Cluster Rates — 5× Everything',C.cy)
+      .addFields(
+        {name:'⚡ XP',value:'5×',inline:true},{name:'🪓 Harvest',value:'5×',inline:true},{name:'🦴 Taming',value:'5×',inline:true},
+        {name:'🥚 Breeding',value:'5×',inline:true},{name:'🏋️ Weight',value:'1,000,000',inline:true},{name:'🦕 Max Dino',value:'Lvl 350',inline:true},
+        {name:'💀 Fall DMG',value:'Off',inline:true},{name:'🌐 Crossplay',value:'Xbox · PS · PC',inline:true},{name:'🗺️ Maps',value:'10 servers',inline:true},
+      )
+    ] });
+
+    if (cmd === 'mods') return i.editReply({ embeds: [base('🔧 Active Cluster Mods',C.cy)
+      .addFields(
+        {name:'☠️ Death Inventory Keeper',value:'Your inventory stays put when you die.'},
+        {name:'🤖 ARKomatic',value:'Quality of life improvements across all maps.'},
+        {name:'🔭 Awesome Spyglass',value:'Enhanced spyglass showing dino stats and more.'},
+        {name:'🌀 Awesome Teleporter',value:'Place teleporters to fast-travel across maps.'},
+      )
+    ] });
+
+    if (cmd === 'wipe') return i.editReply({ embeds: [base('📅 Wipe Schedule',C.mag)
+      .setDescription('Wipe dates announced **1 week in advance** in <#announcements>.')
+      .addFields(
+        {name:'🗺️ PvE Maps',value:'No scheduled wipes. Maps persist until major updates require it.'},
+        {name:'⚔️ Aberration PvP',value:'Seasonal wipes. Check Discord for current season end date.'},
+        {name:'⭐ Amissa',value:'No wipes — patron-protected server.'},
+      )
+    ] });
+
+    if (cmd === 'transfer-guide') return i.editReply({ embeds: [base('🔄 Cross-ARK Transfer Guide',C.cy)
+      .addFields(
+        {name:'Step 1',value:'Go to an **Obelisk**, Supply Drop, or **TEK Transmitter**'},
+        {name:'Step 2',value:'Open Terminal → **"Travel to Another Server"**'},
+        {name:'Step 3',value:'Select the destination Conclave map from the list'},
+        {name:'Step 4',value:'Upload your survivor + dinos/items (each has a 24h timer)'},
+        {name:'⚠️ Notes',value:'Some items may not transfer between all maps. Downloads at Obelisks on destination.'},
+      )
+    ] });
+
+    if (cmd === 'crossplay') return i.editReply({ embeds: [base('🎮 Crossplay Connection Guide',C.cy)
+      .addFields(
+        {name:'🎮 Xbox / Microsoft Store',value:'Search **TheConclave** in the unofficial server browser, or connect by IP via network settings.'},
+        {name:'🎯 PlayStation',value:'Use in-game unofficial server browser and search **TheConclave**.'},
+        {name:'💻 PC (Steam/Epic)',value:'Add as favorite in ARK server browser. All 10 IPs at theconclavedominion.com/ark'},
+        {name:'📋 Quick IP',value:'**The Island:** 217.114.196.102:5390 · All IPs → `/servers`'},
+        {name:'🔧 Still stuck?',value:'Use `/ticket` to open a private support channel.'},
+      )
+    ] });
+
+    if (cmd === 'patreon') return i.editReply({ embeds: [base('⭐ Support on Patreon',C.gold)
+      .setDescription('Help keep **10 servers** running for the entire community.')
+      .addFields(
+        {name:'🌟 Supporter · $5/mo',value:'● Supporter role\n● Early access to events\n● Special badge in Discord'},
+        {name:'💎 Patron · $10/mo',value:'● All above\n● Monthly ClaveShard bonus\n● Exclusive Patron channel'},
+        {name:'⭐ Elite Patron · $20/mo',value:'● All above\n● **Amissa server access** (exclusive map)\n● Priority Council support\n● Name in credits'},
+        {name:'🔗 Links',value:'[Patreon](https://patreon.com/theconclavedominion) · **$TheConclaveDominion** CashApp · **$ANLIKESEF** Chime'},
+      )
+    ] });
+
+    if (cmd === 'forums') return i.editReply({ embeds: [base('🗂️ Forum Panels',C.cy)
+      .addFields(
+        {name:'🌋 ARK Help',value:'#ark-help · #taming-guides · #base-builds · #mod-help',inline:true},
+        {name:'💬 Community',value:'#general · #introductions · #media · #off-topic',inline:true},
+        {name:'💎 ClaveShard',value:'#shard-requests · #trade-post · #giveaways',inline:true},
+        {name:'👁️ Council',value:'#patch-notes · #server-updates · #announcements',inline:true},
+        {name:'🎮 ARK Servers',value:'#server-status · #connection-help · #cluster-chat',inline:true},
+        {name:'🎫 Support',value:'#open-a-ticket · #report-a-player · #appeals',inline:true},
+      )
+    ] });
+
+    if (cmd === 'tip') {
+      const TIPS = [
+        'Put points into **Weight** on your first few levels — you can never have too much.',
+        'On our 5× cluster, **imprinting** is 5× faster too. Set timers, never miss a cuddle!',
+        'Use a **Whip** to grab items off the ground while mounted. Huge QoL upgrade.',
+        'Baby dinos eat roughly **5× faster** on boosted servers. Always prep plenty of food.',
+        '**Element** is shared across the cluster via transfers. Farm on Extinction, use anywhere.',
+        'The **Aberration** server is PvP — cross over prepared or you\'ll be looted.',
+        'Amissa is **Patreon-exclusive** — extra protections, smaller community, premium feel.',
+        'Type `/weekly` in Discord every 7 days for 3 free ClaveShards — never miss it!',
+        'Tame an **Anky** first — metal and crystal farming makes everything easier.',
+        'Beaver dams respawn faster when harvested completely. Leave nothing behind.',
+        'Always back up your dinos in a cryo pod before server transfers.',
+        '**Crystal Isles** and **Lost Colony** are great starter maps — fewer predators near spawn.',
+      ];
+      return i.editReply({ embeds: [base('💡 Dominion Tip',C.gold).setDescription(`> ${TIPS[Math.floor(Math.random()*TIPS.length)]}`).setFooter({text:'TheConclave Dominion · 5× Rates · 10 Maps'})] });
     }
 
-    // ── INFO ──
-    if (cmd==='info') { return interaction.editReply({embeds:[base('ℹ️ TheConclave Dominion',C.cy).setDescription('**5× Crossplay ARK: Survival Ascended** — 10 maps, all platforms.').addFields({name:'🗺️ Cluster',value:'Island · Volcano · Extinction · Center · Lost Colony · Astraeos · Valguero · Scorched · Aberration (PvP) · Amissa (Patreon)',inline:false},{name:'📈 Rates',value:'5× XP · Harvest · Taming · Breeding · 1M Weight · No Fall Damage',inline:false},{name:'💎 Economy',value:'`/weekly` 3 free shards/week · `/order` to shop',inline:false},{name:'💳 Payment',value:'CashApp $TheConclaveDominion · Chime $ANLIKESEF',inline:false},{name:'🔗 Links',value:'theconclavedominion.com · patreon.com/theconclavedominion',inline:false})]}); }
-    if (cmd==='rules') { return interaction.editReply({embeds:[base('📜 Dominion Codex',C.pl).addFields({name:'1️⃣ Respect',value:'No harassment, hate speech, or discrimination.',inline:false},{name:'2️⃣ No Cheating',value:'No exploits, duplication, mesh building, or speed hacks.',inline:false},{name:'3️⃣ No Griefing',value:'No foundation wiping, trap cages, or intentional disruption on PvE.',inline:false},{name:'4️⃣ Base Limits',value:'Follow structure limits. Admins may demolish violating builds.',inline:false},{name:'5️⃣ Language',value:'Keep chat SFW in public channels. English in global chat.',inline:false},{name:'⚔️ PvP',value:'PvP is only enabled on Aberration. All other maps are PvE.',inline:false})]}); }
-    if (cmd==='rates') { return interaction.editReply({embeds:[base('📈 5× Boost Rates',C.gr).addFields({name:'⚡ Core',value:'XP: 5× · Harvest: 5× · Taming: 5× · Breeding: 5×',inline:false},{name:'🏋️ Quality of Life',value:'Weight: 1,000,000 · No Fall Damage · Increased Stack Sizes',inline:false},{name:'🥚 Breeding',value:'Egg Hatch Speed: 50× · Baby Mature Speed: 50× · Cuddle Interval: 0.025',inline:false},{name:'🦕 Creatures',value:'Max Wild Level: 350 · Tamed Level Cap: 600',inline:false})]}); }
-    if (cmd==='mods') { return interaction.editReply({embeds:[base('🔧 Active Cluster Mods',C.cy).addFields({name:'Death Inventory Keeper',value:'Never lose your items on death.',inline:true},{name:'ARKomatic',value:'Quality-of-life improvements.',inline:true},{name:'Awesome Spyglass',value:'Advanced creature stats at a glance.',inline:true},{name:'Teleporter',value:'Fast travel between owned teleporters.',inline:true})]}); }
-    if (cmd==='wipe') { return interaction.editReply({embeds:[base('📅 Wipe Schedule',C.gold).setDescription('Wipes are announced **at least 2 weeks in advance** in announcements.\n\nWipes happen when a new major DLC drops, the cluster runs 4–6 months, or a major balance overhaul is needed.')]}); }
-    if (cmd==='transfer-guide') { return interaction.editReply({embeds:[base('🔄 Cross-ARK Transfer Guide',C.cy).addFields({name:'📤 Uploading',value:'Use any Obelisk, Terminal, or Loot Crate. Upload via "ARK Data". Wait ~1 min before downloading.',inline:false},{name:'📥 Downloading',value:'Visit any Obelisk/Terminal on destination. Open ARK Data tab and retrieve.',inline:false},{name:'⚠️ Notes',value:'Items expire after 24 hours. Some boss items cannot transfer. Element restricted between certain maps.',inline:false})]}); }
-    if (cmd==='crossplay') { return interaction.editReply({embeds:[base('🎮 Crossplay Connection Guide',C.cy).addFields({name:'🎮 Xbox',value:'ARK SA → Multiplayer → Join via IP. Type the IP:Port from `/servers`.',inline:false},{name:'🎮 PlayStation',value:'Same as Xbox — use the Join via IP option in the multiplayer menu.',inline:false},{name:'💻 PC',value:'In ARK SA, go to Join Game → filter by "TheConclave" or paste the IP.',inline:false})]}); }
-    if (cmd==='patreon') { return interaction.editReply({embeds:[base('⭐ Patreon Perks',C.gold).setDescription('Support at **patreon.com/theconclavedominion**').addFields({name:'🥉 Supporter',value:'Discord role · Access to supporter channels',inline:true},{name:'🥈 Champion',value:'All above + Bonus ClaveShards monthly',inline:true},{name:'🥇 Elite ($20/mo)',value:'All above + **Amissa access** · Priority support · Exclusive cosmetics',inline:true})]}); }
-
-    if (cmd==='tip') {
-      const tips=['Always disable friendly fire before taming!','Keep a Cryopod ready — cryo your tames before a base raid.','Use the Spyglass mod to check dino stats BEFORE taming.','Build your first base near water and resources, not in the center.','Boss arenas wipe your inventory — prepare a dedicated boss kit.','Upload your best tames to ARK Data before a wipe warning.','The Megatherium gets a 75% damage boost after killing bugs — great for Broodmother.','Flak armor gives the best overall protection for mid-game.','Quetzals can carry platforms — build a mobile base!','Always name your best dinos — it helps with Dino Insurance claims.'];
-      return interaction.editReply({embeds:[base('💡 ARK Survival Tip',C.gr).setDescription(tips[Math.floor(Math.random()*tips.length)])]});
+    if (cmd === 'dino') {
+      const name = i.options.getString('name');
+      const DINOS = {
+        rex:    {icon:'🦖',desc:'Top predator. Max wild 150. Best for bosses.',food:'Raw Mutton',kibble:'Rex Kibble',tame:'~2h at 150 on 5×'},
+        giga:   {icon:'🦣',desc:'Strongest land dino. Rage mechanic.',food:'Raw Mutton',kibble:'Exceptional',tame:'4-6h at 150 on 5×'},
+        wyvern: {icon:'🐉',desc:'Cannot tame — steal an egg from a nest. Raise on milk.',food:'Wyvern Milk',kibble:'N/A (egg steal)',tame:'Egg steal + imprint'},
+        anky:   {icon:'⚒️',desc:'Best metal/crystal/flint harvester.',food:'Mejoberry',kibble:'Simple',tame:'~1h at 150 on 5×'},
+        argy:   {icon:'🦅',desc:'Best all-around flyer. Great carry weight.',food:'Raw Mutton',kibble:'Regular',tame:'~1.5h at 150 on 5×'},
+        bronto: {icon:'🦕',desc:'Best berry harvester. Saddle is a mobile base.',food:'Crops',kibble:'Superior',tame:'~3h at 150 on 5×'},
+      };
+      const key   = name.toLowerCase().replace(/[^a-z]/g,'');
+      const found = DINOS[key] || Object.entries(DINOS).find(([k])=>k.startsWith(key.slice(0,3)))?.[1];
+      if (found) {
+        return i.editReply({ embeds: [base(`${found.icon} ${name.charAt(0).toUpperCase()+name.slice(1)}`,C.cy)
+          .addFields({name:'📋 About',value:found.desc},{name:'🍖 Best Food',value:found.food,inline:true},{name:'🥣 Kibble',value:found.kibble,inline:true},{name:'⏱️ Tame Time',value:found.tame,inline:true},{name:'💡 Tip',value:'5× rates mean tame times are 5× faster than official!'})
+        ] });
+      }
+      if (anthropic) {
+        try {
+          const msg = await anthropic.messages.create({ model: MODEL_FAST, max_tokens: 400, messages: [{ role: 'user', content: `Brief ARK Survival Ascended tame guide for ${name} on a 5× server. Include best food, kibble, tame time at lvl 150 on 5× rates, and 1 tip. Under 200 words.` }] });
+          return i.editReply({ embeds: [base(`🦕 ${name.charAt(0).toUpperCase()+name.slice(1)} — Tame Guide`,C.cy).setDescription(msg.content[0].text).setFooter({text:'Powered by AEGIS AI · 5× Rates'})] });
+        } catch {}
+      }
+      return i.editReply({ embeds: [base('🦕 Dino Lookup',C.cy).setDescription(`No data for **${name}**. Try /aegis for detailed info!`)] });
     }
 
-    if (cmd==='dino') {
-      const name=interaction.options.getString('name');
-      const resp=await askAegis(`ARK encyclopedia entry for "${name}": taming method, best food, saddle level, recommended use, stats to prioritize, TheConclave-specific tips on 5× rates. Under 1800 chars.`,null);
-      return interaction.editReply({embeds:[base(`🦕 ${name}`,C.gr).setDescription(resp.slice(0,4000))]});
+    if (cmd === 'help') {
+      const categories = [
+        {name:'💎 Economy',value:'`/wallet` `/curr` `/weekly` `/clvsd` `/order` `/shard` `/shop` `/leaderboard` `/give` `/fulfill`'},
+        {name:'🧠 AI & Info',value:'`/aegis` `/ask` `/forget` `/ai-cost` `/servers` `/map` `/info` `/rules` `/rates` `/mods` `/wipe` `/transfer-guide` `/crossplay` `/patreon` `/tip` `/dino`'},
+        {name:'🎖️ Profile & Social',value:'`/profile` `/rank` `/rep` `/trade` `/online` `/clipscore` `/coords` `/forums`'},
+        {name:'📢 Moderation',value:'`/announce` `/event` `/warn` `/ban` `/timeout` `/role` `/ticket` `/report` `/warn-history` `/purge` `/slowmode` `/lock`'},
+        {name:'🎲 Tools',value:'`/poll` `/giveaway` `/remind` `/roll` `/coinflip` `/calc` `/whois` `/serverinfo`'},
+        {name:'📡 Monitoring',value:'`/setup-monitoring` `/monitor-refresh` `/monitor-add`'},
+        {name:'🔐 Beacon Sentinel',value:'`/beacon-setup` `/tribes` `/player-lookup` `/sentinel-bans`'},
+        {name:'🎵 Music',value:'`/music play` `/music search` `/music queue` `/music skip` `/music volume` `/music room` `/music launchpad` and more'},
+        {name:'🔗 Links',value:'[Website](https://theconclavedominion.com) · [Discord](https://discord.gg/theconclave) · [Patreon](https://patreon.com/theconclavedominion)'},
+      ];
+      return i.editReply({ embeds: [base('📖 AEGIS Command Reference',C.pl).setDescription(`**${cmds.length} commands** available.\nUse \`/aegis [question]\` to ask anything!`).addFields(...categories)] });
     }
 
-    if (cmd==='help') {
-      return interaction.editReply({embeds:[base('📖 AEGIS Command Reference',C.pl).addFields(
-        {name:'🧠 AI',value:'`/aegis` `/ask` `/forget` `/ai-cost`',inline:true},
-        {name:'💎 Economy',value:'`/wallet` `/weekly` `/order` `/shard` `/shop` `/leaderboard`',inline:true},
-        {name:'🎵 Music',value:'`/music play/search/browse/launchpad/room/...`',inline:true},
-        {name:'🗺️ Servers',value:'`/servers` `/map` `/monitor`',inline:true},
-        {name:'ℹ️ Info',value:'`/info` `/rules` `/rates` `/mods` `/tip` `/dino`',inline:true},
-        {name:'🤝 Community',value:'`/profile` `/rep` `/trade` `/coords` `/report`',inline:true},
-        {name:'🔨 Moderation',value:'`/warn` `/ban` `/timeout` `/role` `/purge` `/lock`',inline:true},
-        {name:'📡 Admin',value:'`/clvsd` `/give` `/announce` `/event` `/giveaway` `/ticket` `/know`',inline:true},
-      ).setFooter({...FT,text:'AEGIS v10 Sovereign · /aegis for AI help'})]});
+    if (cmd === 'ping') {
+      const start = Date.now(); let apiMs = '—';
+      try { const t = Date.now(); await axios.get(`${API_BASE}/health`,{timeout:5000}); apiMs = `${Date.now()-t}ms`; } catch {}
+      return i.editReply({ embeds: [base('🏓 Pong!',C.gr)
+        .addFields(
+          {name:'💓 WS Heartbeat',value:`${bot.ws.ping}ms`,inline:true},
+          {name:'🌐 API Latency',value:apiMs,inline:true},
+          {name:'⚡ Command',value:`${Date.now()-start}ms`,inline:true},
+          {name:'📊 Status',value:bot.ws.ping<100?'🟢 Excellent':bot.ws.ping<200?'🟡 Good':'🔴 Degraded',inline:true},
+          {name:'🤖 Model',value:`Haiku fast / Sonnet smart`,inline:true},
+          {name:'💾 DB',value:sb?(sbOk()?'🟢 OK':'🔴 CB Open'):'⚠️ No DB',inline:true},
+        )] });
     }
 
-    if (cmd==='ping') {
-      return interaction.editReply({embeds:[base('🏓 Pong!',C.gr).addFields({name:'📡 WS Latency',value:`${bot.ws.ping}ms`,inline:true},{name:'⏰ Uptime',value:`${Math.floor(process.uptime()/3600)}h ${Math.floor((process.uptime()%3600)/60)}m`,inline:true},{name:'💾 Memory',value:`${Math.round(process.memoryUsage().heapUsed/1024/1024)}MB`,inline:true},{name:'🎵 Music',value:musicRuntime?'✅ Loaded':'❌ Disabled',inline:true},{name:'🧠 AI',value:anthropic?'✅ Connected':'❌ Disabled',inline:true},{name:'🗄️ DB',value:sb&&sbOk()?'✅ Connected':'❌ Down',inline:true})]});
+    // ── PROFILE / SOCIAL ──
+    if (cmd === 'profile') {
+      const target = i.options.getUser('user') || i.user;
+      const member = await i.guild.members.fetch(target.id).catch(() => null);
+      let wallet = null;
+      if (sb && sbOk()) { try { const { data } = await sb.from('aegis_wallets').select('*').eq('discord_id',target.id).single(); wallet = data; } catch {} }
+      const roles     = member?.roles.cache.filter(r=>r.id!==i.guild.id).sort((a,b)=>b.position-a.position).first(5).map(r=>`<@&${r.id}>`).join(' ') || 'None';
+      const joinedDays = member?.joinedAt ? Math.floor((Date.now()-member.joinedAt)/(1000*60*60*24)) : 0;
+      const emb = base(`🎖️ ${target.username}'s Profile`,C.pl).setThumbnail(target.displayAvatarURL({size:256}))
+        .addFields({name:'📅 Member Since',value:member?.joinedAt?`<t:${Math.floor(member.joinedAt/1000)}:D>`:'Unknown',inline:true},{name:'📆 Days',value:`${joinedDays}`,inline:true},{name:'🆔 ID',value:target.id,inline:true},{name:'🎖️ Top Roles',value:roles});
+      if (wallet) {
+        const total = (wallet.wallet_balance||0)+(wallet.bank_balance||0);
+        emb.addFields({name:'💎 Wallet',value:`${(wallet.wallet_balance||0).toLocaleString()}`,inline:true},{name:'🏦 Bank',value:`${(wallet.bank_balance||0).toLocaleString()}`,inline:true},{name:'💰 Total',value:`${total.toLocaleString()}`,inline:true},{name:'🔥 Streak',value:`Week ${wallet.daily_streak||0}`,inline:true},{name:'📈 Earned',value:`${(wallet.lifetime_earned||0).toLocaleString()}`,inline:true},{name:'📉 Spent',value:`${(wallet.lifetime_spent||0).toLocaleString()}`,inline:true});
+      }
+      return i.editReply({ embeds: [emb] });
     }
 
-    // ── COMMUNITY ──
-    if (cmd==='profile') {
-      const target=interaction.options.getUser('user')||interaction.user;
-      const member=interaction.guild.members.cache.get(target.id);
-      const w=sb?await getWallet(target.id,target.tag||target.username).catch(()=>null):null;
-      const emb=base(`🎖️ ${target.username}'s Profile`,C.pl).setThumbnail(target.displayAvatarURL({size:128})).addFields({name:'🎭 Joined',value:member?.joinedAt?`<t:${Math.floor(member.joinedAt.getTime()/1000)}:D>`:'Unknown',inline:true},{name:'📅 Discord Since',value:`<t:${Math.floor(target.createdAt.getTime()/1000)}:D>`,inline:true});
-      if(w)emb.addFields({name:'💎 ClaveShards',value:`${(w.wallet_balance||0).toLocaleString()} wallet · ${(w.bank_balance||0).toLocaleString()} bank`,inline:false},{name:'🔥 Streak',value:`Week ${w.daily_streak||0}`,inline:true},{name:'📈 Earned',value:`${(w.lifetime_earned||0).toLocaleString()}`,inline:true});
-      return interaction.editReply({embeds:[emb]});
+    if (cmd === 'rank') {
+      if (!sb||!sbOk()) return i.editReply('⚠️ Database unavailable.');
+      const { data: all } = await sb.from('aegis_wallets').select('discord_id,wallet_balance,bank_balance').order('wallet_balance',{ascending:false});
+      const myW  = await getWallet(i.user.id, i.user.username);
+      const pos  = all?.findIndex(w=>w.discord_id===i.user.id) ?? -1;
+      const total = (myW.wallet_balance||0)+(myW.bank_balance||0);
+      const rank  = total>=10000?'⚜️ Shard Lord':total>=5000?'💎 Shard Master':total>=1000?'🔷 Shard Knight':total>=500?'🔹 Shard Warrior':'⚪ Shard Novice';
+      return i.editReply({ embeds: [base('📊 Your Rank',C.gold).setThumbnail(i.user.displayAvatarURL()).setDescription(`**${i.user.username}**\n${rank}`)
+        .addFields({name:'💎 Wallet',value:`${(myW.wallet_balance||0).toLocaleString()}`,inline:true},{name:'🏦 Bank',value:`${(myW.bank_balance||0).toLocaleString()}`,inline:true},{name:'💰 Total',value:`${total.toLocaleString()}`,inline:true},{name:'🏆 Rank',value:pos>=0?`#${pos+1} of ${all.length}`:'Unranked',inline:true})] });
     }
 
-    if (cmd==='rank') {
-      try{const lb=await getLeaderboard(100);const pos=lb.findIndex(w=>w.discord_id===interaction.user.id)+1;const w=lb.find(w=>w.discord_id===interaction.user.id);if(!w)return interaction.editReply({embeds:[base('📊 Your Rank',C.cy).setDescription('No wallet found. Use `/weekly` to claim your first shards!')]});return interaction.editReply({embeds:[base(`📊 ${interaction.user.username}'s Rank`,C.cy).addFields({name:'🏆 Rank',value:pos?`#${pos} of ${lb.length}`:'>100',inline:true},{name:'💎 Wallet',value:`${(w.wallet_balance||0).toLocaleString()}`,inline:true})]});}
-      catch{return interaction.editReply({embeds:[base('📊 Rank',C.cy).setDescription('_Rank unavailable._')]});}
+    if (cmd === 'rep') {
+      const target = i.options.getUser('user'), reason = i.options.getString('reason') || 'Being an awesome community member!';
+      if (target.id === i.user.id) return i.editReply('❌ Cannot rep yourself!');
+      if (target.bot) return i.editReply('❌ Bots don\'t need reputation.');
+      if (sb && sbOk()) { try { await grantShards(target.id,target.username,10,`Rep from ${i.user.username}: ${reason}`,i.user.id,i.user.username); try { await target.send({ embeds: [base('⭐ You\'ve Been Repped!',C.gold).setDescription(`**${i.user.username}** gave you a rep point!\n📝 *"${reason}"*\n\n+10 ClaveShard bonus!`)] }); } catch {} } catch {} }
+      return i.editReply({ embeds: [base('⭐ Rep Given!',C.gold).setDescription(`**${i.user.username}** repped **${target.username}**!\n📝 *"${reason}"*`).addFields({name:'💎 Bonus',value:'+10 ClaveShard to their wallet!',inline:true})] });
     }
 
-    if (cmd==='rep') {
-      const target=interaction.options.getUser('user'),reason=interaction.options.getString('reason')||'No reason given';
-      if(target.id===interaction.user.id)return interaction.editReply('⚠️ You cannot rep yourself!');
-      return interaction.editReply({embeds:[base('⭐ Reputation Given',C.gold).setDescription(`${interaction.user} gave **+1 rep** to ${target}\n*"${reason}"*`)]});
+    if (cmd === 'trade') {
+      const offering = i.options.getString('offering'), lookingFor = i.options.getString('looking-for'), server = i.options.getString('server') || 'Any server';
+      return i.editReply({ embeds: [base('🤝 Trade Request',C.gold).setDescription(`**${i.user.username}** is looking to trade!`)
+        .addFields({name:'📦 Offering',value:offering,inline:true},{name:'🔍 Looking For',value:lookingFor,inline:true},{name:'🗺️ Server',value:server,inline:true},{name:'📬 Contact',value:`DM <@${i.user.id}> or reply here`})
+        .setFooter({text:'TheConclave Trade Post · No scam protection'})] });
     }
 
-    if (cmd==='trade') {
-      const offering=interaction.options.getString('offering'),looking=interaction.options.getString('looking-for'),server=interaction.options.getString('server')||'Any';
-      return interaction.editReply({embeds:[base('🤝 Trade Post',C.gold).setDescription(`Posted by **${interaction.user.username}**`).addFields({name:'📤 Offering',value:offering,inline:true},{name:'📥 Looking For',value:looking,inline:true},{name:'🗺️ Server',value:server,inline:true}).setFooter({...FT,text:'DM the poster to trade • Use /report for scams'})]});
+    if (cmd === 'online') {
+      let total = 0, description = '';
+      if (beaconState.access) {
+        try {
+          const chars = await sentinelOnlinePlayers();
+          if (chars.length) {
+            total = chars.length;
+            const by = {};
+            for (const c of chars) { const s = c.serviceDisplayName||'Unknown'; if (!by[s]) by[s] = 0; by[s]++; }
+            description = Object.entries(by).map(([s,n]) => `**${s}** — ${n} player${n>1?'s':''}`).join('\n');
+          }
+        } catch {}
+      }
+      if (!description) description = 'No live player data. Use `/servers` for server status.';
+      return i.editReply({ embeds: [base(`👥 Online Now — ${total} Player${total!==1?'s':''}`,C.gr).setDescription(description).setFooter({text:'Live via Beacon Sentinel · TheConclave Dominion'})] });
     }
 
-    if (cmd==='online') {
-      return interaction.editReply({embeds:[base('👥 Cluster Online',C.gr).setDescription('_Online player tracking requires Beacon Sentinel. Use `/servers` for live server counts._')]});
+    if (cmd === 'clipscore') {
+      const url = i.options.getString('url'), desc = i.options.getString('description') || 'No description.';
+      const emb = base('🎬 Clip Submission',C.mag).setDescription(`**${i.user.username}** submitted a clip!`).addFields({name:'🔗 Link',value:url},{name:'📝 Description',value:desc},{name:'⭐ Vote',value:'React with ⭐ to support this clip!'}).setFooter({text:'TheConclave Clip of the Week · Council picks the winner'});
+      const msg = await i.editReply({ embeds:[emb], fetchReply:true });
+      await msg.react('⭐').catch(()=>{});
+      return;
     }
 
-    if (cmd==='clipscore') {
-      const url=interaction.options.getString('url'),desc=interaction.options.getString('description')||'No description';
-      return interaction.editReply({embeds:[base('🎬 Clip Submitted!',C.pk).setDescription(`**${interaction.user.username}** submitted a clip!\n\n🔗 ${url}\n\n*${desc}*`)]});
-    }
-
-    if (cmd==='coords') {
-      const location=interaction.options.getString('location'),map=interaction.options.getString('map')||'Unknown';
-      return interaction.editReply({embeds:[base('📍 Coordinates Shared',C.cy).setDescription(`**${interaction.user.username}** shared a location:`).addFields({name:'📍 Location',value:location,inline:true},{name:'🗺️ Map',value:map,inline:true})]});
-    }
-
-    if (cmd==='whois') {
-      const target=interaction.options.getUser('user'),member=interaction.guild.members.cache.get(target.id);
-      return interaction.editReply({embeds:[base(`🔍 ${target.username}`,C.cy).setThumbnail(target.displayAvatarURL({size:128})).addFields({name:'🆔 ID',value:target.id,inline:true},{name:'📅 Created',value:`<t:${Math.floor(target.createdAt.getTime()/1000)}:D>`,inline:true},{name:'🎭 Joined',value:member?.joinedAt?`<t:${Math.floor(member.joinedAt.getTime()/1000)}:D>`:'Not in server',inline:true},{name:'🎨 Roles',value:member?.roles.cache.filter(r=>r.name!=='@everyone').map(r=>`<@&${r.id}>`).join(' ')||'None',inline:false})]});
-    }
-
-    if (cmd==='serverinfo') {
-      const g=interaction.guild;
-      return interaction.editReply({embeds:[base(`🏠 ${g.name}`,C.pl).setThumbnail(g.iconURL()||'').addFields({name:'👥 Members',value:`${g.memberCount}`,inline:true},{name:'📅 Created',value:`<t:${Math.floor(g.createdAt.getTime()/1000)}:D>`,inline:true},{name:'💬 Channels',value:`${g.channels.cache.size}`,inline:true},{name:'🎭 Roles',value:`${g.roles.cache.size}`,inline:true},{name:'😀 Emojis',value:`${g.emojis.cache.size}`,inline:true},{name:'🌟 Boosts',value:`${g.premiumSubscriptionCount||0}`,inline:true})]});
-    }
-
-    if (cmd==='report') {
-      const issue=interaction.options.getString('issue'),player=interaction.options.getString('player')||'Not specified';
-      const emb=base('🚨 Report Received',C.rd).setDescription(`Report filed by **${interaction.user.username}**`).addFields({name:'📋 Issue',value:issue,inline:false},{name:'👤 Player',value:player,inline:true},{name:'📅 Time',value:`<t:${Math.floor(Date.now()/1000)}:F>`,inline:true});
-      if(sb&&sbOk())try{await sb.from('aegis_reports').insert({guild_id:interaction.guildId,reporter_id:interaction.user.id,reporter_tag:interaction.user.tag||interaction.user.username,issue,player,created_at:new Date().toISOString()});}catch{}
-      return interaction.editReply({embeds:[emb.setFooter({...FT,text:'A Council member will review your report soon.'})]});
-    }
-
-    // ── ADMIN / EVENTS ──
-    if (cmd==='announce') {
-      if(!isAdmin(interaction.member))return interaction.editReply('⛔ Admin only.');
-      const title=interaction.options.getString('title'),message=interaction.options.getString('message'),ping=interaction.options.getBoolean('ping')??false;
-      const emb=base(`📢 ${title}`,C.gold).setDescription(message).setFooter({...FT,text:`Announced by ${interaction.user.username}`});
-      await interaction.channel.send({content:ping?'@everyone':null,embeds:[emb]});
-      return interaction.editReply('✅ Announcement posted.');
-    }
-
-    if (cmd==='event') {
-      if(!isAdmin(interaction.member))return interaction.editReply('⛔ Admin only.');
-      const title=interaction.options.getString('title'),desc=interaction.options.getString('description'),date=interaction.options.getString('date')||'TBA',ping=interaction.options.getBoolean('ping')??false;
-      const emb=base(`📅 Event: ${title}`,C.pk).setDescription(desc).addFields({name:'🕐 Date & Time',value:date,inline:true},{name:'📢 Hosted by',value:interaction.user.username,inline:true}).setFooter({...FT,text:'React 🎉 to show interest!'});
-      await interaction.channel.send({content:ping?'@everyone':null,embeds:[emb]});
-      return interaction.editReply('✅ Event announcement posted.');
-    }
-
-    if (cmd==='giveaway') {
-      if(!isAdmin(interaction.member))return interaction.editReply('⛔ Admin only.');
-      const prize=interaction.options.getString('prize'),duration=interaction.options.getInteger('duration'),winners=interaction.options.getInteger('winners')||1;
-      const endTime=Date.now()+duration*60*1000;
-      const emb=base(`🎉 GIVEAWAY — ${prize}`,C.gold).setDescription(`Click below to enter!\n\n🏆 **${winners} winner${winners!==1?'s':''}**\n⏰ Ends: <t:${Math.floor(endTime/1000)}:R>`).setFooter({...FT,text:`Hosted by ${interaction.user.username}`});
-      const row=new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('giveaway_enter').setLabel('🎉 Enter Giveaway').setStyle(ButtonStyle.Success));
-      const msg=await interaction.channel.send({embeds:[emb],components:[row]});
-      activeGiveaways.set(msg.id,{prize,entries:new Set(),endTime,channelId:interaction.channelId,winnersCount:winners});
-      setTimeout(()=>drawGiveaway(msg.id,interaction.guildId,bot),duration*60*1000);
-      return interaction.editReply(`✅ Giveaway started! Ends <t:${Math.floor(endTime/1000)}:R>.`);
-    }
-
-    if (cmd==='endgiveaway') {
-      if(!isAdmin(interaction.member))return interaction.editReply('⛔ Admin only.');
-      const msgId=interaction.options.getString('messageid');
-      if(!activeGiveaways.has(msgId))return interaction.editReply('⚠️ No active giveaway with that ID.');
-      await drawGiveaway(msgId,interaction.guildId,bot);
-      return interaction.editReply('✅ Giveaway ended.');
+    if (cmd === 'coords') {
+      const location = i.options.getString('location'), map = i.options.getString('map') || 'current map';
+      return i.editReply({ embeds: [base('📍 Coordinates',C.cy).setDescription(`**${location}** on ${map}`).addFields({name:'📋 Format',value:'**LAT LON** shown top-right of HUD\nExample: `52.3 / 48.1`'},{name:'💡 Tip',value:'Use 📍 in chat + coords so tribe/allies can find you fast'},{name:'🗺️ Map Overlays',value:'Visit ARK Smart Breeding or Dododex for detailed maps'})] });
     }
 
     // ── MODERATION ──
-    if (cmd==='warn') {
-      if(!isMod(interaction.member))return interaction.editReply('⛔ Mod only.');
-      const target=interaction.options.getUser('user'),reason=interaction.options.getString('reason');
-      await addWarn(interaction.guildId,target.id,target.tag||target.username,reason,interaction.user.id,interaction.user.tag||interaction.user.username);
-      const warns=await getWarns(interaction.guildId,target.id);
-      const emb=base('⚠️ Warning Issued',C.gold).setDescription(`**${target}** has been warned.`).addFields({name:'📋 Reason',value:reason,inline:false},{name:'🔢 Total Warnings',value:`${warns.length}`,inline:true},{name:'👮 Issued by',value:`${interaction.user}`,inline:true});
-      try{const dm=await target.createDM();await dm.send({embeds:[base(`⚠️ Warning in ${interaction.guild.name}`,C.gold).setDescription(`**Reason:** ${reason}\n\nPlease review the server rules with \`/rules\`.`)]});}catch{}
-      return interaction.editReply({embeds:[emb]});
+    if (cmd === 'announce') {
+      if (!isAdmin(i.member)) return i.editReply('⛔ Admins only.');
+      const emb = new EmbedBuilder().setTitle(`📢 ${i.options.getString('title')}`).setDescription(i.options.getString('message')).setColor(C.gold).setFooter(FT).setTimestamp().setAuthor({name:i.user.username,iconURL:i.user.displayAvatarURL()});
+      const ch  = i.guild.channels.cache.find(c=>c.name==='announcements') || i.channel;
+      try { await ch.send({ content: i.options.getBoolean('ping') ? '@everyone' : undefined, embeds: [emb] }); } catch { await i.channel.send({ embeds: [emb] }); }
+      try { await axios.post(`${API_BASE}/api/announcements`,{title:i.options.getString('title'),body:i.options.getString('message'),author:i.user.username},{headers:{Authorization:`Bearer ${ADMIN_TOKEN||''}`}}); } catch {}
+      return i.editReply(`✅ Announcement sent to ${ch}!`);
     }
 
-    if (cmd==='warn-history') {
-      if(!isMod(interaction.member))return interaction.editReply('⛔ Mod only.');
-      const target=interaction.options.getUser('user'),warns=await getWarns(interaction.guildId,target.id);
-      if(!warns.length)return interaction.editReply(`✅ **${target.username}** has no warnings.`);
-      return interaction.editReply({embeds:[base(`📋 Warnings — ${target.username}`,C.rd).setDescription(warns.map((w,i)=>`**${i+1}.** ${w.reason}\n└ by **${w.issued_by_tag||'Unknown'}** · <t:${Math.floor(new Date(w.created_at).getTime()/1000)}:R>`).join('\n\n'))]});
+    if (cmd === 'event') {
+      if (!isAdmin(i.member)) return i.editReply('⛔ Admins only.');
+      const title = i.options.getString('title'), desc = i.options.getString('description'), date = i.options.getString('date') || 'Date TBD';
+      try { await axios.post(`${API_BASE}/api/events`,{title,description:desc,event_date:null,created_by:i.user.username},{headers:{Authorization:`Bearer ${ADMIN_TOKEN||''}`}}); } catch {}
+      const emb = base(`📅 ${title}`,C.gold).setDescription(desc).addFields({name:'📆 When',value:date,inline:true},{name:'📌 By',value:i.user.username,inline:true}).setAuthor({name:'TheConclave Event',iconURL:i.user.displayAvatarURL()}).setFooter({text:'React with 🎉 to show interest! • TheConclave Dominion'});
+      const annCh = i.guild.channels.cache.find(c=>c.name==='announcements'||c.name==='events') || i.channel;
+      const msg = await annCh.send({ content: i.options.getBoolean('ping') ? '@everyone' : undefined, embeds: [emb] });
+      try { await msg.react('🎉'); } catch {}
+      return i.editReply(`✅ Event posted to ${annCh}!`);
     }
 
-    if (cmd==='ban') {
-      if(!interaction.member.permissions.has(PermissionFlagsBits.BanMembers))return interaction.editReply('⛔ Ban Members required.');
-      const target=interaction.options.getUser('user'),reason=interaction.options.getString('reason');
-      try{await interaction.guild.members.ban(target.id,{reason:`${interaction.user.username}: ${reason}`});return interaction.editReply({embeds:[base(`🔨 Banned: ${target.username}`,C.rd).setDescription(`**Reason:** ${reason}`)]});}
-      catch(e){return interaction.editReply(`⚠️ Could not ban: ${e.message}`);}
+    if (cmd === 'warn') {
+      if (!isMod(i.member)) return i.editReply('⛔ Moderators only.');
+      const target = i.options.getUser('user'), reason = i.options.getString('reason');
+      const warnEmb = base('⚠️ Formal Warning',C.rd).setDescription(`**${target.username}** was warned by **${i.user.username}**`).addFields({name:'📝 Reason',value:reason},{name:'⏰ Time',value:`<t:${Math.floor(Date.now()/1000)}:F>`});
+      try { await target.send({ embeds: [base('⚠️ Warning — TheConclave',C.rd).setDescription(`You received a formal warning.\n📝 **${reason}**\n\nFurther violations may result in timeout or ban.`)] }); } catch {}
+      try { const modCh = i.guild.channels.cache.find(c=>c.name==='mod-log'); if (modCh) await modCh.send({ embeds: [warnEmb] }); } catch {}
+      if (sb && sbOk()) { (async () => { try { await sb.from('aegis_warnings').insert({ discord_id: target.id, discord_tag: target.username, reason, issued_by: i.user.id, issued_by_tag: i.user.username, created_at: new Date().toISOString() }); } catch {} })(); }
+      return i.editReply({ embeds: [warnEmb] });
     }
 
-    if (cmd==='timeout') {
-      if(!isMod(interaction.member))return interaction.editReply('⛔ Mod only.');
-      const target=interaction.options.getUser('user'),duration=interaction.options.getString('duration'),reason=interaction.options.getString('reason')||'No reason';
-      const durations={'5m':5*60_000,'1h':60*60_000,'6h':6*60*60_000,'24h':24*60*60_000,'7d':7*24*60*60_000};
-      const ms=durations[duration]||5*60_000;
-      try{const member=interaction.guild.members.cache.get(target.id);if(!member)return interaction.editReply('⚠️ Member not in server.');await member.timeout(ms,reason);return interaction.editReply({embeds:[base(`⏰ Timeout: ${target.username}`,C.gold).addFields({name:'⏱️ Duration',value:duration,inline:true},{name:'📋 Reason',value:reason,inline:true})]});}
-      catch(e){return interaction.editReply(`⚠️ Timeout failed: ${e.message}`);}
+    if (cmd === 'warn-history') {
+      if (!isMod(i.member)) return i.editReply('⛔ Moderators only.');
+      const target = i.options.getUser('user');
+      if (!sb||!sbOk()) return i.editReply('⚠️ Database unavailable.');
+      const { data: warns } = await sb.from('aegis_warnings').select('*').eq('discord_id',target.id).order('created_at',{ascending:false}).limit(20);
+      if (!warns?.length) return i.editReply(`✅ No warnings on record for **${target.username}**.`);
+      const lines = warns.map((w,idx) => `**${idx+1}.** <t:${Math.floor(new Date(w.created_at).getTime()/1000)}:D> · ${w.reason} · by ${w.issued_by_tag}`).join('\n');
+      return i.editReply({ embeds: [base(`⚠️ Warnings — ${target.username}`,C.rd).setDescription(lines).addFields({name:'Total',value:`${warns.length} warning${warns.length!==1?'s':''}`,inline:true})] });
     }
 
-    if (cmd==='role') {
-      if(!interaction.member.permissions.has(PermissionFlagsBits.ManageRoles))return interaction.editReply('⛔ Manage Roles required.');
-      const target=interaction.options.getUser('user'),role=interaction.options.getRole('role'),action=interaction.options.getString('action');
-      try{const m=interaction.guild.members.cache.get(target.id);if(!m)return interaction.editReply('⚠️ Member not found.');if(action==='add'){await m.roles.add(role);return interaction.editReply(`✅ Added <@&${role.id}> to **${target.username}**.`);}else{await m.roles.remove(role);return interaction.editReply(`✅ Removed <@&${role.id}> from **${target.username}**.`);}}
-      catch(e){return interaction.editReply(`⚠️ Role change failed: ${e.message}`);}
+    if (cmd === 'ban') {
+      if (!isMod(i.member)) return i.editReply('⛔ Moderators only.');
+      const t = i.options.getUser('user'), r = i.options.getString('reason');
+      try {
+        await i.guild.bans.create(t.id, { reason: `${i.user.username}: ${r}`, deleteMessageSeconds: 86400 });
+        try { const modCh = i.guild.channels.cache.find(c=>c.name==='mod-log'); if (modCh) await modCh.send({ embeds: [base('🔨 Member Banned',C.rd).addFields({name:'👤 User',value:`${t.username} (${t.id})`,inline:true},{name:'👮 By',value:i.user.username,inline:true},{name:'📝 Reason',value:r})] }); } catch {}
+        return i.editReply(`✅ **${t.username}** has been banned. Reason: ${r}`);
+      } catch (e) { return i.editReply(`⚠️ Ban failed: ${e.message}`); }
     }
 
-    if (cmd==='ticket') {
-      if(!isAdmin(interaction.member))return interaction.editReply('⛔ Admin only.');
-      const row=new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('ticket_open').setLabel('🎫 Open a Ticket').setStyle(ButtonStyle.Primary),
+    if (cmd === 'timeout') {
+      if (!isMod(i.member)) return i.editReply('⛔ Moderators only.');
+      const t = i.options.getUser('user'), d = i.options.getString('duration'), r = i.options.getString('reason') || 'No reason';
+      const MS = {'5m':300000,'1h':3600000,'6h':21600000,'24h':86400000,'7d':604800000};
+      try { const m = await i.guild.members.fetch(t.id); await m.timeout(MS[d]||3600000, r); return i.editReply(`✅ **${t.username}** timed out for **${d}**. Reason: ${r}`); }
+      catch (e) { return i.editReply(`⚠️ ${e.message}`); }
+    }
+
+    if (cmd === 'role') {
+      if (!isAdmin(i.member)) return i.editReply('⛔ Admins only.');
+      const t = i.options.getUser('user'), role = i.options.getRole('role'), act = i.options.getString('action');
+      try {
+        const m = await i.guild.members.fetch(t.id);
+        if (act === 'add') { await m.roles.add(role); return i.editReply(`✅ Added **${role.name}** to **${t.username}**.`); }
+        else { await m.roles.remove(role); return i.editReply(`✅ Removed **${role.name}** from **${t.username}**.`); }
+      } catch (e) { return i.editReply(`⚠️ ${e.message}`); }
+    }
+
+    if (cmd === 'ticket') {
+      if (!isAdmin(i.member)) return i.editReply('⛔ Admins only.');
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('open_ticket').setLabel('🎫 Open a Ticket').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setLabel('📋 View Rules').setStyle(ButtonStyle.Link).setURL('https://theconclavedominion.com/terms.html'),
       );
-      await interaction.channel.send({embeds:[base('🎫 Support Center',C.cy).setDescription('Click below to open a private support ticket.\nCouncil responds within 24 hours.').addFields({name:'🆘 General Support',value:'Server issues, questions, help',inline:true},{name:'💎 ClaveShard Issues',value:'Orders, economy disputes',inline:true},{name:'🚨 Report a Player',value:'Rules violations, griefing, toxicity',inline:true})],components:[row]});
-      return interaction.editReply('✅ Ticket panel posted.');
+      await i.channel.send({ embeds: [base('🎫 Support Center',C.cy).setDescription('Click below to open a private support ticket.\nCouncil responds within 24 hours.').addFields({name:'🆘 General Support',value:'Server issues, questions, help',inline:true},{name:'💎 ClaveShard Issues',value:'Orders, economy disputes',inline:true},{name:'🚨 Report a Player',value:'Rules violations, griefing, toxicity',inline:true})], components: [row] });
+      return i.editReply('✅ Ticket panel posted.');
     }
 
-    if (cmd==='purge') {
-      if(!isAdmin(interaction.member))return interaction.editReply('⛔ Admin only.');
-      const count=interaction.options.getInteger('count'),user=interaction.options.getUser('user');
-      try{let messages=await interaction.channel.messages.fetch({limit:100});if(user)messages=messages.filter(m=>m.author.id===user.id);const toDelete=[...messages.values()].slice(0,count).filter(m=>Date.now()-m.createdTimestamp<1209600000);await interaction.channel.bulkDelete(toDelete,true);return interaction.editReply(`✅ Deleted **${toDelete.length}** message${toDelete.length!==1?'s':''}${user?` from **${user.username}**`:''}.`);}
-      catch(e){return interaction.editReply(`⚠️ ${e.message}`);}
+    if (cmd === 'report') {
+      const player = i.options.getUser('player'), reason = i.options.getString('reason'), srv = i.options.getString('server') || 'Not specified';
+      const ref = `RPT-${Date.now().toString(36).toUpperCase()}`;
+      const emb = base('🚨 Player Report',C.rd).setDescription(`**Reported by:** ${i.user.username} (${i.user.id})`).addFields({name:'👤 Reported',value:player?`${player.username} (${player.id})`:'Not specified',inline:true},{name:'🗺️ Server',value:srv,inline:true},{name:'📝 Reason',value:reason},{name:'📌 Ref',value:ref},{name:'⏰ Time',value:`<t:${Math.floor(Date.now()/1000)}:F>`});
+      try { const modCh = i.guild.channels.cache.find(c=>c.name==='mod-log'||c.name==='council-chamber'); if (modCh) await modCh.send({ embeds: [emb] }); } catch {}
+      return i.editReply({ embeds: [base('✅ Report Submitted',C.gr).setDescription('Report logged and forwarded to Council.').addFields({name:'📌 Reference',value:ref},{name:'⏱️ Response',value:'Typically within 24 hours'},{name:'📬 Urgent?',value:'Use `/ticket` for a private support channel'})], ephemeral: true });
     }
 
-    if (cmd==='slowmode') {
-      if(!isAdmin(interaction.member))return interaction.editReply('⛔ Admin only.');
-      const seconds=interaction.options.getInteger('seconds');
-      try{await interaction.channel.setRateLimitPerUser(seconds);return interaction.editReply(seconds===0?'✅ Slowmode disabled.':`✅ Slowmode set to **${seconds}s**.`);}
-      catch(e){return interaction.editReply(`⚠️ ${e.message}`);}
+    if (cmd === 'purge') {
+      if (!isAdmin(i.member)) return i.editReply('⛔ Admins only.');
+      const count = i.options.getInteger('count');
+      const user  = i.options.getUser('user');
+      try {
+        let messages = await i.channel.messages.fetch({ limit: 100 });
+        if (user) messages = messages.filter(m => m.author.id === user.id);
+        const toDelete = [...messages.values()].slice(0, count).filter(m => Date.now() - m.createdTimestamp < 1209600000);
+        await i.channel.bulkDelete(toDelete, true);
+        return i.editReply(`✅ Deleted **${toDelete.length}** message${toDelete.length!==1?'s':''}${user?` from **${user.username}**`:''}.`);
+      } catch (e) { return i.editReply(`⚠️ Purge failed: ${e.message}`); }
     }
 
-    if (cmd==='lock') {
-      if(!isAdmin(interaction.member))return interaction.editReply('⛔ Admin only.');
-      const action=interaction.options.getString('action'),reason=interaction.options.getString('reason')||'No reason';
-      try{const lock=action==='lock';await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone,{SendMessages:lock?false:null});return interaction.editReply(`${lock?'🔒':'🔓'} Channel **${lock?'locked':'unlocked'}**. Reason: ${reason}`);}
-      catch(e){return interaction.editReply(`⚠️ ${e.message}`);}
+    if (cmd === 'slowmode') {
+      if (!isAdmin(i.member)) return i.editReply('⛔ Admins only.');
+      const seconds = i.options.getInteger('seconds');
+      try { await i.channel.setRateLimitPerUser(seconds); return i.editReply(seconds === 0 ? '✅ Slowmode disabled.' : `✅ Slowmode set to **${seconds}s**.`); }
+      catch (e) { return i.editReply(`⚠️ ${e.message}`); }
     }
 
-    // ── KNOWLEDGE ──
-    if (cmd==='know') {
-      if(!isAdmin(interaction.member))return interaction.editReply('⛔ Admin only.');
-      if(!sb)return interaction.editReply('⚠️ Supabase not configured.');
-      const sub=interaction.options.getSubcommand();
-      try{
-        if(sub==='add'){const category=interaction.options.getString('category'),title=interaction.options.getString('title'),content=interaction.options.getString('content');const key=`${category}_${Date.now().toString(36)}`;const{error}=await sb.from('aegis_knowledge').upsert({category,key,title,content,added_by:interaction.user.tag||interaction.user.username,updated_at:new Date().toISOString()},{onConflict:'key'});if(error)throw new Error(error.message);_kCache=null;return interaction.editReply(`✅ Added knowledge entry **${title}** in category **${category}**.`);}
-        if(sub==='list'){const category=interaction.options.getString('category');let query=sb.from('aegis_knowledge').select('category,key,title,added_by').order('category').limit(30);if(category)query=query.eq('category',category);const{data,error}=await query;if(error)throw new Error(error.message);if(!data?.length)return interaction.editReply('📭 No knowledge entries.');return interaction.editReply({embeds:[base('📚 Knowledge Base',C.cy).setDescription(data.map(r=>`**[${r.category}]** \`${r.key}\` · ${r.title} · *by ${r.added_by||'Unknown'}*`).join('\n'))]});}
-        if(sub==='delete'){const key=interaction.options.getString('key');const{error}=await sb.from('aegis_knowledge').delete().eq('key',key);if(error)throw new Error(error.message);_kCache=null;return interaction.editReply(`✅ Deleted knowledge entry \`${key}\``);}
-      }catch(e){return interaction.editReply(`⚠️ ${e.message}`);}
+    if (cmd === 'lock') {
+      if (!isAdmin(i.member)) return i.editReply('⛔ Admins only.');
+      const action = i.options.getString('action'), reason = i.options.getString('reason') || 'No reason';
+      try {
+        const lock = action === 'lock';
+        await i.channel.permissionOverwrites.edit(i.guild.roles.everyone, { SendMessages: lock ? false : null });
+        return i.editReply(`${lock?'🔒':'🔓'} Channel **${lock?'locked':'unlocked'}**. Reason: ${reason}`);
+      } catch (e) { return i.editReply(`⚠️ ${e.message}`); }
     }
 
-    // ── UTILS ──
-    if (cmd==='roll') {
-      const notation=(interaction.options.getString('dice')||'d6').toLowerCase().replace(/\s/g,'');
-      const match=notation.match(/^(\d+)?d(\d+)([+-]\d+)?$/);
-      if(!match)return interaction.editReply('⚠️ Invalid notation. Try `d6`, `2d10`, `3d8+5`');
-      const count2=Math.min(parseInt(match[1]||'1'),20),sides=Math.min(parseInt(match[2]),1000),mod=parseInt(match[3]||'0');
-      const rolls=Array.from({length:count2},()=>Math.floor(Math.random()*sides)+1);
-      const sum=rolls.reduce((a,b)=>a+b,0)+mod;
-      return interaction.editReply({embeds:[base(`🎲 ${notation.toUpperCase()}`,C.cy).setDescription(`**Result: ${sum}**\n[${rolls.join(', ')}]${mod?` ${mod>0?'+':''}${mod}`:''}`)]}); 
+    // ── TOOLS ──
+    if (cmd === 'poll') {
+      if (!isAdmin(i.member)) return i.editReply('⛔ Admins only.');
+      const opts = i.options.getString('options').split('|').map(o=>o.trim()).filter(Boolean).slice(0,10);
+      if (opts.length < 2) return i.editReply('⚠️ Need at least 2 options separated by |');
+      const L = ['🇦','🇧','🇨','🇩','🇪','🇫','🇬','🇭','🇮','🇯'];
+      const emb = base(`📊 ${i.options.getString('question')}`,C.cy).setDescription(opts.map((o,j)=>`${L[j]} **${o}**`).join('\n\n')).setFooter({text:`Poll by ${i.user.username} • TheConclave Dominion`});
+      const msg = await i.editReply({ embeds: [emb], fetchReply: true });
+      for (let j = 0; j < opts.length; j++) { try { await msg.react(L[j]); } catch {} }
     }
 
-    if (cmd==='coinflip') { return interaction.editReply({embeds:[base(`🪙 ${Math.random()<0.5?'Heads':'Tails'}!`,C.gold).setDescription(`The coin landed on **${Math.random()<0.5?'🌕 Heads':'🌑 Tails'}**!`)]}); }
-
-    if (cmd==='calc') {
-      const expr=interaction.options.getString('expression');
-      try{const san=expr.replace(/[^0-9+\-*/().% ^]/g,'');if(!san)return interaction.editReply('⚠️ Invalid expression.');const result=Function(`'use strict'; return (${san.replace(/\^/g,'**')})`)();if(!isFinite(result))return interaction.editReply('⚠️ Result not finite.');return interaction.editReply({embeds:[base('🔢 Calculator',C.cy).addFields({name:'Expression',value:`\`${expr}\``,inline:true},{name:'Result',value:`**${result.toLocaleString()}**`,inline:true})]});}
-      catch{return interaction.editReply('⚠️ Invalid expression.');}
+    if (cmd === 'giveaway') {
+      if (!isAdmin(i.member)) return i.editReply('⛔ Admins only.');
+      const prize = i.options.getString('prize'), dur = parseInt(i.options.getString('duration')||'86400'), winners = i.options.getInteger('winners')||1, reqRole = i.options.getRole('required_role');
+      const endsAt = new Date(Date.now()+dur*1000);
+      const emb = new EmbedBuilder().setTitle('🎁 GIVEAWAY').setColor(C.gold).setDescription(`**Prize:** ${prize}\n\nReact with 🎉 to enter!${reqRole?`\n\n⚠️ **Required role:** <@&${reqRole.id}>`:''}`)
+        .addFields({name:'🏆 Winners',value:String(winners),inline:true},{name:'⏰ Ends',value:`<t:${Math.floor(endsAt/1000)}:R>`,inline:true},{name:'📌 Hosted By',value:i.user.username,inline:true}).setTimestamp(endsAt).setFooter(FT);
+      const msg = await i.editReply({ embeds: [emb], fetchReply: true });
+      try { await msg.react('🎉'); } catch {}
     }
 
-    if (cmd==='remind') {
-      const message=interaction.options.getString('message'),timeStr=interaction.options.getString('time');
-      const parseTime=(s)=>{const n=parseFloat(s);if(s.endsWith('d'))return n*86400000;if(s.endsWith('h'))return n*3600000;if(s.endsWith('m'))return n*60000;return null;};
-      const ms=parseTime(timeStr);
-      if(!ms||ms<10000||ms>604800000)return interaction.editReply('⚠️ Time must be 10s–7d. Examples: `30m`, `2h`, `1d`');
-      const fireAt=new Date(Date.now()+ms);
-      await interaction.editReply({embeds:[base('⏰ Reminder Set!',C.cy).setDescription(`I'll ping you <t:${Math.floor(fireAt/1000)}:R>!\n📝 *${message}*`)]});
-      setTimeout(async()=>{try{await interaction.user.send({embeds:[base('⏰ Reminder!',C.cy).setDescription(`📝 *${message}*`)]});}catch{const ch=interaction.channel;if(ch)await ch.send({content:`<@${interaction.user.id}>`,embeds:[base('⏰ Reminder!',C.cy).setDescription(`📝 *${message}*`)]}).catch(()=>{}); }},ms);
+    if (cmd === 'remind') {
+      const message = i.options.getString('message'), timeStr = i.options.getString('time');
+      const parseTime = (s) => { const n = parseFloat(s); if (s.endsWith('d')) return n*86400000; if (s.endsWith('h')) return n*3600000; if (s.endsWith('m')) return n*60000; return null; };
+      const ms = parseTime(timeStr);
+      if (!ms||ms<10000||ms>604800000) return i.editReply('⚠️ Time must be 10s–7d. Examples: `30m`, `2h`, `1d`');
+      const fireAt = new Date(Date.now()+ms);
+      await i.editReply({ embeds: [base('⏰ Reminder Set!',C.cy).setDescription(`I'll ping you <t:${Math.floor(fireAt/1000)}:R>!\n📝 *${message}*`)] });
+      setTimeout(async () => {
+        try { await i.user.send({ embeds: [base('⏰ Reminder!',C.cy).setDescription(`📝 *${message}*`)] }); }
+        catch { const ch = i.channel; if (ch) await ch.send({ content:`<@${i.user.id}>`, embeds: [base('⏰ Reminder!',C.cy).setDescription(`📝 *${message}*`)] }).catch(()=>{}); }
+      }, ms);
     }
 
-    if (cmd==='poll') {
-      if(!isAdmin(interaction.member))return interaction.editReply('⛔ Admin only.');
-      const opts=interaction.options.getString('options').split('|').map(o=>o.trim()).filter(Boolean).slice(0,10);
-      if(opts.length<2)return interaction.editReply('⚠️ Need at least 2 options separated by |');
-      const L=['🇦','🇧','🇨','🇩','🇪','🇫','🇬','🇭','🇮','🇯'];
-      const emb=base(`📊 ${interaction.options.getString('question')}`,C.cy).setDescription(opts.map((o,j)=>`${L[j]} **${o}**`).join('\n\n')).setFooter({...FT,text:`Poll by ${interaction.user.username}`});
-      const msg=await interaction.editReply({embeds:[emb],fetchReply:true});
-      for(let j=0;j<opts.length;j++){try{await msg.react(L[j]);}catch{}}
+    if (cmd === 'roll') {
+      const notation = (i.options.getString('dice')||'d6').toLowerCase().replace(/\s/g,'');
+      const match = notation.match(/^(\d+)?d(\d+)([+-]\d+)?$/);
+      if (!match) return i.editReply('⚠️ Invalid notation. Try `d6`, `2d10`, `3d8+5`');
+      const count2 = Math.min(parseInt(match[1]||'1'),20), sides = Math.min(parseInt(match[2]),1000), mod = parseInt(match[3]||'0');
+      if (sides < 2) return i.editReply('⚠️ Dice must have at least 2 sides.');
+      const rolls = Array.from({length:count2}, ()=>Math.floor(Math.random()*sides)+1);
+      const sum   = rolls.reduce((a,b)=>a+b,0)+mod;
+      const display = rolls.length>1 ? `[${rolls.join(', ')}]${mod?` ${mod>0?'+':''}${mod}`:''}` : `${rolls[0]}${mod?` ${mod>0?'+':''}${mod}`:''}`;
+      return i.editReply({ embeds: [base(`🎲 ${notation.toUpperCase()}`,C.cy).setDescription(`**Result: ${sum}**\n${display}`).addFields({name:'Rolls',value:rolls.join(', '),inline:true},{name:'Total',value:`${sum}`,inline:true})] });
     }
 
-  } catch(e) {
+    if (cmd === 'coinflip') {
+      const result = Math.random()<0.5?'Heads':'Tails';
+      return i.editReply({ embeds: [base(`🪙 ${result}!`,C.gold).setDescription(`${result==='Heads'?'🌕':'🌑'} The coin landed on **${result}**!`)] });
+    }
+
+    if (cmd === 'calc') {
+      const expr = i.options.getString('expression');
+      try {
+        const san = expr.replace(/[^0-9+\-*/().% ^]/g,'');
+        if (!san) return i.editReply('⚠️ Invalid expression.');
+        const result = Function(`'use strict'; return (${san.replace(/\^/g,'**')})`)();
+        if (!isFinite(result)) return i.editReply('⚠️ Result not finite.');
+        return i.editReply({ embeds: [base('🔢 Calculator',C.cy).addFields({name:'Expression',value:`\`${expr}\``,inline:true},{name:'Result',value:`**${result.toLocaleString()}**`,inline:true})] });
+      } catch { return i.editReply('⚠️ Invalid expression. Try: `100*5`, `2^10`, `(50+30)/4`'); }
+    }
+
+    if (cmd === 'whois') {
+      const target = i.options.getUser('user');
+      try {
+        const member = await i.guild.members.fetch(target.id);
+        const roles  = member.roles.cache.filter(r=>r.id!==i.guild.id).sort((a,b)=>b.position-a.position).first(8).map(r=>`<@&${r.id}>`).join(' ') || 'None';
+        let wallet = null;
+        if (sb&&sbOk()) { try { const { data } = await sb.from('aegis_wallets').select('wallet_balance,bank_balance,daily_streak').eq('discord_id',target.id).single(); wallet = data; } catch {} }
+        const emb = base(`🔍 ${target.username}`,C.cy).setThumbnail(target.displayAvatarURL()).addFields({name:'📅 Joined',value:member.joinedAt?`<t:${Math.floor(member.joinedAt/1000)}:D>`:'Unknown',inline:true},{name:'📆 Created',value:`<t:${Math.floor(target.createdAt/1000)}:D>`,inline:true},{name:'🆔 ID',value:target.id,inline:true},{name:'🎖️ Roles',value:roles});
+        if (wallet) emb.addFields({name:'💎 ClaveShard',value:`${((wallet.wallet_balance||0)+(wallet.bank_balance||0)).toLocaleString()} total · 🔥 Week ${wallet.daily_streak||0}`,inline:true});
+        if (member.nickname) emb.addFields({name:'🏷️ Nickname',value:member.nickname,inline:true});
+        return i.editReply({ embeds: [emb] });
+      } catch (e) { return i.editReply(`⚠️ ${e.message}`); }
+    }
+
+    if (cmd === 'serverinfo') {
+      const g = i.guild;
+      await g.members.fetch().catch(()=>{});
+      const online   = g.members.cache.filter(m=>m.presence?.status==='online'||m.presence?.status==='dnd'||m.presence?.status==='idle').size;
+      const channels = g.channels.cache;
+      return i.editReply({ embeds: [base(`🏠 ${g.name}`,C.pl).setThumbnail(g.iconURL()).addFields({name:'👥 Members',value:`${g.memberCount.toLocaleString()} · ${online} online`,inline:true},{name:'📅 Created',value:`<t:${Math.floor(g.createdAt/1000)}:D>`,inline:true},{name:'🆔 Guild ID',value:g.id,inline:true},{name:'📺 Channels',value:`${channels.filter(c=>c.type===0).size} text · ${channels.filter(c=>c.type===2).size} voice`,inline:true},{name:'🎭 Roles',value:`${g.roles.cache.size}`,inline:true},{name:'🌟 Features',value:'5× crossplay ARK · ClaveShard Economy · AEGIS AI · 10 Maps'})] });
+    }
+
+    // ── MONITORING ──
+    if (cmd === 'setup-monitoring') {
+      if (!isAdmin(i.member)) return i.editReply('⛔ Admins only.');
+      await i.editReply('⚙️ Deploying Dominion Cluster Monitor...');
+      try {
+        const everyone  = i.guild.roles.everyone;
+        const readOnly  = [{ id: everyone, allow: [PermissionFlagsBits.ViewChannel], deny: [PermissionFlagsBits.SendMessages, PermissionFlagsBits.AddReactions] }, ...(ROLE_ADMIN_ID?[{id:ROLE_ADMIN_ID,allow:[PermissionFlagsBits.ViewChannel,PermissionFlagsBits.SendMessages,PermissionFlagsBits.ManageMessages]}]:[]), ...(ROLE_OWNER_ID?[{id:ROLE_OWNER_ID,allow:[PermissionFlagsBits.ViewChannel,PermissionFlagsBits.SendMessages,PermissionFlagsBits.ManageMessages]}]:[])];
+        const voicePerms = [{ id: everyone, deny: [PermissionFlagsBits.Connect, PermissionFlagsBits.Speak, PermissionFlagsBits.SendMessages] }];
+        const statuses  = await fetchServerStatus(MONITOR_SERVERS);
+        const online    = statuses.filter(s=>s.status==='online');
+        const total     = online.reduce((sum,s)=>sum+s.players,0);
+        const cat = await i.guild.channels.create({ name: '⚡・DOMINION NETWORK', type: 4, permissionOverwrites: readOnly });
+        const vOnline  = await i.guild.channels.create({ name: `🟢 Online: ${online.length} of 10`, type: 2, parent: cat.id, permissionOverwrites: voicePerms });
+        await new Promise(r=>setTimeout(r,400));
+        const vPlayers = await i.guild.channels.create({ name: `👥 Players: ${total} Live`, type: 2, parent: cat.id, permissionOverwrites: voicePerms });
+        await new Promise(r=>setTimeout(r,400));
+        for (const srv of statuses) {
+          const isOn = srv.status === 'online';
+          const name = isOn ? `${srv.emoji} ${srv.name} · ${srv.players}/${srv.maxPlayers}` : `🔴 ${srv.name} · Offline`;
+          await i.guild.channels.create({ name, type: 2, parent: cat.id, permissionOverwrites: voicePerms });
+          await new Promise(r=>setTimeout(r,500));
+        }
+        const statusCh = await i.guild.channels.create({ name: '📡・cluster-status', type: 0, parent: cat.id, topic: '⚡ Live ARK cluster — auto-updates every 5 min', permissionOverwrites: readOnly });
+        const actCh    = await i.guild.channels.create({ name: '📊・player-activity', type: 0, parent: cat.id, topic: 'Live player activity across all 10 servers', permissionOverwrites: readOnly });
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('monitor_refresh').setLabel('🔄 Refresh').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId('monitor_players').setLabel('👥 Who Is Online').setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setLabel('🌐 Website').setStyle(ButtonStyle.Link).setURL('https://theconclavedominion.com'),
+        );
+        const msg = await statusCh.send({ embeds: [buildMonitorEmbed(statuses)], components: [row] });
+        await actCh.send({ embeds: [new EmbedBuilder().setColor(0x7B2FFF).setTitle('📊 Player Activity Feed').setDescription('Player count changes appear here in real time.\nPowered by **Nitrado direct API**.').setFooter({text:'TheConclave Dominion • AEGIS Network Monitor'}).setTimestamp()] });
+        monitorState.set(i.guild.id, { statusChannelId: statusCh.id, activityChannelId: actCh.id, messageId: msg.id, servers: [...MONITOR_SERVERS], prevStatuses: statuses });
+        return i.editReply({ embeds: [base('⚡ Dominion Network Online',0x7B2FFF).setDescription('Full live cluster monitor deployed.').addFields({name:'🟢 Online',value:`${online.length}/10`,inline:true},{name:'👥 Players',value:`${total}`,inline:true},{name:'⏰ Refresh',value:'Every 5 min',inline:true},{name:'📡 Status Feed',value:`${statusCh}`,inline:true},{name:'📊 Activity Feed',value:`${actCh}`,inline:true})] });
+      } catch (e) { return i.editReply(`⚠️ Setup failed: ${e.message}`); }
+    }
+
+    if (cmd === 'monitor-add') {
+      if (!isAdmin(i.member)) return i.editReply('⛔ Admins only.');
+      const state = monitorState.get(i.guild.id);
+      if (!state) return i.editReply('⚠️ Run `/setup-monitoring` first.');
+      const name = i.options.getString('name'), ip = i.options.getString('ip'), port = i.options.getInteger('port');
+      const emoji = i.options.getString('emoji')||'🖥️', pvp = i.options.getBoolean('pvp')||false, patreon = i.options.getBoolean('patreon')||false;
+      const id = name.toLowerCase().replace(/[^a-z0-9]/g,'_');
+      if (state.servers?.find(s=>s.ip===ip&&s.port===port)) return i.editReply(`⚠️ **${ip}:${port}** already monitored.`);
+      state.servers = [...(state.servers||MONITOR_SERVERS), { id, name, emoji, ip, port, pvp, patreon }];
+      await refreshMonitor(i.guild);
+      return i.editReply({ embeds: [base(`✅ Added ${emoji} ${name}`,0x35ED7E).addFields({name:'🌐 IP',value:`\`${ip}:${port}\``,inline:true},{name:'⚔️ PvP',value:pvp?'Yes':'No',inline:true},{name:'⭐ Patreon',value:patreon?'Yes':'No',inline:true})] });
+    }
+
+    if (cmd === 'monitor-refresh') {
+      if (!isAdmin(i.member)) return i.editReply('⛔ Admins only.');
+      const state = monitorState.get(i.guild.id);
+      if (!state) return i.editReply('⚠️ No monitor active. Run `/setup-monitoring` first.');
+      await i.editReply('🔄 Forcing cluster refresh...');
+      await refreshMonitor(i.guild);
+      return i.editReply('✅ All stat channels updated.');
+    }
+
+    // ── BEACON SENTINEL ──
+    if (cmd === 'beacon-setup') {
+      if (!isAdmin(i.member)) return i.editReply('⛔ Admins only.');
+      try {
+        const { randomBytes, createHash } = require('crypto');
+        const verifier  = randomBytes(48).toString('base64url').slice(0,96);
+        const challenge = createHash('sha256').update(verifier).digest('base64url');
+        const clientId  = process.env.BEACON_CLIENT_ID || 'eb9ecdff-4048-4a83-8f40-f2e16d2e9a81';
+        const clientSec = process.env.BEACON_CLIENT_SECRET || '';
+        const form = new URLSearchParams({ client_id: clientId, client_secret: clientSec, scope: 'common sentinel:read sentinel:write', code_challenge: challenge, code_challenge_method: 'S256' });
+        const r = await axios.post('https://api.usebeacon.app/v4/device', form.toString(), { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 10000 });
+        const { device_code, user_code, verification_uri_complete, expires_in } = r.data;
+        try {
+          await i.user.send({ embeds: [base('🔐 Beacon Sentinel Auth',C.cy).setDescription('Visit the link below to connect AEGIS to Beacon Sentinel.').addFields({name:'🔑 Code',value:`\`${user_code}\``,inline:true},{name:'⏰ Expires',value:`${Math.floor(expires_in/60)} min`,inline:true},{name:'🌐 Auth Link',value:`[Click to authorize](${verification_uri_complete})`},{name:'📋 Steps',value:'1. Click link\n2. Log in to Beacon\n3. Enter the code\n4. Wait for DM confirmation'})] });
+        } catch { return i.editReply('⚠️ Could not DM you. Enable DMs from server members.'); }
+        await i.editReply('✅ Auth code sent to your DMs. Complete the steps there.');
+        const pollMs = (r.data.interval||5)*1000;
+        let attempts = 0;
+        const max = Math.floor(expires_in/(r.data.interval||5));
+        const poll = setInterval(async () => {
+          attempts++;
+          if (attempts > max) { clearInterval(poll); return; }
+          try {
+            const t = await axios.post('https://api.usebeacon.app/v4/login', { client_id: clientId, client_secret: clientSec||undefined, device_code, grant_type: 'urn:ietf:params:oauth:grant-type:device_code', code_verifier: verifier }, { headers: { 'Content-Type': 'application/json' }, timeout: 10000 });
+            clearInterval(poll);
+            beaconState.access = t.data.access_token; beaconState.refresh = t.data.refresh_token; beaconState.expiresAt = t.data.access_token_expiration;
+            try {
+              await i.user.send({ embeds: [base('✅ Beacon Connected!',C.gr).setDescription('AEGIS is now authenticated with Beacon Sentinel.').addFields({name:'⚠️ Next Step',value:'Copy tokens from next message into Render env vars.'})] });
+              await i.user.send(`**Paste into Render Environment Variables:**\n\`\`\`\nBEACON_ACCESS_TOKEN=${t.data.access_token}\nBEACON_REFRESH_TOKEN=${t.data.refresh_token}\nBEACON_TOKEN_EXPIRES=${t.data.access_token_expiration}\n\`\`\``);
+            } catch {}
+          } catch (e) {
+            const code = e.response?.data?.error;
+            if (code==='authorization_pending'||code==='slow_down') return;
+            clearInterval(poll);
+          }
+        }, pollMs);
+      } catch (e) { return i.editReply(`⚠️ ${e.response?.data?.error||e.message}`); }
+    }
+
+    if (cmd === 'tribes') {
+      const filter = i.options.getString('server') || '';
+      if (!beaconState.access) return i.editReply('⚠️ Beacon Sentinel not connected. Admin must run `/beacon-setup` first.');
+      const tribes = await sentinelTribes(filter);
+      if (!tribes.length) return i.editReply(`📭 No tribes found${filter?` on **${filter}**`:''}.`);
+      const lines = tribes.slice(0,25).map((t,idx) => `**${idx+1}.** ${t.tribeName||'Unnamed'}${t.serviceDisplayName?` · *${t.serviceDisplayName}*`:''}`).join('\n');
+      return i.editReply({ embeds: [base(`🏛️ Tribes${filter?' — '+filter:''}`,C.pl).setDescription(lines).addFields({name:'📊 Total',value:`${tribes.length}`,inline:true}).setFooter({text:'Powered by Beacon Sentinel • TheConclave Dominion'})] });
+    }
+
+    if (cmd === 'player-lookup') {
+      if (!isMod(i.member)) return i.editReply('⛔ Moderators only.');
+      if (!beaconState.access) return i.editReply('⚠️ Beacon Sentinel not connected.');
+      const name = i.options.getString('name');
+      const player = await sentinelPlayer(name);
+      if (!player) return i.editReply(`📭 No player found matching **${name}**.`);
+      const emb = base(`🔍 ${player.playerName||name}`,C.cy).addFields({name:'🆔 Player ID',value:player.playerId||'Unknown',inline:true},{name:'👤 Name',value:player.playerName||'Unknown',inline:true},{name:'🕐 Last Active',value:player.updatedAt?`<t:${Math.floor(new Date(player.updatedAt)/1000)}:R>`:'Unknown',inline:true});
+      if (player.notes?.length) emb.addFields({name:'📝 Notes',value:player.notes.slice(0,3).map(n=>n.note).join('\n')});
+      return i.editReply({ embeds: [emb] });
+    }
+
+    if (cmd === 'sentinel-bans') {
+      if (!isAdmin(i.member)) return i.editReply('⛔ Admins only.');
+      if (!beaconState.access) return i.editReply('⚠️ Beacon Sentinel not connected.');
+      const bans = await sentinelBans();
+      if (!bans.length) return i.editReply('✅ No active bans on record.');
+      const lines = bans.slice(0,20).map((b,idx) => `**${idx+1}.** ${b.playerName||b.playerId||'Unknown'} · ${b.reason||'No reason'}${b.createdAt?` · <t:${Math.floor(new Date(b.createdAt)/1000)}:R>`:''}`).join('\n');
+      return i.editReply({ embeds: [base('🚫 Sentinel Ban List',C.rd).setDescription(lines).addFields({name:'📊 Total',value:`${bans.length}`,inline:true}).setFooter({text:'Powered by Beacon Sentinel'})] });
+    }
+
+  } catch (e) {
     console.error(`❌ /${cmd}:`, e.message);
-    try { await interaction.editReply(`⚠️ Error: ${e.message.slice(0,200)}`); } catch {}
+    try { await i.editReply(`⚠️ Error: ${e.message.slice(0,200)}`); } catch {}
   }
 });
 
-// ══════════════════════════════════════════════════════════════════
-// AUTO-REPLY IN AEGIS CHANNEL
-// ══════════════════════════════════════════════════════════════════
+// ─── AEGIS CHANNEL AUTO-REPLY ──────────────────────────────────────────
 bot.on(Events.MessageCreate, async msg => {
   if (msg.author.bot) return;
-  if (!AEGIS_CHANNEL_ID || msg.channelId !== AEGIS_CHANNEL_ID) return;
+  if (!AEGIS_CH || msg.channelId !== AEGIS_CH) return;
   const w = checkRate(msg.author.id, 8000);
-  if (w) { const m = await msg.reply(`⏳ Retry in ${w}s.`).catch(()=>null); if(m)setTimeout(()=>m.delete().catch(()=>{}),4000); return; }
+  if (w) { const m = await msg.reply(`⏳ Retry in ${w}s.`).catch(()=>null); if (m) setTimeout(()=>m.delete().catch(()=>{}),4000); return; }
   msg.channel.sendTyping().catch(()=>{});
   const r = await askAegis(msg.content, msg.author.id);
   msg.reply(r.slice(0,1990)).catch(()=>msg.channel.send(r.slice(0,1990)).catch(()=>{}));
 });
 
-// ══════════════════════════════════════════════════════════════════
-// WELCOME + AUTO-WALLET
-// ══════════════════════════════════════════════════════════════════
+// ─── WELCOME + AUTO-WALLET ──────────────────────────────────────────────
 bot.on(Events.GuildMemberAdd, async member => {
   try {
-    if(sb&&sbOk())(async()=>{try{await sb.from('aegis_wallets').upsert({discord_id:member.id,discord_tag:member.user.username,updated_at:new Date().toISOString()},{onConflict:'discord_id',ignoreDuplicates:true});}catch{}})();
-    const ch=member.guild.channels.cache.find(c=>c.name==='welcome'||c.name==='welcomes');
-    if(!ch)return;
-    await ch.send({embeds:[base(`⚔️ Welcome, ${member.user.username}!`,C.pl).setThumbnail(member.user.displayAvatarURL()).setDescription('You\'ve joined TheConclave Dominion — 5× crossplay ARK across **10 maps**.').addFields({name:'📌 Start Here',value:'#rules — Read the Codex',inline:true},{name:'🎮 Server IPs',value:'`/servers`',inline:true},{name:'💎 Free Shards',value:'`/weekly`',inline:true},{name:'💬 Say Hi',value:'#general',inline:true},{name:'🎫 Support',value:'`/ticket`',inline:true},{name:'🧠 Ask AEGIS',value:'`/aegis [question]`',inline:true}).setFooter({text:`Member #${member.guild.memberCount} • TheConclave Dominion`})]});
-  } catch(e) { console.error('❌ Welcome:', e.message); }
+    if (sb && sbOk()) (async () => { try { await sb.from('aegis_wallets').upsert({ discord_id: member.id, discord_tag: member.user.username, updated_at: new Date().toISOString() }, { onConflict: 'discord_id', ignoreDuplicates: true }); } catch {} })();
+    const ch = member.guild.channels.cache.find(c => c.name==='welcome'||c.name==='welcomes'||c.name==='welcome-gate');
+    if (!ch) return;
+    await ch.send({ embeds: [base(`⚔️ Welcome, ${member.user.username}!`,C.pl)
+      .setThumbnail(member.user.displayAvatarURL())
+      .setDescription('You\'ve joined TheConclave Dominion — 5× crossplay ARK across **10 maps**.')
+      .addFields({name:'📌 Start Here',value:'#rules — Read the Codex',inline:true},{name:'🎮 Server IPs',value:'`/servers`',inline:true},{name:'💎 Free Shards',value:'`/weekly`',inline:true},{name:'💬 Say Hi',value:'#general',inline:true},{name:'🎫 Support',value:'`/ticket`',inline:true},{name:'🧠 Ask AEGIS',value:'`/aegis [question]`',inline:true})
+      .setFooter({text:`Member #${member.guild.memberCount} • TheConclave Dominion`})] });
+  } catch (e) { console.error('❌ Welcome:', e.message); }
 });
 
-// ══════════════════════════════════════════════════════════════════
-// HEALTH SERVER
-// ══════════════════════════════════════════════════════════════════
-const STATUS = { ready:false, readyAt:null, reconnects:0 };
+// ─── WATCHDOG ──────────────────────────────────────────────────────────
+const STATUS = { ready: false, readyAt: null, reconnects: 0 };
+let watchdogFails = 0, lastReady = Date.now();
+const WATCHDOG_START = Date.now() + 90_000;
 
+setInterval(async () => {
+  if (Date.now() < WATCHDOG_START) return;
+  const wsStatus = bot.ws?.status ?? -1;
+  const heapMB   = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
+  if (heapMB > 450) console.warn(`⚠️  High memory: ${heapMB}MB`);
+  if (wsStatus !== 5) { if (wsStatus === 0) { watchdogFails = 0; lastReady = Date.now(); } return; }
+  watchdogFails++;
+  if (watchdogFails >= 5) {
+    STATUS.reconnects++;
+    console.error(`❌ Bot fully disconnected — restarting (attempt #${STATUS.reconnects})...`);
+    STATUS.ready = false;
+    try { healthServer.close(); } catch {}
+    try { bot.destroy(); } catch {}
+    setTimeout(() => process.exit(1), 2000);
+  }
+}, 30_000);
+
+// ─── HEALTH SERVER ─────────────────────────────────────────────────────
 const healthServer = http.createServer((req, res) => {
-  if (req.url==='/health'||req.url==='/') {
-    const up=STATUS.ready&&bot.ws.status===0;
-    const mem=process.memoryUsage();
-    res.writeHead(up?200:503,{'Content-Type':'application/json'});
-    res.end(JSON.stringify({status:up?'ok':'degraded',bot:STATUS.ready?'ready':'not_ready',ws:bot.ws.status,wsLatency:bot.ws.ping,uptime:STATUS.readyAt?Math.floor((Date.now()-STATUS.readyAt)/1000)+'s':'0s',reconnects:STATUS.reconnects,heapMB:Math.round(mem.heapUsed/1024/1024),supabase:sb?(sbOk()?'ok':'circuit_open'):'not_configured',version:'v10.0',ts:new Date().toISOString()}));
+  if (req.url === '/health' || req.url === '/') {
+    const up  = STATUS.ready && bot.ws.status === 0;
+    const mem = process.memoryUsage();
+    res.writeHead(up ? 200 : 503, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      status: up ? 'ok' : 'degraded', bot: STATUS.ready ? 'ready' : 'not_ready',
+      ws: bot.ws.status, wsLatency: bot.ws.ping, uptime: STATUS.readyAt ? Math.floor((Date.now()-STATUS.readyAt)/1000)+'s' : '0s',
+      reconnects: STATUS.reconnects, heapMB: Math.round(mem.heapUsed/1024/1024),
+      supabase: sb ? (sbOk() ? 'ok' : 'circuit_open') : 'not_configured',
+      commands: cmds.length, version: 'v10.0', ts: new Date().toISOString(),
+    }));
   } else { res.writeHead(404); res.end('Not found'); }
 });
-healthServer.listen(BOT_PORT, ()=>console.log(`💓 Health: :${BOT_PORT}`));
+healthServer.listen(BOT_PORT, () => console.log(`💓 Health: :${BOT_PORT}`));
 
-// ══════════════════════════════════════════════════════════════════
-// PROCESS GUARDS
-// ══════════════════════════════════════════════════════════════════
-const IGNORE=['Unknown interaction','Unknown Message','Missing Access','Cannot send messages','Unknown Channel'];
-process.on('unhandledRejection',r=>{const m=r?.message||String(r);if(!IGNORE.some(e=>m.includes(e)))console.error('❌ Rejection:',m);});
-process.on('uncaughtException',(e,o)=>console.error(`❌ Exception [${o}]:`,e.message));
-process.on('SIGTERM',()=>{STATUS.ready=false;healthServer.close();bot.destroy();setTimeout(()=>process.exit(0),3000);});
-process.on('SIGINT', ()=>{STATUS.ready=false;healthServer.close();bot.destroy();setTimeout(()=>process.exit(0),1000);});
+// ─── PROCESS GUARDS ─────────────────────────────────────────────────────
+const IGNORE = ['Unknown interaction','Unknown Message','Missing Access','Cannot send messages','Unknown Channel'];
+process.on('unhandledRejection', r => { const m = r?.message||String(r); if (!IGNORE.some(e=>m.includes(e))) console.error('❌ Rejection:', m); });
+process.on('uncaughtException', (e, o) => console.error(`❌ Exception [${o}]:`, e.message));
+process.on('SIGTERM', () => { STATUS.ready = false; healthServer.close(); bot.destroy(); setTimeout(() => process.exit(0), 3000); });
+process.on('SIGINT',  () => { STATUS.ready = false; healthServer.close(); bot.destroy(); setTimeout(() => process.exit(0), 1000); });
 
-// ══════════════════════════════════════════════════════════════════
-// READY
-// ══════════════════════════════════════════════════════════════════
+// ─── READY ─────────────────────────────────────────────────────────────
 bot.once(Events.ClientReady, async () => {
-  STATUS.ready=true; STATUS.readyAt=Date.now();
+  STATUS.ready = true; STATUS.readyAt = Date.now();
   console.log(`🤖 AEGIS v10.0 SOVEREIGN — ${bot.user.tag}`);
-  console.log(`   Supabase: ${sb?'✅':'⚠️'} · Anthropic: ${anthropic?'✅':'⚠️'} · Health: :${BOT_PORT}`);
-  bot.user.setActivity(`💎 /weekly | AEGIS v10 Sovereign`, { type:3 });
+  console.log(`   Supabase: ${sb?'✅':'⚠️'} · Anthropic: ${anthropic?'✅':'⚠️'} · Health: :${BOT_PORT} · Commands: ${cmds.length}`);
+  bot.user.setActivity(`💎 /weekly | ${cmds.length} commands | AEGIS v10`, { type: 3 });
   await registerCommands();
 
   if (DISCORD_GUILD_ID) {
-    try {
-      const guild=await bot.guilds.fetch(DISCORD_GUILD_ID).catch(()=>null);
-      if (guild) {
-        console.log('📡 Updating live status channels...');
-        const statuses=await fetchServerStatuses();
-        await updateExistingStatusChannels(guild,statuses);
-        console.log('✅ Status channels updated on boot');
-
-        const monCh=process.env.MONITOR_STATUS_CHANNEL_ID;
-        const monMsg=process.env.MONITOR_MESSAGE_ID;
-        if (monCh&&monMsg) {
-          monitorState.set(DISCORD_GUILD_ID,{statusChannelId:monCh,messageId:monMsg});
-          const ch=await guild.channels.fetch(monCh).catch(()=>null);
-          if (ch) {
-            const embed=buildMonitorEmbed(statuses);
-            const msg=await ch.messages.fetch(monMsg).catch(()=>null);
-            if(msg)await msg.edit({embeds:[embed]}).catch(()=>{});
-            console.log('📡 Monitor embed resumed');
-          }
-        }
+    const guild = await bot.guilds.fetch(DISCORD_GUILD_ID).catch(()=>null);
+    if (guild) {
+      console.log('📡 Updating live status channels...');
+      const statuses = await fetchServerStatus(MONITOR_SERVERS);
+      await updateExistingStatusChannels(guild, statuses);
+      console.log('✅ Status channels updated on boot');
+      const monCh  = process.env.MONITOR_STATUS_CHANNEL_ID;
+      const actCh  = process.env.MONITOR_ACTIVITY_CHANNEL_ID;
+      const monMsg = process.env.MONITOR_MESSAGE_ID;
+      if (monCh && monMsg) {
+        monitorState.set(DISCORD_GUILD_ID, { statusChannelId: monCh, activityChannelId: actCh||null, messageId: monMsg, servers: [...MONITOR_SERVERS], prevStatuses: statuses });
+        await refreshMonitor(guild);
+        console.log('📡 Monitor embed resumed');
       }
-    } catch(e){ console.error('❌ Boot tasks:',e.message); }
+    }
   }
 });
 
-// ══════════════════════════════════════════════════════════════════
-// LOGIN WITH EXPONENTIAL BACKOFF
-// ══════════════════════════════════════════════════════════════════
-const BACKOFF=[5,15,30,60,120,120];
-let loginAttempt=0;
-async function login(){
+// ─── LOGIN ──────────────────────────────────────────────────────────────
+let loginAttempt = 0;
+const BACKOFF = [5,15,30,60,120,120];
+async function login() {
   loginAttempt++;
-  try { await bot.login(DISCORD_BOT_TOKEN); loginAttempt=0; }
-  catch(e) {
-    const delay=BACKOFF[Math.min(loginAttempt-1,BACKOFF.length-1)]*1000;
+  try { await bot.login(DISCORD_BOT_TOKEN); loginAttempt = 0; }
+  catch (e) {
+    const delay = BACKOFF[Math.min(loginAttempt-1, BACKOFF.length-1)] * 1000;
     console.error(`❌ Login attempt ${loginAttempt} failed: ${e.message} — retry in ${delay/1000}s`);
-    setTimeout(login,delay);
+    setTimeout(login, delay);
   }
 }
 login();
