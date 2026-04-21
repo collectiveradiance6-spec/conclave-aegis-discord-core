@@ -12,6 +12,7 @@ const {
   getVoiceConnection, NoSubscriberBehavior, StreamType,
 } = require('@discordjs/voice');
 const playdl = require('play-dl');
+const fs = require('node:fs');
 const {
   EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
   StringSelectMenuBuilder, SlashCommandBuilder, PermissionFlagsBits,
@@ -33,6 +34,37 @@ const DJ_ROLE              = process.env.MUSIC_DJ_ROLE_ID || null;
 const VOTE_THRESHOLD       = 0.5;
 const HISTORY_MAX          = 50;
 const AUTO_SIMILAR_COUNT   = 5;
+const YT_COOKIES_PATH      = process.env.YT_COOKIES_PATH || '';
+const YT_COOKIES_STRING    = process.env.YT_COOKIES_STRING || '';
+const YT_FAIL_SKIP_DELAY   = parseInt(process.env.YT_FAIL_SKIP_DELAY || '1200');
+const YT_ERROR_COOLDOWN_MS = parseInt(process.env.YT_ERROR_COOLDOWN_MS || '15000');
+
+function isYouTubeBotGateError(err) {
+  const msg = String(err?.message || err || '');
+  return /sign in to confirm you(?:'|’)re not a bot/i.test(msg)
+    || /confirm you(?:'|’)re not a bot/i.test(msg)
+    || /while getting info from url/i.test(msg);
+}
+
+function getCookieString() {
+  if (YT_COOKIES_STRING) return YT_COOKIES_STRING;
+  if (YT_COOKIES_PATH && fs.existsSync(YT_COOKIES_PATH)) {
+    try { return fs.readFileSync(YT_COOKIES_PATH, 'utf8'); }
+    catch { return ''; }
+  }
+  return '';
+}
+
+// Optional: inject YouTube cookies into play-dl if available
+try {
+  const cookie = getCookieString();
+  if (cookie && typeof playdl.setToken === 'function') {
+    playdl.setToken({ youtube: { cookie } });
+    console.log('🍪 YouTube cookie injected into play-dl');
+  }
+} catch (e) {
+  console.warn('⚠️  Failed to inject YouTube cookie:', e.message);
+}
 
 // ─── GENRE CATALOG ────────────────────────────────────────────────────
 const GENRES = {
@@ -208,7 +240,18 @@ async function search10(query) {
 }
 
 async function getStream(track) {
-  return playdl.stream(track.url, { quality:2, precache:3, discordPlayerCompatibility:true });
+  const opts = { quality:2, precache:3, discordPlayerCompatibility:true };
+
+  try {
+    return await playdl.stream(track.url, opts);
+  } catch (e1) {
+    // Retry once with lower quality before failing
+    try {
+      return await playdl.stream(track.url, { ...opts, quality: 1 });
+    } catch (e2) {
+      throw e2;
+    }
+  }
 }
 
 // ─── EMBED BUILDERS ───────────────────────────────────────────────────
@@ -437,7 +480,7 @@ function buildGenreComponents(state) {
 async function playNext(state, client) {
   if (!state.connection || !state.voiceChannelId) return;
 
-  // Save to history
+  // Save last track into history
   if (state.current) {
     state.history.push({ ...state.current, playedAt: new Date().toISOString() });
     if (state.history.length > HISTORY_MAX) state.history.shift();
@@ -458,28 +501,38 @@ async function playNext(state, client) {
   } else if (state.mood) {
     track = await getMoodTrack(state);
   } else if (state.autoplay && state.current) {
-    // Autoplay — search for similar
     const terms = state.current.title.split(' ').slice(0,4).join(' ');
-    const res = await playdl.search(`${terms} similar music`, { source:{ youtube:'video' }, limit:AUTO_SIMILAR_COUNT }).catch(()=>[]);
-    const pick = res.find(r => !state.history.some(h=>h.url===r.url));
+    const res = await playdl.search(`${terms} similar music`, {
+      source: { youtube: 'video' },
+      limit: AUTO_SIMILAR_COUNT
+    }).catch(() => []);
+    const pick = res.find(r => !state.history.some(h => h.url === r.url));
     if (pick) track = mkTrack(pick, null, 'youtube');
   }
 
   if (!track) {
     state.current = null;
-    state.paused  = false;
+    state.paused = false;
     await updateDashboard(state, client);
     return;
   }
 
-  state.current  = { ...track, startTime: Date.now(), requestedBy: track.requestedBy || 'AutoPlay' };
+  state.current = {
+    ...track,
+    startTime: Date.now(),
+    requestedBy: track.requestedBy || 'AutoPlay'
+  };
   state.startedAt = Date.now();
-  state.paused   = false;
+  state.paused = false;
   state.skipVotes.clear();
 
   try {
-    const stream   = await getStream(track);
-    const resource = createAudioResource(stream.stream, { inputType: stream.type || StreamType.Opus, inlineVolume: true });
+    const stream = await getStream(track);
+    const resource = createAudioResource(stream.stream, {
+      inputType: stream.type || StreamType.Opus,
+      inlineVolume: true
+    });
+
     resource.volume?.setVolume(state.volume / 100);
     state.player.play(resource);
 
@@ -495,29 +548,38 @@ async function playNext(state, client) {
 
   } catch (e) {
     console.error('[Music] playNext error:', e.message);
-    setTimeout(() => playNext(state, client), 500);
-  }
-}
 
-async function getMoodTrack(state) {
-  if (state.moodBuffer.length) return state.moodBuffer.shift();
-  const mood = MOODS[state.mood];
-  if (!mood) return null;
-  const genre = GENRES[mood.genre];
-  if (!genre) return null;
-  try {
-    const q = genre.queries[Math.floor(Math.random() * genre.queries.length)];
-    const res = await playdl.search(q, { source:{ youtube:'video' }, limit:10 });
-    state.moodBuffer = res
-      .filter(r => r.durationInSec > 60 && r.durationInSec < 7200)
-      .map(r => mkTrack(r, null, 'youtube'));
-    // Shuffle buffer
-    for (let i = state.moodBuffer.length-1; i>0; i--) {
-      const j = Math.floor(Math.random()*(i+1));
-      [state.moodBuffer[i], state.moodBuffer[j]] = [state.moodBuffer[j], state.moodBuffer[i]];
+    clearInterval(state.progressTimer);
+
+    if (isYouTubeBotGateError(e)) {
+      try {
+        const ch = state.textChannelId ? client.channels.cache.get(state.textChannelId) : null;
+        const now = Date.now();
+
+        if (!state._lastBotGateNoticeAt || now - state._lastBotGateNoticeAt > YT_ERROR_COOLDOWN_MS) {
+          state._lastBotGateNoticeAt = now;
+          if (ch) {
+            await ch.send('⚠️ This track could not be loaded because the source is currently asking for anti-bot verification. Skipping to the next track.');
+          }
+        }
+      } catch {}
+
+      state.current = null;
+      state.paused = false;
+      await updateDashboard(state, client);
+      return setTimeout(() => playNext(state, client), YT_FAIL_SKIP_DELAY);
     }
-    return state.moodBuffer.shift() || null;
-  } catch { return null; }
+
+    try {
+      const ch = state.textChannelId ? client.channels.cache.get(state.textChannelId) : null;
+      if (ch) await ch.send('⚠️ A track failed to play and was skipped.');
+    } catch {}
+
+    state.current = null;
+    state.paused = false;
+    await updateDashboard(state, client);
+    return setTimeout(() => playNext(state, client), YT_FAIL_SKIP_DELAY);
+  }
 }
 
 // ─── VOICE CONNECTION ─────────────────────────────────────────────────
@@ -526,9 +588,12 @@ async function ensureVC(state, vc, client) {
   if (ex && state.connection === ex) return ex;
 
   const conn = joinVoiceChannel({
-    channelId: vc.id, guildId: state.guildId,
-    adapterCreator: vc.guild.voiceAdapterCreator, selfDeaf: true,
-  });
+  channelId: vc.id,
+  guildId: state.guildId,
+  adapterCreator: vc.guild.voiceAdapterCreator,
+  selfDeaf: true,
+  selfMute: false,
+});
   state.connection    = conn;
   state.voiceChannelId = vc.id;
   state.client        = client;
@@ -539,11 +604,28 @@ async function ensureVC(state, vc, client) {
       clearInterval(state.progressTimer);
       setTimeout(() => playNext(state, client), 300);
     });
-    state.player.on('error', e => {
-      console.error('[Music] Player err:', e.message);
-      setTimeout(() => playNext(state, client), 600);
-    });
+    state.player.on('error', async e => {
+  console.error('[Music] Player err:', e.message);
+  clearInterval(state.progressTimer);
+
+  if (isYouTubeBotGateError(e)) {
+    try {
+      const ch = state.textChannelId ? client.channels.cache.get(state.textChannelId) : null;
+      const now = Date.now();
+
+      if (!state._lastBotGateNoticeAt || now - state._lastBotGateNoticeAt > YT_ERROR_COOLDOWN_MS) {
+        state._lastBotGateNoticeAt = now;
+        if (ch) {
+          await ch.send('⚠️ Playback hit a source verification block. Skipping this track and moving on.');
+        }
+      }
+    } catch {}
   }
+
+  state.current = null;
+  state.paused = false;
+  setTimeout(() => playNext(state, client), YT_FAIL_SKIP_DELAY);
+});
 
   conn.subscribe(state.player);
 
