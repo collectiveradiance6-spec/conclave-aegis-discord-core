@@ -661,29 +661,61 @@ async function cmdPlay(i, client) {
   if (!isDJ(i.member)) return i.editReply('⛔ DJ role required.');
   const vc = i.member?.voice?.channel;
   if (!vc) return i.editReply('⚠️ Join a voice channel first.');
+  
+  const query = i.options.getString('query');
   const state = getState(i.guildId);
   state.textChannelId = i.channelId;
   await ensureVC(state, vc, client);
-  await i.editReply(`🔍 Searching: \`${i.options.getString('query').slice(0,80)}\`...`);
-  const result = await resolveTrack(i.options.getString('query'));
-  if (!result) return i.editReply('⚠️ No results found. Try a different query or URL.');
-  if (Array.isArray(result)) {
-    result.forEach(t => { if (state.queue.length < MAX_QUEUE) state.queue.push({ ...t, requestedBy:i.user.username }); });
-    if (!state.current) await playNext(state, client);
-    return i.editReply({ content:null, embeds:[new EmbedBuilder().setColor(0x7B2FFF).setTitle('📂 Playlist Added').setDescription(`Added **${result.length}** tracks to queue.`).addFields({ name:'📋 Queue', value:`${state.queue.length} total`, inline:true }).setFooter(FT)] });
+  
+  // Check if URL (direct play) or search query
+  const isUrl = /^https?:\/\//.test(query);
+  
+  if (isUrl) {
+    // Direct URL - add immediately like before
+    await i.editReply(`🔍 Loading: \`${query.slice(0,80)}\`...`);
+    const result = await resolveTrack(query);
+    if (!result) return i.editReply('⚠️ Could not load URL.');
+    
+    if (Array.isArray(result)) {
+      result.forEach(t => { if (state.queue.length < MAX_QUEUE) state.queue.push({ ...t, requestedBy:i.user.username }); });
+      if (!state.current) await playNext(state, client);
+      return i.editReply({ content:null, embeds:[new EmbedBuilder().setColor(0x7B2FFF).setTitle('📂 Playlist Added').setDescription(`Added **${result.length}** tracks to queue.`).addFields({ name:'📋 Queue', value:`${state.queue.length} total`, inline:true }).setFooter(FT)] });
+    }
+    
+    result.requestedBy = i.user.username;
+    if (state.queue.length >= MAX_QUEUE) return i.editReply(`⚠️ Queue full (${MAX_QUEUE} max).`);
+    state.queue.push(result);
+    const wasEmpty = state.queue.length === 1 && !state.current;
+    if (wasEmpty) await playNext(state, client);
+    return i.editReply({ content:null, embeds:[new EmbedBuilder()
+      .setColor(wasEmpty?0x00D4FF:0x7B2FFF)
+      .setTitle(wasEmpty?'▶️ Now Playing':'📋 Added to Queue')
+      .setDescription(`**[${result.title}](${result.url})**`)
+      .setThumbnail(result.thumbnail||null)
+      .addFields({ name:'⏱️ Duration', value:fmtTime(result.duration), inline:true },{ name:wasEmpty?'🎵 Source':'📍 Position', value:wasEmpty?(result.source||'YouTube'):`#${state.queue.length}`, inline:true })
+      .setFooter(FT)] });
   }
-  result.requestedBy = i.user.username;
-  if (state.queue.length >= MAX_QUEUE) return i.editReply(`⚠️ Queue full (${MAX_QUEUE} max).`);
-  state.queue.push(result);
-  const wasEmpty = state.queue.length === 1 && !state.current;
-  if (wasEmpty) await playNext(state, client);
-  return i.editReply({ content:null, embeds:[new EmbedBuilder()
-    .setColor(wasEmpty?0x00D4FF:0x7B2FFF)
-    .setTitle(wasEmpty?'▶️ Now Playing':'📋 Added to Queue')
-    .setDescription(`**[${result.title}](${result.url})**`)
-    .setThumbnail(result.thumbnail||null)
-    .addFields({ name:'⏱️ Duration', value:fmtTime(result.duration), inline:true },{ name:wasEmpty?'🎵 Source':'📍 Position', value:wasEmpty?(result.source||'YouTube'):`#${state.queue.length}`, inline:true })
-    .setFooter(FT)] });
+  
+  // Search query - show picker menu
+  await i.editReply(`🔍 Searching YouTube: \`${query.slice(0,80)}\`...`);
+  const results = await search5(query);
+  if (!results.length) return i.editReply('⚠️ No results found. Try a different search term.');
+  
+  const emb = new EmbedBuilder().setColor(0x00D4FF)
+    .setTitle(`🔍 Search Results: "${query.slice(0,60)}"`)
+    .setDescription(results.map((r,idx)=>`**${idx+1}.** [${r.title.slice(0,65)}](${r.url})\n└ \`${fmtTime(r.durationInSec)}\` · YouTube`).join('\n\n'))
+    .setFooter(FT);
+  
+  const select = new StringSelectMenuBuilder()
+    .setCustomId('music_search_select')
+    .setPlaceholder('🎵 Select a track to add...')
+    .addOptions(results.map((r,idx)=>({ 
+      label: `${idx+1}. ${r.title.slice(0,75)}`, 
+      value: r.url, 
+      description: `${fmtTime(r.durationInSec)} · YouTube` 
+    })));
+  
+  return i.editReply({ embeds:[emb], components:[new ActionRowBuilder().addComponents(select)] });
 }
 
 async function cmdSearch(i, client) {
