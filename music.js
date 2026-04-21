@@ -581,7 +581,37 @@ async function playNext(state, client) {
     return setTimeout(() => playNext(state, client), YT_FAIL_SKIP_DELAY);
   }
 }
+async function getMoodTrack(state) {
+  if (state.moodBuffer.length) return state.moodBuffer.shift();
 
+  const mood = MOODS[state.mood];
+  if (!mood) return null;
+
+  const genre = GENRES[mood.genre];
+  if (!genre) return null;
+
+  try {
+    const q = genre.queries[Math.floor(Math.random() * genre.queries.length)];
+    const res = await playdl.search(q, {
+      source: { youtube: 'video' },
+      limit: 10,
+    });
+
+    state.moodBuffer = res
+      .filter(r => r.durationInSec > 60 && r.durationInSec < 7200)
+      .map(r => mkTrack(r, null, 'youtube'));
+
+    for (let i = state.moodBuffer.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [state.moodBuffer[i], state.moodBuffer[j]] = [state.moodBuffer[j], state.moodBuffer[i]];
+    }
+
+    return state.moodBuffer.shift() || null;
+  } catch (e) {
+    console.error('[Music] getMoodTrack error:', e.message);
+    return null;
+  }
+}
 // ─── VOICE CONNECTION ─────────────────────────────────────────────────
 async function ensureVC(state, vc, client) {
   const ex = getVoiceConnection(state.guildId);
