@@ -626,6 +626,13 @@ async function ensureVC(state, vc, client) {
   state.paused = false;
   setTimeout(() => playNext(state, client), YT_FAIL_SKIP_DELAY);
 });
+}
+
+conn.subscribe(state.player);
+  state.current = null;
+  state.paused = false;
+  setTimeout(() => playNext(state, client), YT_FAIL_SKIP_DELAY);
+});
 
   conn.subscribe(state.player);
 
