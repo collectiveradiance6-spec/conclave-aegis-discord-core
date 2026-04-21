@@ -109,7 +109,7 @@ Aberration 217.114.196.80:5540 (PvP) · Amissa 217.114.196.80:5180 (Patreon-excl
 
 RATES: 5× XP/Harvest/Taming/Breeding · 1M weight · No fall damage · Max wild 350
 MODS: Death Inventory Keeper · ARKomatic · Awesome Spyglass · Teleporter
-SHOP: /weekly (3 free shards) · theconclavedominion.com/shop
+SHOP: theconclavedominion.com/shop · Donations only ($1 = 1 shard)
 PAYMENTS: CashApp $TheConclaveDominion · Chime $ANLIKESEF
 MINECRAFT: 134.255.214.44:10090 (Bedrock)
 PATREON: patreon.com/theconclavedominion — Amissa at Elite $20/mo
@@ -302,7 +302,6 @@ function walletEmbed(title,w,color=C.pl){
     {name:'📊 Total', value:`**${total.toLocaleString()}**`,                  inline:true},
     {name:'📈 Earned',value:`${(w.lifetime_earned||0).toLocaleString()}`,     inline:true},
     {name:'📉 Spent', value:`${(w.lifetime_spent||0).toLocaleString()}`,      inline:true},
-    {name:'🔥 Streak',value:`Week ${w.daily_streak||0}`,                      inline:true},
   );
 }
 
@@ -311,12 +310,12 @@ function walletEmbed(title,w,color=C.pl){
 // ══════════════════════════════════════════════════════════════════
 const SHOP_TIERS = [
   {shards:1,  emoji:'💠',name:'1 Clave Shard',   items:['Level 600 Vanilla Dino (Tameable)','Max XP','3 Stacks Ammo','Full Dino Coloring','100 Kibble / Cakes / Beer','100% Imprint','500 Non-Tek Structures','Cryofridge + 120 Pods','50,000 Echo Coins','2,500 Materials','10 Same-Type Tributes','Boss Artifact + Tribute (1 Run)','Non-Tek Blueprint','Dino Revival Token (48hr limit)']},
-  {shards:2,  emoji:'💎',name:'2 Clave Shards',  items:['Modded Level 600 Dino','60 Dedicated Storage','Level 600 Yeti','Level 600 Polar Bear','450 Random Shiny','Random Shiny Shoulder Variant']},
+  {shards:2,  emoji:'💎',name:'2 Clave Shards',  items:['Modded Level 600 Dino','60 Dedicated Storage','450 Random Shiny Shoulder Pet Variant']},
   {shards:3,  emoji:'✨',name:'3 Clave Shards',  items:['Tek Blueprint','1 Shiny Essence','200% Imprint','450 T1 Special Shiny']},
   {shards:5,  emoji:'🔥',name:'5 Clave Shards',  items:['Boss Defeat Command','Bronto or Dread + Saddle','Astral Dino','Level 1000 Basilisk','Level 1000 Rock Elemental','Level 1000 Karkinos','50 Raw Shiny Essence','450 T2 Special Shiny','Small Resource Bundle','2,500 Imprint Kibble']},
   {shards:6,  emoji:'⚔️',name:'6 Clave Shards',  items:['Boss Ready Dino Bundle','300% Imprint','Max XP']},
   {shards:8,  emoji:'🌌',name:'8 Clave Shards',  items:['Medium Resource Bundle','100,000 Resources (No Element)']},
-  {shards:10, emoji:'🛡️',name:'10 Clave Shards', items:['Tek Suit Blueprint Set','Floating Platform','Combo Shinies','Dino Color Party','Breeding Pair']},
+  {shards:10, emoji:'🛡️',name:'10 Clave Shards', items:['Tek Suit Blueprint/Set','Floating Platform','Combo Shinies','Dino Color Party','Breeding Pair']},
   {shards:12, emoji:'🌠',name:'12 Clave Shards', items:['Large Resource Bundle','200,000 Resources']},
   {shards:15, emoji:'👑',name:'15 Clave Shards', items:['30,000 Element','Level 900 Rhyniognatha','Reaper','Aureliax','XLarge Bundle (300k Resources)']},
   {shards:20, emoji:'🏰',name:'20 Clave Shards', items:['1x1 Behemoth Gate Expansion (10/max)']},
@@ -360,7 +359,7 @@ const ALL_COMMANDS = [
   // Economy
   addWalletSubs(new SlashCommandBuilder().setName('wallet').setDescription('💎 ClaveShard wallet')),
   addWalletSubs(new SlashCommandBuilder().setName('curr').setDescription('💎 ClaveShard wallet (alias)')),
-  new SlashCommandBuilder().setName('weekly').setDescription('🌟 Claim your weekly 3 ClaveShard reward'),
+  new SlashCommandBuilder().setName('theconclavedominion.com/shop').setDescription('🌟·Donations only ($1 = 1 shard'),
   new SlashCommandBuilder().setName('leaderboard').setDescription('🏆 Top 10 ClaveShard holders'),
   new SlashCommandBuilder().setName('give').setDescription('🎁 [ADMIN] Quick grant shards').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     .addUserOption(o=>o.setName('user').setDescription('Player').setRequired(true))
