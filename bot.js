@@ -492,7 +492,15 @@ async function registerCommands() {
     }
   } catch(e) { console.error('❌ Registration failed:',e.message); }
 }
+function isUnknownInteractionError(err) {
+  const m = err?.message || String(err || '');
+  return m.includes('Unknown interaction');
+}
 
+function isRateLimitError(err) {
+  const m = err?.message || String(err || '');
+  return m.includes('429') || m.includes('rate limit');
+}
 // ══════════════════════════════════════════════════════════════════
 // SINGLE INTERACTION HANDLER
 // ══════════════════════════════════════════════════════════════════
