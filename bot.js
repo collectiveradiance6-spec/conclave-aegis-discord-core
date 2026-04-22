@@ -1043,38 +1043,57 @@ process.on('SIGINT', ()=>{STATUS.ready=false;healthServer.close();bot.destroy();
 // READY
 // ══════════════════════════════════════════════════════════════════
 bot.once(Events.ClientReady, async () => {
-  STATUS.ready=true; STATUS.readyAt=Date.now();
+  STATUS.ready = true;
+  STATUS.readyAt = Date.now();
+
   console.log(`🤖 AEGIS v10.1 SOVEREIGN (Groq Free AI) — ${bot.user.tag}`);
-  console.log(`   Supabase: ${sb?'✅':'⚠️'} · Groq AI: ${groq?'✅ Free':'⚠️ Set GROQ_API_KEY'} · Health: :${BOT_PORT}`);
-  bot.user.setActivity(`💎 /weekly | AEGIS v10.1 Free AI`, { type:3 });
+  console.log(`   Supabase: ${sb ? '✅' : '⚠️'} · Groq AI: ${groq ? '✅ Free' : '⚠️ Set GROQ_API_KEY'} · Health: :${BOT_PORT}`);
+
+  bot.user.setActivity(`💎 /weekly | AEGIS v10.1 Free AI`, { type: 3 });
+
   await registerCommands();
 
-  if (DISCORD_GUILD_ID) {
-    try {
-      const guild=await bot.guilds.fetch(DISCORD_GUILD_ID).catch(()=>null);
-      if (guild) {
-        console.log('📡 Updating live status channels...');
-        const statuses=await fetchServerStatuses();
-        await updateExistingStatusChannels(guild,statuses);
-        console.log('✅ Status channels updated on boot');
+  if (!DISCORD_GUILD_ID) return;
 
-        const monCh=process.env.MONITOR_STATUS_CHANNEL_ID;
-        const monMsg=process.env.MONITOR_MESSAGE_ID;
-        if (monCh&&monMsg) {
-          monitorState.set(DISCORD_GUILD_ID,{statusChannelId:monCh,messageId:monMsg});
-          const ch=await guild.channels.fetch(monCh).catch(()=>null);
-          if (ch) {
-            const embed=buildMonitorEmbed(statuses);
-            const msg=await ch.messages.fetch(monMsg).catch(()=>null);
-            if(msg)await msg.edit({embeds:[embed]}).catch(()=>{});
-            console.log('📡 Monitor embed resumed');
-          }
+  try {
+    const guild = await bot.guilds.fetch(DISCORD_GUILD_ID).catch(() => null);
+    if (!guild) return;
+
+    // IMPORTANT:
+    // Do NOT mass-rename status channels on boot.
+    // That is the most likely source of your 429 spam.
+    console.log('📡 Skipping boot-time status channel renames to avoid rate limits');
+
+    const statuses = await fetchServerStatuses().catch(() => []);
+
+    const monCh = process.env.MONITOR_STATUS_CHANNEL_ID;
+    const monMsg = process.env.MONITOR_MESSAGE_ID;
+
+    if (monCh && monMsg) {
+      monitorState.set(DISCORD_GUILD_ID, {
+        statusChannelId: monCh,
+        messageId: monMsg,
+      });
+
+      const ch = await guild.channels.fetch(monCh).catch(() => null);
+      if (ch) {
+        const embed = buildMonitorEmbed(statuses);
+        const msg = await ch.messages.fetch(monMsg).catch(() => null);
+
+        if (msg) {
+          await msg.edit({ embeds: [embed] }).catch((e) => {
+            console.error('❌ Monitor resume edit:', e.message);
+          });
+          console.log('📡 Monitor embed resumed');
+        } else {
+          console.log('⚠️ Monitor message not found — embed resume skipped');
         }
       }
-    } catch(e){ console.error('❌ Boot tasks:',e.message); }
+    }
+  } catch (e) {
+    console.error('❌ Boot tasks:', e.message);
   }
 });
-
 // ══════════════════════════════════════════════════════════════════
 // LOGIN WITH EXPONENTIAL BACKOFF
 // ══════════════════════════════════════════════════════════════════
