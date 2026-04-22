@@ -254,15 +254,101 @@ const EXISTING_STATUS_CHANNELS = {
   center:'1491715233847316590',extinction:'1491715612911861790',lostcolony:'1491715764678299670',
   scorched:'1491717247083876435',island:'1491715445659799692',valguero:'1491715929586008075',volcano:'1491716283857633290',
 };
+// ── PER-CHANNEL RENAME COOLDOWN MAP ──────────────────────────────────
+const channelRenameCooldowns = new Map();
+const RENAME_COOLDOWN_MS     = 12 * 60 * 1000; // 12 min per channel
+const RENAME_QUEUE_DELAY_MS  = 1_500;           // 1.5s between each rename
+
+async function safeRenameChannel(ch, newName) {
+  if (!ch || ch.name === newName) return false;
+
+  const now = Date.now();
+  const lastRename = channelRenameCooldowns.get(ch.id) || 0;
+  if (now - lastRename < RENAME_COOLDOWN_MS) return false;
+
+  channelRenameCooldowns.set(ch.id, now);
+
+  try {
+    await ch.setName(newName);
+    return true;
+  } catch (e) {
+    if (e.status === 429 || (e.message || '').includes('429')) {
+      channelRenameCooldowns.set(ch.id, now + 15 * 60 * 1000);
+      console.warn(`⚠️ 429 on channel rename — ${ch.name} backed off 15 min`);
+    } else {
+      console.error(`❌ Rename ${ch.name}:`, e.message);
+    }
+    return false;
+  }
+}
 async function fetchNitradoServer(nitradoId){if(!process.env.NITRADO_API_KEY)return null;try{const res=await axios.get(`https://api.nitrado.net/services/${nitradoId}/gameservers`,{headers:{Authorization:`Bearer ${process.env.NITRADO_API_KEY}`},timeout:10000});const gs=res.data?.data?.gameserver;if(!gs)return null;return{status:gs.status==='started'?'online':'offline',players:gs.query?.player_current??0,maxPlayers:gs.query?.player_max??20};}catch{return null;}}
 async function fetchServerStatuses(){if(!process.env.NITRADO_API_KEY)return MONITOR_SERVERS.map(s=>({...s,status:'unknown',players:0,maxPlayers:20}));const results=[];await Promise.all(MONITOR_SERVERS.map(async srv=>{const data=srv.nitradoId?await fetchNitradoServer(srv.nitradoId):null;results.push({...srv,status:data?.status??'unknown',players:data?.players??0,maxPlayers:data?.maxPlayers??20});}));return results;}
 function buildMonitorEmbed(servers){const online=servers.filter(s=>s.status==='online'),offline=servers.filter(s=>s.status!=='online'),total=online.reduce((sum,s)=>sum+s.players,0);const lines=[...online.map(s=>`🟢 **${s.emoji} ${s.name}**${s.pvp?' ⚔️':s.patreon?' ⭐':''} \`${s.players}/${s.maxPlayers}\``), ...offline.map(s=>`🔴 **${s.emoji} ${s.name}** · Offline`)].join('\n');return new EmbedBuilder().setTitle('⚔️ TheConclave — Live Cluster Monitor').setColor(total>0?0x35ED7E:0xFF4500).setDescription(lines||'No server data.').addFields({name:'🟢 Online',value:`${online.length}/${servers.length}`,inline:true},{name:'👥 Players',value:`${total}`,inline:true},{name:'⏰ Updated',value:`<t:${Math.floor(Date.now()/1000)}:R>`,inline:true}).setFooter({text:'TheConclave Dominion • Auto-refreshes every 5 min',iconURL:'https://theconclavedominion.com/conclave-badge.png'}).setTimestamp();}
-async function updateExistingStatusChannels(guild,statuses){for(const srv of statuses){const chId=EXISTING_STATUS_CHANNELS[srv.id];if(!chId)continue;try{const ch=await guild.channels.fetch(chId).catch(()=>null);if(!ch)continue;const name=srv.status==='online'?`🟢${srv.pvp?'⚔️':srv.patreon?'⭐':''}・${srv.name}-${srv.players}p`:`🔴・${srv.name}-offline`;if(ch.name!==name){await ch.setName(name);await new Promise(r=>setTimeout(r,600));}}catch{}}}
+async function updateExistingStatusChannels(guild, statuses) {
+  for (const srv of statuses) {
+    const chId = EXISTING_STATUS_CHANNELS[srv.id];
+    if (!chId) continue;
 
-setInterval(async()=>{
-  if(DISCORD_GUILD_ID){try{const g=await bot.guilds.fetch(DISCORD_GUILD_ID).catch(()=>null);if(g){const s=await fetchServerStatuses();await updateExistingStatusChannels(g,s);for(const[gid,state]of monitorState){if(!state.statusChannelId||!state.messageId)continue;try{const guild=await bot.guilds.fetch(gid).catch(()=>null);if(!guild)continue;const ch=await guild.channels.fetch(state.statusChannelId).catch(()=>null);if(!ch)continue;const embed=buildMonitorEmbed(s);const msg=await ch.messages.fetch(state.messageId).catch(()=>null);if(msg)await msg.edit({embeds:[embed]});else{const nm=await ch.send({embeds:[embed]});state.messageId=nm.id;}}catch{}}}}catch{}}
-},5*60_000);
+    const ch = await guild.channels.fetch(chId).catch(() => null);
+    if (!ch) continue;
 
+    const newName = srv.status === 'online'
+      ? `🟢${srv.pvp ? '⚔️' : srv.patreon ? '⭐' : ''}・${srv.name}-${srv.players}p`
+      : `🔴・${srv.name}-offline`;
+
+    const renamed = await safeRenameChannel(ch, newName);
+    if (renamed) {
+      // Space out renames so we don't burst Discord's API
+      await new Promise(r => setTimeout(r, RENAME_QUEUE_DELAY_MS));
+    }
+  }
+}
+let _monitorTick = 0;
+
+setInterval(async () => {
+  _monitorTick++;
+
+  if (!DISCORD_GUILD_ID) return;
+
+  try {
+    const g = await bot.guilds.fetch(DISCORD_GUILD_ID).catch(() => null);
+    if (!g) return;
+
+    const s = await fetchServerStatuses().catch(() =>
+      MONITOR_SERVERS.map(srv => ({ ...srv, status: 'unknown', players: 0, maxPlayers: 20 }))
+    );
+
+    // Only rename status channels every other tick (10 min effective cadence)
+    if (_monitorTick % 2 === 0) {
+      await updateExistingStatusChannels(g, s);
+    }
+
+    // Always update monitor embeds
+    for (const [gid, state] of monitorState) {
+      if (!state.statusChannelId || !state.messageId) continue;
+
+      try {
+        const guild = await bot.guilds.fetch(gid).catch(() => null);
+        if (!guild) continue;
+
+        const ch = await guild.channels.fetch(state.statusChannelId).catch(() => null);
+        if (!ch) continue;
+
+        const embed = buildMonitorEmbed(s);
+        const msg = await ch.messages.fetch(state.messageId).catch(() => null);
+
+        if (msg) {
+          await msg.edit({ embeds: [embed] });
+        } else {
+          const nm = await ch.send({ embeds: [embed] });
+          state.messageId = nm.id;
+        }
+      } catch {}
+    }
+  } catch (e) {
+    console.error('❌ Monitor tick:', e.message);
+  }
+}, 5 * 60_000);
 // ══════════════════════════════════════════════════════════════════
 // MUSIC NEXUS SYNC
 // ══════════════════════════════════════════════════════════════════
@@ -305,7 +391,7 @@ function walletEmbed(title,w,color=C.pl){
   );
 }
 
-// ══════════════════════════════════════════════════════════════════
+// ══//////////////////////════════════════════════════════════════════════════════════════
 // SHOP TIER DATA
 // ══════════════════════════════════════════════════════════════════
 const SHOP_TIERS = [
