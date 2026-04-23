@@ -14,9 +14,7 @@
 // ✅ Bulk admin ops — bulk grant/deduct, audit trail
 // ✅ Server vote — community voting system
 // ✅ Enhanced AEGIS AI — smarter routing, context injection, search
-// ══════════════════════════════════════════════════════════════════════
-// ENV + CLIENTS
-// ══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════
 'use strict';
 require('dotenv').config();
 
@@ -41,44 +39,33 @@ const { createClient } = require('@supabase/supabase-js');
 const Groq = require('groq-sdk');
 const P = require('./panels.js');
 
+// ══════════════════════════════════════════════════════════════════════
+// ENV + CLIENTS
+// ══════════════════════════════════════════════════════════════════════
 const {
-  DISCORD_BOT_TOKEN,
-  DISCORD_CLIENT_ID,
-  DISCORD_GUILD_ID,
-  ROLE_OWNER_ID,
-  ROLE_ADMIN_ID,
-  ROLE_HELPER_ID,
-  GROQ_API_KEY,
-  SUPABASE_URL,
-  SUPABASE_SERVICE_ROLE_KEY,
+  DISCORD_BOT_TOKEN, DISCORD_CLIENT_ID, DISCORD_GUILD_ID,
+  ROLE_OWNER_ID, ROLE_ADMIN_ID, ROLE_HELPER_ID,
+  GROQ_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
   AEGIS_CHANNEL_ID,
 } = process.env;
 
-if (!DISCORD_BOT_TOKEN) {
-  console.error('❌ DISCORD_BOT_TOKEN missing');
-  process.exit(1);
-}
+if (!DISCORD_BOT_TOKEN) { console.error('❌ DISCORD_BOT_TOKEN missing'); process.exit(1); }
 
-const BOT_PORT = parseInt(process.env.BOT_PORT || '3001', 10);
-const MODEL_FAST = 'llama-3.1-8b-instant';
+const BOT_PORT    = parseInt(process.env.BOT_PORT || '3001');
+const MODEL_FAST  = 'llama-3.1-8b-instant';
 const MODEL_SMART = 'llama-3.3-70b-versatile';
+const MUSIC_API   = (process.env.MUSIC_API_URL || 'https://api.theconclavedominion.com').replace(/\/$/, '');
 
 const groq = GROQ_API_KEY ? new Groq({ apiKey: GROQ_API_KEY }) : null;
-const sb =
-  SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
-    ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-        auth: { persistSession: false },
-      })
-    : null;
+const sb   = (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY)
+  ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } })
+  : null;
 
 const bot = new Client({
   intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.DirectMessages,
-    GatewayIntentBits.GuildPresences,
+    GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.DirectMessages, GatewayIntentBits.GuildPresences,
     GatewayIntentBits.GuildModeration,
   ],
   rest: { timeout: 15000 },
@@ -719,7 +706,17 @@ const ALL_COMMANDS = [
     .addSubcommand(s => s.setName('top').setDescription('🏆 Top 15 holders'))
     .addSubcommand(s => s.setName('stats').setDescription('📊 Economy stats'))
     .addSubcommand(s => s.setName('usage').setDescription('🧠 AI usage stats'))
-    .addSubcommand(s => s.setName('bulk-grant').setDescription('🎁 Grant shards to multiple users (mention up to 5)').addIntegerOption(o => o.setName('amount').setDescription('Shards each').setRequired(true).setMinValue(1)).addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)).addUserOption(o => o.setName('user1').setDescription('User 1').setRequired(true)).addUserOption(o => o.setName('user2').setDescription('User 2').setRequired(false)).addUserOption(o => o.setName('user3').setDescription('User 3').setRequired(false)).addUserOption(o => o.setName('user4').setDescription('User 4').setRequired(false)).addUserOption(o => o.setName('user5').setDescription('User 5').setRequired(false)))
+    .addSubcommand(s => s
+  .setName('bulk-grant')
+  .setDescription('🎁 Grant shards to multiple users (mention up to 5)')
+  .addIntegerOption(o => o.setName('amount').setDescription('Shards each').setRequired(true).setMinValue(1))
+  .addUserOption(o => o.setName('user1').setDescription('User 1').setRequired(true))
+  .addUserOption(o => o.setName('user2').setDescription('User 2').setRequired(false))
+  .addUserOption(o => o.setName('user3').setDescription('User 3').setRequired(false))
+  .addUserOption(o => o.setName('user4').setDescription('User 4').setRequired(false))
+  .addUserOption(o => o.setName('user5').setDescription('User 5').setRequired(false))
+  .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false))
+)
     .addSubcommand(s => s.setName('audit').setDescription('📋 View recent economy actions').addIntegerOption(o => o.setName('limit').setDescription('Entries (max 20)').setRequired(false).setMinValue(1).setMaxValue(20))),
   // Shop
   new SlashCommandBuilder().setName('order').setDescription('📦 Submit ClaveShard shop order')
