@@ -18,6 +18,17 @@
 // TheConclave Dominion · 5× Crossplay ARK: Survival Ascended
 // Groq Free AI (llama-3.3-70b) · Zero API cost · Full economy
 // ═══════════════════════════════════════════════════════════════════════
+<<<<<<< HEAD
+=======
+'use strict';
+require('dotenv').config();
+let musicRuntime = null;
+if (process.env.MUSIC_RUNTIME_ENABLED !== 'false') {
+  try { musicRuntime = require('./music.js'); console.log('🎵 Music runtime v3 loaded'); }
+  catch (e) { console.warn('⚠️  Music runtime not loaded:', e.message); }
+}
+
+>>>>>>> dfcb23e (Remove music runtime and clean bot.js)
 const http = require('http');
 const {
   Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder,
@@ -41,7 +52,14 @@ require('dotenv').config();
 
 const fs = require('fs');
 const path = require('path');
+<<<<<<< HEAD
 const { Client, GatewayIntentBits, Partials, EmbedBuilder } = require('discord.js');
+=======
+const axios = require('axios');
+const { Client, GatewayIntentBits, Partials, EmbedBuilder } = require('discord.js');
+const { createClient } = require('@supabase/supabase-js');
+const Groq = require('groq-sdk');
+>>>>>>> dfcb23e (Remove music runtime and clean bot.js)
 const axios  = require('axios');
 const P = require('./panels.js'); // AEGIS Visual Panel System v3.0
 
@@ -2068,6 +2086,17 @@ const healthServer = http.createServer((req, res) => {
       ai:        groq ? 'groq' : 'not_configured',
       supabase:  sb ? (sbOk() ? 'ok' : 'circuit_open') : 'not_configured',
       version:   'v11.0',
+<<<<<<< HEAD
+=======
+
+  // ── MUSIC COMMANDS ──
+  if ((cmd==='music'||cmd==='setup-music') && musicRuntime) {
+    await interaction.deferReply();
+    return musicRuntime.handleMusicCommand(interaction, bot);
+  }
+
+  await interaction.deferReply();
+>>>>>>> dfcb23e (Remove music runtime and clean bot.js)
 
   try {
     // ──────────────────────────────────────────────────────────────
