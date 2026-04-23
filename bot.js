@@ -45,7 +45,14 @@ const {
   DISCORD_BOT_TOKEN, DISCORD_CLIENT_ID, DISCORD_GUILD_ID,
   ROLE_OWNER_ID, ROLE_ADMIN_ID, ROLE_HELPER_ID,
   GROQ_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
-const Groq   = require('groq-sdk');
+require('dotenv').config();
+
+const fs = require('fs');
+const path = require('path');
+const axios = require('axios');
+const { Client, GatewayIntentBits, Partials, EmbedBuilder } = require('discord.js');
+const { createClient } = require('@supabase/supabase-js');
+const Groq = require('groq-sdk');
 const axios  = require('axios');
 const { createClient } = require('@supabase/supabase-js');
 const P = require('./panels.js'); // AEGIS Visual Panel System v3.0
