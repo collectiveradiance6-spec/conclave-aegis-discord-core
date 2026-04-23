@@ -18,14 +18,6 @@
 // TheConclave Dominion · 5× Crossplay ARK: Survival Ascended
 // Groq Free AI (llama-3.3-70b) · Zero API cost · Full economy
 // ═══════════════════════════════════════════════════════════════════════
-'use strict';
-require('dotenv').config();
-let musicRuntime = null;
-if (process.env.MUSIC_RUNTIME_ENABLED !== 'false') {
-  try { musicRuntime = require('./music.js'); console.log('🎵 Music runtime v3 loaded'); }
-  catch (e) { console.warn('⚠️  Music runtime not loaded:', e.message); }
-}
-
 const http = require('http');
 const {
   Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder,
