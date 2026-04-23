@@ -1,0 +1,77 @@
+services:
+  - type: worker
+    name: conclave-aegis-bot
+    runtime: node
+    buildCommand: npm install
+    startCommand: node bot.js
+    plan: starter
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: BOT_PORT
+        value: 3001
+      - key: DISCORD_GUILD_ID
+        value: "1438103556610723922"
+      - key: API_URL
+        value: https://api.theconclavedominion.com
+      - key: BEACON_CLIENT_ID
+        value: eb9ecdff-4048-4a83-8f40-f2e16d2e9a81
+      - key: MUSIC_RUNTIME_ENABLED
+        value: "true"
+      - key: MUSIC_FALLBACK_ENABLED
+        value: "true"
+      - key: ROOM_PULSE_INTERVAL
+        value: "30000"
+      - key: ROOM_RECONNECT_DELAY
+        value: "5000"
+      # ── Fill in Render Dashboard (sync: false = secret) ──
+      - key: DISCORD_BOT_TOKEN
+        sync: false
+      - key: DISCORD_CLIENT_ID
+        sync: false
+      - key: ROLE_OWNER_ID
+        sync: false
+      - key: ROLE_ADMIN_ID
+        sync: false
+      - key: ROLE_HELPER_ID
+        sync: false
+      - key: ADMIN_TOKEN
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: AEGIS_CHANNEL_ID
+        sync: false
+      - key: BEACON_CLIENT_SECRET
+        sync: false
+      - key: BEACON_ACCESS_TOKEN
+        sync: false
+      - key: BEACON_REFRESH_TOKEN
+        sync: false
+      - key: BEACON_TOKEN_EXPIRES
+        sync: false
+      - key: BEACON_GROUP_ID
+        sync: false
+      - key: NITRADO_API_KEY
+        sync: false
+      - key: MONITOR_STATUS_CHANNEL_ID
+        sync: false
+      - key: MONITOR_ACTIVITY_CHANNEL_ID
+        sync: false
+      - key: MONITOR_MESSAGE_ID
+        sync: false
+      - key: SPOTIFY_CLIENT_ID
+        sync: false
+      - key: SPOTIFY_CLIENT_SECRET
+        sync: false
+      - key: SPOTIFY_REFRESH_TOKEN
+        sync: false
+      - key: SOUNDCLOUD_CLIENT_ID
+        sync: false
+      - key: YOUTUBE_COOKIE
+        sync: false
+      - key: MUSIC_DJ_ROLE_ID
+        sync: false
