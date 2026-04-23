@@ -41,21 +41,73 @@ const P = require('./panels.js');
 // ══════════════════════════════════════════════════════════════════════
 // ENV + CLIENTS
 // ══════════════════════════════════════════════════════════════════════
-const {
-  DISCORD_BOT_TOKEN, DISCORD_CLIENT_ID, DISCORD_GUILD_ID,
-  ROLE_OWNER_ID, ROLE_ADMIN_ID, ROLE_HELPER_ID,
-  GROQ_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
+'use strict';
 require('dotenv').config();
 
-const fs = require('fs');
-const path = require('path');
+const http = require('http');
 const axios = require('axios');
-const { Client, GatewayIntentBits, Partials, EmbedBuilder } = require('discord.js');
+const {
+  Client,
+  GatewayIntentBits,
+  REST,
+  Routes,
+  SlashCommandBuilder,
+  EmbedBuilder,
+  PermissionFlagsBits,
+  Events,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  StringSelectMenuBuilder,
+  ChannelType,
+} = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
 const Groq = require('groq-sdk');
-const axios  = require('axios');
-const { createClient } = require('@supabase/supabase-js');
-const P = require('./panels.js'); // AEGIS Visual Panel System v3.0
+const P = require('./panels.js');
+
+const {
+  DISCORD_BOT_TOKEN,
+  DISCORD_CLIENT_ID,
+  DISCORD_GUILD_ID,
+  ROLE_OWNER_ID,
+  ROLE_ADMIN_ID,
+  ROLE_HELPER_ID,
+  GROQ_API_KEY,
+  SUPABASE_URL,
+  SUPABASE_SERVICE_ROLE_KEY,
+  AEGIS_CHANNEL_ID,
+} = process.env;
+
+if (!DISCORD_BOT_TOKEN) {
+  console.error('❌ DISCORD_BOT_TOKEN missing');
+  process.exit(1);
+}
+
+const BOT_PORT = parseInt(process.env.BOT_PORT || '3001', 10);
+const MODEL_FAST = 'llama-3.1-8b-instant';
+const MODEL_SMART = 'llama-3.3-70b-versatile';
+
+const groq = GROQ_API_KEY ? new Groq({ apiKey: GROQ_API_KEY }) : null;
+const sb =
+  SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
+    ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+        auth: { persistSession: false },
+      })
+    : null;
+
+const bot = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.DirectMessages,
+    GatewayIntentBits.GuildPresences,
+    GatewayIntentBits.GuildModeration,
+  ],
+  rest: { timeout: 15000 },
+  allowedMentions: { parse: ['users', 'roles'], repliedUser: false },
+});
 
 // ── ENV ──────────────────────────────────────────────────────────────
 const {
@@ -71,17 +123,12 @@ if (!DISCORD_BOT_TOKEN) { console.error('❌ DISCORD_BOT_TOKEN missing'); proces
 const BOT_PORT    = parseInt(process.env.BOT_PORT || '3001');
 const MODEL_FAST  = 'llama-3.1-8b-instant';
 const MODEL_SMART = 'llama-3.3-70b-versatile';
-const MUSIC_API   = (process.env.MUSIC_API_URL || 'https://api.theconclavedominion.com').replace(/\/$/, '');
-
-const groq = GROQ_API_KEY ? new Groq({ apiKey: GROQ_API_KEY }) : null;
 const sb   = (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY)
 
 // ── GROQ MODEL ROUTING ─────────────────────────────────────────────
 // Both models are FREE on Groq — no cost ever
 const MODEL_FAST  = 'llama-3.1-8b-instant';     // ~fastest model alive, replaces Haiku
 const MODEL_SMART = 'llama-3.3-70b-versatile';  // frontier quality, replaces Sonnet
-
-const MUSIC_API = (process.env.MUSIC_API_URL || 'https://api.theconclavedominion.com').replace(/\/$/, '');
 
 const groq = GROQ_API_KEY ? new Groq({ apiKey: GROQ_API_KEY }) : null;
 
@@ -967,28 +1014,6 @@ setInterval(async () => {
     console.error('❌ Monitor tick:', e.message);
   }
 }, 5 * 60_000);
-// ══════════════════════════════════════════════════════════════════
-// MUSIC NEXUS SYNC
-// ══════════════════════════════════════════════════════════════════
-async function syncMusicState(guildId) {
-  if (!musicRuntime) return;
-  try {
-    const state = musicRuntime.getState(guildId);
-    if (!state?.current) return;
-    await axios.post(`${MUSIC_API}/api/music/session`, {
-      guild_id:    guildId,
-      now_playing: state.current,
-      queue_count: state.queue.length,
-      mood:        state.mood || null,
-      volume:      state.volume,
-      loop:        state.loop,
-      shuffle:     state.shuffle,
-      autoplay:    state.autoplay,
-      updated_at:  new Date().toISOString(),
-    }, { timeout: 5000 });
-  } catch {}
-}
-setInterval(()=>{ for(const[gid]of(musicRuntime?new Map([[DISCORD_GUILD_ID,1]]):new Map()))syncMusicState(gid); },15_000);
 
 // ══════════════════════════════════════════════════════════════════
 // EMBED HELPERS
@@ -1417,8 +1442,6 @@ bot.on(Events.InteractionCreate, async interaction => {
 async function registerCommands() {
   if (!DISCORD_CLIENT_ID) { console.warn('⚠️  DISCORD_CLIENT_ID missing — skipping registration'); return; }
   const rest = new REST().setToken(DISCORD_BOT_TOKEN);
-  const musicCmds = musicRuntime?.MUSIC_COMMANDS || [];
-  const allJson   = [...ALL_COMMANDS.map(c=>c.toJSON()), ...musicCmds];
   try {
     console.log(`📡 Registering ${allJson.length} slash commands...`);
     if (DISCORD_GUILD_ID) {
@@ -1444,14 +1467,6 @@ function isRateLimitError(err) {
 // ══════════════════════════════════════════════════════════════════
 bot.on(Events.InteractionCreate, async interaction => {
 
-  // ── MUSIC BUTTONS ──
-  if (interaction.isButton() && musicRuntime?.isMusicButton(interaction.customId)) {
-    return musicRuntime.handleMusicButton(interaction, bot);
-  }
-  // ── MUSIC SELECT ──
-  if (interaction.isStringSelectMenu() && musicRuntime?.isMusicSelect(interaction.customId)) {
-    return musicRuntime.handleMusicSelect(interaction, bot);
-  }
   // ── GIVEAWAY BUTTON ──
   if (interaction.isButton() && interaction.customId === 'giveaway_enter') {
     const gw = activeGiveaways.get(interaction.message.id);
@@ -1751,7 +1766,7 @@ bot.on(Events.InteractionCreate, async interaction => {
         { name: '🔨 Moderation', value: '`/warn` `/warn-history` `/warn-clear` `/ban` `/timeout` `/role` `/purge` `/lock` `/slowmode` `/ticket`', inline: false },
         { name: '📚 Knowledge', value: '`/know add|list|delete`', inline: false },
         { name: '🔧 Utils', value: '`/roll` `/coinflip` `/calc` `/remind` `/whois` `/serverinfo` `/ping`', inline: false },
-      ).setFooter({ ...FT, text: 'AEGIS v11.0 Sovereign · Groq Free AI · No Music (CONbot5 handles music)' })] });
+      ).setFooter({ ...FT, text: 'AEGIS v11.0 Sovereign · CONCLAVE_AEGIS_AI)' })] });
     }
 
     if (cmd === 'ping') {
@@ -2117,6 +2132,7 @@ const healthServer = http.createServer((req, res) => {
       ai:        groq ? 'groq' : 'not_configured',
       supabase:  sb ? (sbOk() ? 'ok' : 'circuit_open') : 'not_configured',
       version:   'v11.0',
+<<<<<<< HEAD
 
   // ── MUSIC COMMANDS ──
   if ((cmd==='music'||cmd==='setup-music') && musicRuntime) {
@@ -2125,6 +2141,8 @@ const healthServer = http.createServer((req, res) => {
   }
 
   await interaction.deferReply();
+=======
+>>>>>>> 4efe3a1150591d03eafc78fc2c7d11cae5ef69eb
 
   try {
     // ──────────────────────────────────────────────────────────────
@@ -2303,7 +2321,6 @@ const healthServer = http.createServer((req, res) => {
       return interaction.editReply({embeds:[base('📖 AEGIS Command Reference',C.pl).addFields(
         {name:'🧠 AI',value:'`/aegis` `/ask` `/forget` `/ai-cost`',inline:true},
         {name:'💎 Economy',value:'`/wallet` `/weekly` `/order` `/shard` `/shop` `/leaderboard`',inline:true},
-        {name:'🎵 Music',value:'`/music play/search/browse/launchpad/room/...`',inline:true},
         {name:'🗺️ Servers',value:'`/servers` `/map` `/monitor`',inline:true},
         {name:'ℹ️ Info',value:'`/info` `/rules` `/rates` `/mods` `/tip` `/dino`',inline:true},
         {name:'🤝 Community',value:'`/profile` `/rep` `/trade` `/coords` `/report`',inline:true},
@@ -2313,7 +2330,7 @@ const healthServer = http.createServer((req, res) => {
     }
 
     if (cmd==='ping') {
-      return interaction.editReply({embeds:[P.PingPanel(bot.ws.ping,process.uptime(),Math.round(process.memoryUsage().heapUsed/1024/1024),!!groq,!!(sb&&sbOk()),!!musicRuntime)]});
+      return interaction.editReply({embeds:[P.PingPanel(bot.ws.ping,process.uptime(),Math.round(process.memoryUsage().heapUsed/1024/1024),!!groq,!!(sb&&sbOk)]});
     }
 
     // ── COMMUNITY ──
