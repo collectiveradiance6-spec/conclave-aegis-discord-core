@@ -6,6 +6,10 @@ services:
     startCommand: node bot.js
     plan: starter
     envVars:
+<<<<<<< HEAD
+=======
+      # ── Static config ──────────────────────────────────────────────
+>>>>>>> d06f07d2ab295b3409afeee2a8246798de8c2766
       - key: NODE_ENV
         value: production
       - key: BOT_PORT
@@ -14,6 +18,11 @@ services:
         value: "1438103556610723922"
       - key: API_URL
         value: https://api.theconclavedominion.com
+<<<<<<< HEAD
+=======
+      - key: MUSIC_API_URL
+        value: https://api.theconclavedominion.com
+>>>>>>> d06f07d2ab295b3409afeee2a8246798de8c2766
       - key: BEACON_CLIENT_ID
         value: eb9ecdff-4048-4a83-8f40-f2e16d2e9a81
       - key: MUSIC_RUNTIME_ENABLED
@@ -24,7 +33,14 @@ services:
         value: "30000"
       - key: ROOM_RECONNECT_DELAY
         value: "5000"
+<<<<<<< HEAD
       # ── Fill in Render Dashboard (sync: false = secret) ──
+=======
+      - key: LAUNCHPAD_EDIT_INTERVAL
+        value: "12000"
+
+      # ── Secrets (fill in Render Dashboard → Environment) ───────────
+>>>>>>> d06f07d2ab295b3409afeee2a8246798de8c2766
       - key: DISCORD_BOT_TOKEN
         sync: false
       - key: DISCORD_CLIENT_ID
@@ -41,10 +57,16 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
+<<<<<<< HEAD
+=======
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+>>>>>>> d06f07d2ab295b3409afeee2a8246798de8c2766
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: AEGIS_CHANNEL_ID
         sync: false
+<<<<<<< HEAD
       - key: BEACON_CLIENT_SECRET
         sync: false
       - key: BEACON_ACCESS_TOKEN
@@ -62,6 +84,19 @@ services:
       - key: MONITOR_ACTIVITY_CHANNEL_ID
         sync: false
       - key: MONITOR_MESSAGE_ID
+=======
+
+      # ── Shop ──────────────────────────────────────────────────────
+      - key: ORDERS_CHANNEL_ID
+        sync: false
+      - key: DISCORD_WEBHOOK_URL
+        sync: false
+      - key: SHOP_WEBHOOK_URL
+        sync: false
+
+      # ── Music ─────────────────────────────────────────────────────
+      - key: MUSIC_DJ_ROLE_ID
+>>>>>>> d06f07d2ab295b3409afeee2a8246798de8c2766
         sync: false
       - key: SPOTIFY_CLIENT_ID
         sync: false
@@ -73,5 +108,31 @@ services:
         sync: false
       - key: YOUTUBE_COOKIE
         sync: false
+<<<<<<< HEAD
       - key: MUSIC_DJ_ROLE_ID
+=======
+
+      # ── Beacon ────────────────────────────────────────────────────
+      - key: BEACON_CLIENT_SECRET
+        sync: false
+      - key: BEACON_ACCESS_TOKEN
+        sync: false
+      - key: BEACON_REFRESH_TOKEN
+        sync: false
+      - key: BEACON_TOKEN_EXPIRES
+        sync: false
+      - key: BEACON_GROUP_ID
+        sync: false
+
+      # ── Nitrado ───────────────────────────────────────────────────
+      - key: NITRADO_API_KEY
+        sync: false
+
+      # ── Monitor (fill after /setup-monitoring) ────────────────────
+      - key: MONITOR_STATUS_CHANNEL_ID
+        sync: false
+      - key: MONITOR_ACTIVITY_CHANNEL_ID
+        sync: false
+      - key: MONITOR_MESSAGE_ID
+>>>>>>> d06f07d2ab295b3409afeee2a8246798de8c2766
         sync: false
