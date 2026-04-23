@@ -1634,3 +1634,10 @@ async function login() {
 }
 login();
 module.exports = bot;
+process.on('unhandledRejection', err => {
+  console.error('UNHANDLED REJECTION:', err);
+});
+
+process.on('uncaughtException', err => {
+  console.error('UNCAUGHT EXCEPTION:', err);
+});
