@@ -1,5 +1,4 @@
 // ═══════════════════════════════════════════════════════════════════════
-<<<<<<< HEAD
 // CONCLAVE AEGIS BOT — v11.0 SOVEREIGN EDITION
 // TheConclave Dominion · 5× Crossplay ARK: Survival Ascended
 // ─────────────────────────────────────────────────────────────────────
@@ -15,24 +14,18 @@
 // ✅ Bulk admin ops — bulk grant/deduct, audit trail
 // ✅ Server vote — community voting system
 // ✅ Enhanced AEGIS AI — smarter routing, context injection, search
-=======
 // CONCLAVE AEGIS BOT — v10.1 SOVEREIGN EDITION
 // TheConclave Dominion · 5× Crossplay ARK: Survival Ascended
 // Groq Free AI (llama-3.3-70b) · Zero API cost · Full economy
->>>>>>> d06f07d2ab295b3409afeee2a8246798de8c2766
 // ═══════════════════════════════════════════════════════════════════════
 'use strict';
 require('dotenv').config();
-
-<<<<<<< HEAD
-=======
 let musicRuntime = null;
 if (process.env.MUSIC_RUNTIME_ENABLED !== 'false') {
   try { musicRuntime = require('./music.js'); console.log('🎵 Music runtime v3 loaded'); }
   catch (e) { console.warn('⚠️  Music runtime not loaded:', e.message); }
 }
 
->>>>>>> d06f07d2ab295b3409afeee2a8246798de8c2766
 const http = require('http');
 const {
   Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder,
@@ -40,7 +33,6 @@ const {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   StringSelectMenuBuilder, ChannelType,
 } = require('discord.js');
-<<<<<<< HEAD
 const Groq  = require('groq-sdk');
 const axios = require('axios');
 const { createClient } = require('@supabase/supabase-js');
@@ -53,8 +45,14 @@ const {
   DISCORD_BOT_TOKEN, DISCORD_CLIENT_ID, DISCORD_GUILD_ID,
   ROLE_OWNER_ID, ROLE_ADMIN_ID, ROLE_HELPER_ID,
   GROQ_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
-=======
-const Groq   = require('groq-sdk');
+require('dotenv').config();
+
+const fs = require('fs');
+const path = require('path');
+const axios = require('axios');
+const { Client, GatewayIntentBits, Partials, EmbedBuilder } = require('discord.js');
+const { createClient } = require('@supabase/supabase-js');
+const Groq = require('groq-sdk');
 const axios  = require('axios');
 const { createClient } = require('@supabase/supabase-js');
 const P = require('./panels.js'); // AEGIS Visual Panel System v3.0
@@ -65,21 +63,18 @@ const {
   ROLE_OWNER_ID, ROLE_ADMIN_ID, ROLE_HELPER_ID,
   GROQ_API_KEY,
   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
->>>>>>> d06f07d2ab295b3409afeee2a8246798de8c2766
   AEGIS_CHANNEL_ID,
 } = process.env;
 
 if (!DISCORD_BOT_TOKEN) { console.error('❌ DISCORD_BOT_TOKEN missing'); process.exit(1); }
 
 const BOT_PORT    = parseInt(process.env.BOT_PORT || '3001');
-<<<<<<< HEAD
 const MODEL_FAST  = 'llama-3.1-8b-instant';
 const MODEL_SMART = 'llama-3.3-70b-versatile';
 const MUSIC_API   = (process.env.MUSIC_API_URL || 'https://api.theconclavedominion.com').replace(/\/$/, '');
 
 const groq = GROQ_API_KEY ? new Groq({ apiKey: GROQ_API_KEY }) : null;
 const sb   = (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY)
-=======
 
 // ── GROQ MODEL ROUTING ─────────────────────────────────────────────
 // Both models are FREE on Groq — no cost ever
@@ -91,7 +86,6 @@ const MUSIC_API = (process.env.MUSIC_API_URL || 'https://api.theconclavedominion
 const groq = GROQ_API_KEY ? new Groq({ apiKey: GROQ_API_KEY }) : null;
 
 const sb = (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY)
->>>>>>> d06f07d2ab295b3409afeee2a8246798de8c2766
   ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } })
   : null;
 
@@ -99,7 +93,6 @@ const bot = new Client({
   intents: [
     GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers,
-<<<<<<< HEAD
     GatewayIntentBits.DirectMessages, GatewayIntentBits.GuildPresences,
     GatewayIntentBits.GuildModeration,
   ],
@@ -110,7 +103,6 @@ const bot = new Client({
 // ══════════════════════════════════════════════════════════════════════
 // PERMISSION HELPERS
 // ══════════════════════════════════════════════════════════════════════
-=======
     GatewayIntentBits.DirectMessages, GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildPresences,
   ],
@@ -119,12 +111,10 @@ const bot = new Client({
 });
 
 // ── PERMISSION HELPERS ──────────────────────────────────────────────
->>>>>>> d06f07d2ab295b3409afeee2a8246798de8c2766
 const isOwner = m => m?.roles?.cache?.has(ROLE_OWNER_ID) || m?.permissions?.has(PermissionFlagsBits.Administrator);
 const isAdmin = m => isOwner(m) || m?.roles?.cache?.has(ROLE_ADMIN_ID);
 const isMod   = m => isAdmin(m) || m?.roles?.cache?.has(ROLE_HELPER_ID) || m?.permissions?.has(PermissionFlagsBits.ModerateMembers);
 
-<<<<<<< HEAD
 // ══════════════════════════════════════════════════════════════════════
 // RATE LIMITER
 // ══════════════════════════════════════════════════════════════════════
@@ -300,7 +290,6 @@ function clearHist(uid) { convMem.delete(uid); }
 setInterval(() => { for (const [k, v] of convMem) if (!v?.length) convMem.delete(k); }, 30 * 60_000);
 
 async function askAegis(msg, uid = null, extraCtx = '', channelId = null) {
-=======
 // ── RATE LIMITER ──────────────────────────────────────────────────
 const rates = new Map();
 function checkRate(uid, ms=8000) { const l=rates.get(uid)||0,n=Date.now(); if(n-l<ms)return Math.ceil((ms-(n-l))/1000); rates.set(uid,n); return 0; }
@@ -375,7 +364,6 @@ setInterval(()=>{for(const[k,v]of convMem)if(!v?.length)convMem.delete(k);},30*6
 
 // ── CORE AI FUNCTION — GROQ (FREE, UNLIMITED) ─────────────────────
 async function askAegis(msg, uid=null, extraCtx='') {
->>>>>>> d06f07d2ab295b3409afeee2a8246798de8c2766
   if (!groq) return '⚠️ AI not configured — set GROQ_API_KEY in Render environment.';
 
   const { model } = pickModel(msg);
@@ -383,7 +371,6 @@ async function askAegis(msg, uid=null, extraCtx='') {
 
   while (retries < 3) {
     try {
-<<<<<<< HEAD
       const knowledge = await getKnowledge();
       const persona   = channelId ? (personaOverrides.get(channelId) || null) : null;
       const personaCtx = persona ? `\n\nCURRENT CHANNEL PERSONA OVERRIDE:\nStyle: ${persona.style}\nPersona note: ${persona.note}` : '';
@@ -394,7 +381,6 @@ async function askAegis(msg, uid=null, extraCtx='') {
         model,
         max_tokens: model.includes('8b') ? 600 : 1000,
         temperature: 0.78,
-=======
       const knowledge  = await getKnowledge();
       const system     = CORE + knowledge + (extraCtx ? '\n\n' + extraCtx : '');
       const history    = uid ? getHist(uid) : [];
@@ -403,7 +389,6 @@ async function askAegis(msg, uid=null, extraCtx='') {
         model,
         max_tokens: model.includes('8b') ? 600 : 900,
         temperature: 0.75,
->>>>>>> d06f07d2ab295b3409afeee2a8246798de8c2766
         messages: [
           { role: 'system', content: system },
           ...history,
@@ -416,7 +401,6 @@ async function askAegis(msg, uid=null, extraCtx='') {
 
       if (uid) { addHist(uid, 'user', msg); addHist(uid, 'assistant', text); }
 
-<<<<<<< HEAD
       if (sb && sbOk()) (async () => {
         try {
           await sb.from('aegis_ai_usage').insert({
@@ -424,7 +408,6 @@ async function askAegis(msg, uid=null, extraCtx='') {
             output_tokens: res.usage?.completion_tokens || 0,
             used_search: false, query_preview: msg.slice(0, 120),
             created_at: new Date().toISOString(),
-=======
       // Log usage to Supabase (keeps /ai-cost dashboard working)
       if (sb && sbOk()) (async () => {
         try {
@@ -435,7 +418,6 @@ async function askAegis(msg, uid=null, extraCtx='') {
             used_search:   false,
             query_preview: msg.slice(0, 120),
             created_at:    new Date().toISOString(),
->>>>>>> d06f07d2ab295b3409afeee2a8246798de8c2766
           });
         } catch {}
       })();
@@ -449,17 +431,13 @@ async function askAegis(msg, uid=null, extraCtx='') {
         if (retries < 3) { await new Promise(r => setTimeout(r, 2000 * retries)); continue; }
         return '⚠️ AEGIS rate limited. Try again in a moment.';
       }
-<<<<<<< HEAD
-=======
       if (msg2.includes('model_not_found')) return '⚠️ AI model unavailable. Check GROQ_API_KEY.';
->>>>>>> d06f07d2ab295b3409afeee2a8246798de8c2766
       console.error('[AEGIS AI]', msg2);
       return '⚠️ AEGIS error: ' + msg2.slice(0, 100);
     }
   }
 }
 
-<<<<<<< HEAD
 // ── AI SUMMARIZE (internal, no history) ──
 async function aiSummarize(prompt) {
   if (!groq) return null;
@@ -837,7 +815,6 @@ function addWalletSubs(b) {
     .addSubcommand(s => s.setName('supply').setDescription('📊 Economy supply'))
     .addSubcommand(s => s.setName('grant').setDescription('🎁 [ADMIN] Grant shards').addUserOption(o => o.setName('user').setDescription('Recipient').setRequired(true)).addIntegerOption(o => o.setName('amount').setDescription('Amount').setRequired(true).setMinValue(1)).addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)))
     .addSubcommand(s => s.setName('deduct').setDescription('⬇️ [ADMIN] Deduct shards').addUserOption(o => o.setName('user').setDescription('Target').setRequired(true)).addIntegerOption(o => o.setName('amount').setDescription('Amount').setRequired(true).setMinValue(1)).addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)));
-=======
 // ══════════════════════════════════════════════════════════════════
 // WALLET ENGINE
 // ══════════════════════════════════════════════════════════════════
@@ -1080,14 +1057,12 @@ function addWalletSubs(b){
     .addSubcommand(s=>s.setName('supply').setDescription('📊 Economy supply'))
     .addSubcommand(s=>s.setName('grant').setDescription('🎁 [ADMIN] Grant shards').addUserOption(o=>o.setName('user').setDescription('Recipient').setRequired(true)).addIntegerOption(o=>o.setName('amount').setDescription('Amount').setRequired(true).setMinValue(1)).addStringOption(o=>o.setName('reason').setDescription('Reason').setRequired(false)))
     .addSubcommand(s=>s.setName('deduct').setDescription('⬇️ [ADMIN] Deduct shards').addUserOption(o=>o.setName('user').setDescription('Target').setRequired(true)).addIntegerOption(o=>o.setName('amount').setDescription('Amount').setRequired(true).setMinValue(1)).addStringOption(o=>o.setName('reason').setDescription('Reason').setRequired(false)));
->>>>>>> d06f07d2ab295b3409afeee2a8246798de8c2766
 }
 
 const ALL_COMMANDS = [
   // Economy
   addWalletSubs(new SlashCommandBuilder().setName('wallet').setDescription('💎 ClaveShard wallet')),
   addWalletSubs(new SlashCommandBuilder().setName('curr').setDescription('💎 ClaveShard wallet (alias)')),
-<<<<<<< HEAD
   new SlashCommandBuilder().setName('weekly').setDescription('🌟 Claim weekly ClaveShards (3/week)'),
   new SlashCommandBuilder().setName('leaderboard').setDescription('🏆 Top 10 ClaveShard holders'),
   new SlashCommandBuilder().setName('give').setDescription('🎁 [ADMIN] Quick grant shards').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
@@ -1137,7 +1112,6 @@ const ALL_COMMANDS = [
   new SlashCommandBuilder().setName('servers').setDescription('🗺️ Live ARK cluster status').addStringOption(o => o.setName('map').setDescription('Filter by map').setRequired(false)),
   new SlashCommandBuilder().setName('map').setDescription('🗺️ Detailed info for a specific map').addStringOption(o => o.setName('name').setDescription('Map').setRequired(true).addChoices({ name: 'The Island', value: 'island' }, { name: 'Volcano', value: 'volcano' }, { name: 'Extinction', value: 'extinction' }, { name: 'The Center', value: 'center' }, { name: 'Lost Colony', value: 'lostcolony' }, { name: 'Astraeos', value: 'astraeos' }, { name: 'Valguero', value: 'valguero' }, { name: 'Scorched Earth', value: 'scorched' }, { name: 'Aberration (PvP)', value: 'aberration' }, { name: 'Amissa (Patreon)', value: 'amissa' })),
   new SlashCommandBuilder().setName('monitor').setDescription('📡 [ADMIN] Post live server status monitor').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages).addChannelOption(o => o.setName('channel').setDescription('Channel to post in').setRequired(true)),
-=======
   new SlashCommandBuilder().setName('leaderboard').setDescription('🏆 Top 10 ClaveShard holders'),
   new SlashCommandBuilder().setName('give').setDescription('🎁 [ADMIN] Quick grant shards').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     .addUserOption(o=>o.setName('user').setDescription('Player').setRequired(true))
@@ -1171,25 +1145,20 @@ const ALL_COMMANDS = [
   new SlashCommandBuilder().setName('servers').setDescription('🗺️ Live ARK cluster status').addStringOption(o=>o.setName('map').setDescription('Filter by map').setRequired(false)),
   new SlashCommandBuilder().setName('map').setDescription('🗺️ Detailed info for a specific map').addStringOption(o=>o.setName('name').setDescription('Map').setRequired(true).addChoices({name:'The Island',value:'island'},{name:'Volcano',value:'volcano'},{name:'Extinction',value:'extinction'},{name:'The Center',value:'center'},{name:'Lost Colony',value:'lostcolony'},{name:'Astraeos',value:'astraeos'},{name:'Valguero',value:'valguero'},{name:'Scorched Earth',value:'scorched'},{name:'Aberration (PvP)',value:'aberration'},{name:'Amissa (Patreon)',value:'amissa'})),
   new SlashCommandBuilder().setName('monitor').setDescription('📡 [ADMIN] Post live server status monitor').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages).addChannelOption(o=>o.setName('channel').setDescription('Channel to post in').setRequired(true)),
->>>>>>> d06f07d2ab295b3409afeee2a8246798de8c2766
   // Info
   new SlashCommandBuilder().setName('info').setDescription('ℹ️ Server info and getting-started guide'),
   new SlashCommandBuilder().setName('rules').setDescription('📜 Dominion Codex rules'),
   new SlashCommandBuilder().setName('rates').setDescription('📈 All 5× boost rates'),
   new SlashCommandBuilder().setName('mods').setDescription('🔧 Active cluster mods'),
-<<<<<<< HEAD
   new SlashCommandBuilder().setName('wipe').setDescription('📅 Wipe schedule and countdown'),
   new SlashCommandBuilder().setName('set-wipe').setDescription('📅 [ADMIN] Set wipe date').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     .addStringOption(o => o.setName('date').setDescription('Date (e.g. 2025-08-01)').setRequired(true))
     .addStringOption(o => o.setName('reason').setDescription('Reason / context').setRequired(false)),
-=======
   new SlashCommandBuilder().setName('wipe').setDescription('📅 Wipe schedule'),
->>>>>>> d06f07d2ab295b3409afeee2a8246798de8c2766
   new SlashCommandBuilder().setName('transfer-guide').setDescription('🔄 Cross-ARK transfer guide'),
   new SlashCommandBuilder().setName('crossplay').setDescription('🎮 Crossplay connection guide'),
   new SlashCommandBuilder().setName('patreon').setDescription('⭐ Patreon perks and Amissa access'),
   new SlashCommandBuilder().setName('tip').setDescription('💡 Random ARK survival tip'),
-<<<<<<< HEAD
   new SlashCommandBuilder().setName('dino').setDescription('🦕 ARK dino lookup').addStringOption(o => o.setName('name').setDescription('Dino name').setRequired(true)),
   new SlashCommandBuilder().setName('help').setDescription('📖 Full command reference'),
   new SlashCommandBuilder().setName('ping').setDescription('🏓 Bot latency and status'),
@@ -1371,7 +1340,6 @@ bot.on(Events.InteractionCreate, async interaction => {
     if (!isMod(interaction.member)) return interaction.reply({ content: '⛔ Staff only.', ephemeral: true });
     await interaction.reply('🔒 Closing ticket in 5 seconds...');
     setTimeout(() => interaction.channel.delete().catch(() => {}), 5000);
-=======
   new SlashCommandBuilder().setName('dino').setDescription('🦕 ARK dino lookup').addStringOption(o=>o.setName('name').setDescription('Dino name').setRequired(true)),
   new SlashCommandBuilder().setName('help').setDescription('📖 Full command reference'),
   new SlashCommandBuilder().setName('ping').setDescription('🏓 Bot latency and status'),
@@ -1522,13 +1490,11 @@ bot.on(Events.InteractionCreate, async interaction => {
     if (!isMod(interaction.member)) return interaction.reply({content:'⛔ Staff only.',ephemeral:true});
     await interaction.reply('🔒 Closing ticket in 5 seconds...');
     setTimeout(()=>interaction.channel.delete().catch(()=>{}),5000);
->>>>>>> d06f07d2ab295b3409afeee2a8246798de8c2766
     return;
   }
 
   if (!interaction.isChatInputCommand()) return;
   const { commandName: cmd } = interaction;
-<<<<<<< HEAD
   await interaction.deferReply();
 
   try {
@@ -2151,7 +2117,6 @@ const healthServer = http.createServer((req, res) => {
       ai:        groq ? 'groq' : 'not_configured',
       supabase:  sb ? (sbOk() ? 'ok' : 'circuit_open') : 'not_configured',
       version:   'v11.0',
-=======
 
   // ── MUSIC COMMANDS ──
   if ((cmd==='music'||cmd==='setup-music') && musicRuntime) {
@@ -2619,12 +2584,10 @@ const healthServer = http.createServer((req, res) => {
       ai:        groq?'groq':'not_configured',
       supabase:  sb?(sbOk()?'ok':'circuit_open'):'not_configured',
       version:   'v10.1',
->>>>>>> d06f07d2ab295b3409afeee2a8246798de8c2766
       ts:        new Date().toISOString(),
     }));
   } else { res.writeHead(404); res.end('Not found'); }
 });
-<<<<<<< HEAD
 healthServer.listen(BOT_PORT, () => console.log(`💓 Health: :${BOT_PORT}`));
 
 // ══════════════════════════════════════════════════════════════════════
@@ -2655,7 +2618,6 @@ bot.once(Events.ClientReady, async () => {
     const monCh = process.env.MONITOR_STATUS_CHANNEL_ID, monMsg = process.env.MONITOR_MESSAGE_ID;
     if (monCh && monMsg) {
       monitorState.set(DISCORD_GUILD_ID, { statusChannelId: monCh, messageId: monMsg });
-=======
 healthServer.listen(BOT_PORT, ()=>console.log(`💓 Health: :${BOT_PORT}`));
 
 // ══════════════════════════════════════════════════════════════════
@@ -2703,12 +2665,10 @@ bot.once(Events.ClientReady, async () => {
         messageId: monMsg,
       });
 
->>>>>>> d06f07d2ab295b3409afeee2a8246798de8c2766
       const ch = await guild.channels.fetch(monCh).catch(() => null);
       if (ch) {
         const embed = buildMonitorEmbed(statuses);
         const msg = await ch.messages.fetch(monMsg).catch(() => null);
-<<<<<<< HEAD
         if (msg) { await msg.edit({ embeds: [embed] }).catch(e => console.error('❌ Monitor resume:', e.message)); console.log('📡 Monitor embed resumed'); }
         else console.log('⚠️ Monitor message not found');
       }
@@ -2729,7 +2689,6 @@ async function login() {
     console.error(`❌ Login attempt ${loginAttempt} failed: ${e.message} — retry in ${delay / 1000}s`);
     STATUS.reconnects++;
     setTimeout(login, delay);
-=======
 
         if (msg) {
           await msg.edit({ embeds: [embed] }).catch((e) => {
@@ -2758,7 +2717,6 @@ async function login(){
     console.error(`❌ Login attempt ${loginAttempt} failed: ${e.message} — retry in ${delay/1000}s`);
     STATUS.reconnects++;
     setTimeout(login,delay);
->>>>>>> d06f07d2ab295b3409afeee2a8246798de8c2766
   }
 }
 login();
