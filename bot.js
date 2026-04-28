@@ -18,6 +18,7 @@
 'use strict';
 require('dotenv').config();
 
+const { sendWatchtowerPanel, handleWatchtowerInteraction } = require('./watchtower-system');
 const http = require('http');
 const axios = require('axios');
 const {
@@ -869,6 +870,12 @@ async function registerCommands() {
 // ══════════════════════════════════════════════════════════════════════
 // INTERACTION HANDLER
 // ══════════════════════════════════════════════════════════════════════
+bot.on('interactionCreate', async (interaction) => {
+  try {
+    // 🔥 WATCHTOWER HANDLER (ADD THIS LINE)
+    if (await handleWatchtowerInteraction(interaction, bot)) return;
+
+    // ⬇️ your existing logic continues below
 bot.on(Events.InteractionCreate, async interaction => {
 
   // ── GIVEAWAY BUTTON ──
