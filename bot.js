@@ -18,7 +18,6 @@
 'use strict';
 require('dotenv').config();
 
-const { sendWatchtowerPanel, handleWatchtowerInteraction } = require('./watchtower-system');
 const http = require('http');
 const axios = require('axios');
 const {
