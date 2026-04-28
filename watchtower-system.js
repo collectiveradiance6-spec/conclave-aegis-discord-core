@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════
-// AEGIS WATCHTOWER — Base Protection Request System
+// AEGIS WATCHTOWER — Base Watch Request System
 // Button → Modal Form → Public Forum/Channel Post + Admin Log
 // ═══════════════════════════════════════════════════════════════════════
 'use strict';
@@ -20,30 +20,46 @@ const WATCHTOWER_ADMIN_LOG_CHANNEL_ID = process.env.WATCHTOWER_ADMIN_LOG_CHANNEL
 const WATCHTOWER_STAFF_ROLE_ID = process.env.WATCHTOWER_STAFF_ROLE_ID || process.env.ROLE_ADMIN_ID || null;
 
 const IDS = {
-  openForm: 'watchtower_open_base_protection_form',
-  submitForm: 'watchtower_submit_base_protection_form',
+  openForm: 'watchtower_open_base_watch_form',
+  submitForm: 'watchtower_submit_base_watch_form',
 };
 
 function buildWatchtowerButton() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(IDS.openForm)
-      .setLabel('🛡️ Open Base Protection Form')
+      .setLabel('🛡️ Open Base Watch Request')
       .setStyle(ButtonStyle.Primary)
   );
 }
 
 function buildWatchtowerPanelContent() {
   return [
-    '⟦ :URGENTA: 🛡️ AEGIS_WATCHTOWER // BASE_PROTECTION_REQUESTS 🛡️ :URGENTA: ⟧',
+    '⟦ 🛡️ AEGIS_TOWER // BASE_WATCH_REQUESTS 🛡️ ⟧',
     '',
-    '📡 This is the official Watchtower intake for base upkeep while players are away.',
+    '📡 Need your base watched while you are away? Submit a Base Watch Request below.',
     '',
-    '🧱 Normal policy: bases are usually not deleted until ⏳ **60 days** of inactivity unless staff were informed prior.',
-    '📅 Request limit: admins can hold/monitor one request for one ⏳ **3-month segment** at a time.',
-    '⚠️ Special circumstances may be reviewed and extended at staff discretion.',
+    '⟡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━⟡',
     '',
-    'Click the button below to submit the form. 👇',
+    '🧾 **What this is for**',
+    '• Away-player base upkeep',
+    '• Multiple maps / multiple base locations',
+    '• Dino feeding checks 🐾',
+    '• Generator fuel checks 🔋',
+    '• Decay prevention / monitoring 👁️',
+    '• Minor emergency notes ⚠️',
+    '',
+    '⏳ **Policy**',
+    '• Bases are normally reviewed after **60 days** of inactivity unless staff were informed prior.',
+    '• Requests may be held for one **3-month segment** at a time.',
+    '• Extensions may be approved only for special circumstances.',
+    '',
+    '🚫 **Not for**',
+    '• Full base management',
+    '• Constant supervision',
+    '• Building, breeding, farming, or personal chores',
+    '',
+    'Click below to open a Base Watch Request ticket. 👇',
   ].join('\n');
 }
 
@@ -54,20 +70,24 @@ async function sendWatchtowerPanel(channel) {
   });
 }
 
-function buildRequestEmbed({ interaction, playerTribe, discordName, mapLocation, dates, upkeep, notes }) {
+function safeField(value, fallback = 'Not provided') {
+  return String(value || fallback).slice(0, 1024);
+}
+
+function buildRequestEmbed({ interaction, playerTribe, discordName, baseLocations, dates, upkeep, accessNotes }) {
   return new EmbedBuilder()
     .setColor(0x7b2fff)
-    .setTitle('🛡️ Base Protection Request')
-    .setDescription('📊 Status: 🟡 Pending')
+    .setTitle('🛡️ Base Watch Request')
+    .setDescription('📊 Status: 🟡 Pending Review')
     .addFields(
-      { name: '👤 Player / Tribe', value: playerTribe.slice(0, 1024), inline: false },
-      { name: '💬 Discord', value: discordName.slice(0, 1024), inline: true },
-      { name: '🗺️ Map / Location', value: mapLocation.slice(0, 1024), inline: false },
-      { name: '⏳ Away → Return', value: dates.slice(0, 1024), inline: false },
-      { name: '⚙️ Upkeep Needed', value: upkeep.slice(0, 1024), inline: false },
-      { name: '🧠 Notes / Urgency', value: (notes || 'No special notes provided.').slice(0, 1024), inline: false },
+      { name: '👤 Player / Tribe', value: safeField(playerTribe), inline: false },
+      { name: '💬 Discord', value: safeField(discordName), inline: true },
+      { name: '🗺️ Maps + Base Locations', value: safeField(baseLocations), inline: false },
+      { name: '⏳ Away → Return', value: safeField(dates), inline: false },
+      { name: '⚙️ Upkeep Needed', value: safeField(upkeep), inline: false },
+      { name: '🔐 Access / Urgency Notes', value: safeField(accessNotes, 'No special access or urgency notes provided.'), inline: false },
     )
-    .setFooter({ text: `Submitted by ${interaction.user.tag} · Watchtower Protocol` })
+    .setFooter({ text: `Submitted by ${interaction.user.tag} · AEGIS Watchtower` })
     .setTimestamp();
 }
 
@@ -75,7 +95,7 @@ async function handleWatchtowerInteraction(interaction, client) {
   if (interaction.isButton() && interaction.customId === IDS.openForm) {
     const modal = new ModalBuilder()
       .setCustomId(IDS.submitForm)
-      .setTitle('Base Protection Request');
+      .setTitle('Base Watch Request');
 
     const playerTribe = new TextInputBuilder()
       .setCustomId('player_tribe')
@@ -93,13 +113,13 @@ async function handleWatchtowerInteraction(interaction, client) {
       .setRequired(true)
       .setMaxLength(100);
 
-    const mapLocation = new TextInputBuilder()
-      .setCustomId('map_location')
-      .setLabel('Map + Base Location / Coords')
-      .setPlaceholder('Example: Valguero — 45 / 62 — Cliffside metal base')
-      .setStyle(TextInputStyle.Short)
+    const baseLocations = new TextInputBuilder()
+      .setCustomId('base_locations')
+      .setLabel('Maps + Base Locations / Coords')
+      .setPlaceholder('Example: Valguero 45/62 cliff base; Island 72/34 water pen; Amissa 50/50 outpost')
+      .setStyle(TextInputStyle.Paragraph)
       .setRequired(true)
-      .setMaxLength(200);
+      .setMaxLength(900);
 
     const dates = new TextInputBuilder()
       .setCustomId('dates')
@@ -111,8 +131,8 @@ async function handleWatchtowerInteraction(interaction, client) {
 
     const upkeep = new TextInputBuilder()
       .setCustomId('upkeep')
-      .setLabel('Upkeep Needed + Notes / Urgency')
-      .setPlaceholder('Example: Feed dinos, fuel generators. Standard urgency. Turrets active.')
+      .setLabel('Upkeep + Access / Urgency Notes')
+      .setPlaceholder('Example: Feed dinos, fuel generators. Main gate unlocked. Standard urgency. Turrets active.')
       .setStyle(TextInputStyle.Paragraph)
       .setRequired(true)
       .setMaxLength(900);
@@ -120,7 +140,7 @@ async function handleWatchtowerInteraction(interaction, client) {
     modal.addComponents(
       new ActionRowBuilder().addComponents(playerTribe),
       new ActionRowBuilder().addComponents(discordName),
-      new ActionRowBuilder().addComponents(mapLocation),
+      new ActionRowBuilder().addComponents(baseLocations),
       new ActionRowBuilder().addComponents(dates),
       new ActionRowBuilder().addComponents(upkeep),
     );
@@ -132,10 +152,10 @@ async function handleWatchtowerInteraction(interaction, client) {
   if (interaction.isModalSubmit() && interaction.customId === IDS.submitForm) {
     const playerTribe = interaction.fields.getTextInputValue('player_tribe');
     const discordName = interaction.fields.getTextInputValue('discord_name');
-    const mapLocation = interaction.fields.getTextInputValue('map_location');
+    const baseLocations = interaction.fields.getTextInputValue('base_locations');
     const dates = interaction.fields.getTextInputValue('dates');
     const upkeep = interaction.fields.getTextInputValue('upkeep');
-    const notes = upkeep;
+    const accessNotes = upkeep;
 
     if (!WATCHTOWER_PUBLIC_CHANNEL_ID || !WATCHTOWER_ADMIN_LOG_CHANNEL_ID) {
       await interaction.reply({
@@ -156,38 +176,48 @@ async function handleWatchtowerInteraction(interaction, client) {
       return true;
     }
 
-    const embed = buildRequestEmbed({ interaction, playerTribe, discordName, mapLocation, dates, upkeep, notes });
+    const embed = buildRequestEmbed({ interaction, playerTribe, discordName, baseLocations, dates, upkeep, accessNotes });
 
     const publicContent = [
-      '⟦ 🛡️ BASE_PROTECTION_REQUEST 🛡️ ⟧',
+      '⟦ 🛡️ BASE_WATCH_REQUEST 🛡️ ⟧',
       '',
       `👤 Player / Tribe: ${playerTribe}`,
       `💬 Discord: ${discordName}`,
-      `🗺️ Map / Location: ${mapLocation}`,
-      `⏳ Away → Return: ${dates}`,
-      `⚙️ Upkeep Needed: ${upkeep}`,
       '',
-      '📊 Status: 🟡 Pending',
+      '🗺️ Maps + Base Locations:',
+      baseLocations,
+      '',
+      `⏳ Away → Return: ${dates}`,
+      '',
+      '⚙️ Upkeep / Notes:',
+      upkeep,
+      '',
+      '📊 Status: 🟡 Pending Review',
     ].join('\n');
 
     const adminContent = [
       WATCHTOWER_STAFF_ROLE_ID ? `<@&${WATCHTOWER_STAFF_ROLE_ID}>` : null,
-      '⟦ :URGENTA: 🛡️ ADMIN_BASE_PROTECTION_LOG 🛡️ :URGENTA: ⟧',
+      '⟦ :URGENTA: 🔒 AEGIS_TOWER_BASE_WATCH // ADMIN_LOG 🔒 :URGENTA: ⟧',
       '',
       `👤 Submitted By: ${interaction.user.tag}`,
       `🆔 Discord ID: ${interaction.user.id}`,
       `👤 Player / Tribe: ${playerTribe}`,
       `💬 Discord Name: ${discordName}`,
-      `🗺️ Map / Location: ${mapLocation}`,
-      `⏳ Away → Return: ${dates}`,
-      `⚙️ Upkeep Needed: ${upkeep}`,
       '',
-      '📊 Status: 🟡 Pending',
+      '🗺️ Maps + Base Locations:',
+      baseLocations,
+      '',
+      `⏳ Away → Return: ${dates}`,
+      '',
+      '⚙️ Upkeep / Access / Urgency:',
+      upkeep,
+      '',
+      '📊 Status: 🟡 Pending Review',
     ].filter(Boolean).join('\n');
 
     if (publicChannel.type === ChannelType.GuildForum) {
       await publicChannel.threads.create({
-        name: `🛡️ Base Request // ${playerTribe}`.slice(0, 100),
+        name: `🛡️ Base Watch // ${playerTribe}`.slice(0, 100),
         message: { content: publicContent, embeds: [embed] },
       });
     } else {
@@ -197,7 +227,7 @@ async function handleWatchtowerInteraction(interaction, client) {
     await adminLog.send({ content: adminContent, embeds: [embed] });
 
     await interaction.reply({
-      content: '✅ Your base protection request has been submitted to the Watchtower.',
+      content: '✅ Your Base Watch Request has been submitted to the Watchtower.',
       ephemeral: true,
     });
     return true;
