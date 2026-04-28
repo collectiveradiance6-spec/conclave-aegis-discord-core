@@ -18,6 +18,7 @@
 'use strict';
 require('dotenv').config();
 
+const { sendWatchtowerPanel, handleWatchtowerInteraction } = require('./watchtower-system');
 const http = require('http');
 const axios = require('axios');
 const {
@@ -692,13 +693,13 @@ const ALL_COMMANDS = [
   // Economy
   addWalletSubs(new SlashCommandBuilder().setName('wallet').setDescription('💎 ClaveShard wallet')),
   addWalletSubs(new SlashCommandBuilder().setName('curr').setDescription('💎 ClaveShard wallet (alias)')),
-  new SlashCommandBuilder().setName('weekly').setDescription('🌟 Claim weekly ClaveShards (3/week)'),
+  new SlashCommandBuilder().setName('weekly').setDescription('🌟 Claim weekly ClaveShards (2/week)'),
   new SlashCommandBuilder().setName('leaderboard').setDescription('🏆 Top 10 ClaveShard holders'),
   new SlashCommandBuilder().setName('give').setDescription('🎁 [ADMIN] Quick grant shards').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     .addUserOption(o => o.setName('user').setDescription('Player').setRequired(true))
     .addIntegerOption(o => o.setName('amount').setDescription('Shards').setRequired(true).setMinValue(1))
     .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)),
-  new SlashCommandBuilder().setName('watchtower').setDescription('🛡️ [ADMIN] Post base protection request panel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+  new SlashCommandBuilder().setName('watchtower').setDescription('🛡️ [ADMIN] Post base protection request panel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
   new SlashCommandBuilder().setName('clvsd').setDescription('💠 Admin economy tools').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     .addSubcommand(s => s.setName('grant').setDescription('🎁 Grant').addUserOption(o => o.setName('user').setDescription('Recipient').setRequired(true)).addIntegerOption(o => o.setName('amount').setDescription('Amount').setRequired(true).setMinValue(1)).addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)))
     .addSubcommand(s => s.setName('deduct').setDescription('⬇️ Deduct').addUserOption(o => o.setName('user').setDescription('Target').setRequired(true)).addIntegerOption(o => o.setName('amount').setDescription('Amount').setRequired(true).setMinValue(1)).addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)))
