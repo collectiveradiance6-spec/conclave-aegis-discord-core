@@ -867,51 +867,15 @@ async function registerCommands() {
     }
   } catch (e) { console.error('❌ Registration failed:', e.message); }
 }
-
-if (interaction.commandName === 'watchtower') {
-  if (!isAdmin(interaction.member)) {
-    return interaction.reply({
-      content: '❌ Admin only.',
-      ephemeral: true,
-    });
-  }
-
-  await sendWatchtowerPanel(interaction.channel);
-
-  return interaction.reply({
-    content: '✅ Watchtower base protection panel posted.',
-    ephemeral: true,
-  });
-}
-
-  await sendWatchtowerPanel(interaction.channel);
-
-  return interaction.reply({
-    content: '✅ Watchtower base protection panel posted.',
-    ephemeral: true,
-  });
-}
   
-  await sendWatchtowerPanel(interaction.channel);
-
-  return interaction.reply({
-    content: '✅ Watchtower panel posted.',
-    ephemeral: true,
-  });
-}
-
 // ══════════════════════════════════════════════════════════════════════
 // INTERACTION HANDLER
 // ══════════════════════════════════════════════════════════════════════
-bot.on('interactionCreate', async (interaction) => {
-  try {
-    // 🔥 WATCHTOWER HANDLER (ADD THIS LINE)
-    if (await handleWatchtowerInteraction(interaction, bot)) return;
-    // ⬇️ your existing logic continues below
 bot.on(Events.InteractionCreate, async interaction => {
+   try {
+    if (await handleWatchtowerInteraction(interaction, bot)) return; 
 
   // ── GIVEAWAY BUTTON ──
-  if (await handleWatchtowerInteraction(interaction, bot)) return;
   if (interaction.isButton() && interaction.customId === 'giveaway_enter') {
     const gw = activeGiveaways.get(interaction.message.id);
     if (!gw) return interaction.reply({ content: '⚠️ Giveaway no longer active.', ephemeral: true });
@@ -989,8 +953,25 @@ bot.on(Events.InteractionCreate, async interaction => {
   }
 
   if (!interaction.isChatInputCommand()) return;
-  const { commandName: cmd } = interaction;
-  await interaction.deferReply();
+
+if (interaction.commandName === 'watchtower') {
+  if (!isAdmin(interaction.member)) {
+    return interaction.reply({
+      content: '❌ Admin only.',
+      ephemeral: true,
+    });
+  }
+
+  await sendWatchtowerPanel(interaction.channel);
+
+  return interaction.reply({
+    content: '✅ Watchtower base protection panel posted.',
+    ephemeral: true,
+  });
+}
+
+const { commandName: cmd } = interaction;
+await interaction.deferReply();
 
   try {
     // ──────────────────────────────────────────────────────────────────
