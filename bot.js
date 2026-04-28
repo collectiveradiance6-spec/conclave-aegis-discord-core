@@ -699,6 +699,7 @@ const ALL_COMMANDS = [
     .addUserOption(o => o.setName('user').setDescription('Player').setRequired(true))
     .addIntegerOption(o => o.setName('amount').setDescription('Shards').setRequired(true).setMinValue(1))
     .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)),
+  new SlashCommandBuilder().setName('watchtower').setDescription('🛡️ [ADMIN] Post base protection request panel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
   new SlashCommandBuilder().setName('clvsd').setDescription('💠 Admin economy tools').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     .addSubcommand(s => s.setName('grant').setDescription('🎁 Grant').addUserOption(o => o.setName('user').setDescription('Recipient').setRequired(true)).addIntegerOption(o => o.setName('amount').setDescription('Amount').setRequired(true).setMinValue(1)).addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)))
     .addSubcommand(s => s.setName('deduct').setDescription('⬇️ Deduct').addUserOption(o => o.setName('user').setDescription('Target').setRequired(true)).addIntegerOption(o => o.setName('amount').setDescription('Amount').setRequired(true).setMinValue(1)).addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)))
@@ -867,6 +868,37 @@ async function registerCommands() {
   } catch (e) { console.error('❌ Registration failed:', e.message); }
 }
 
+if (interaction.commandName === 'watchtower') {
+  if (!isAdmin(interaction.member)) {
+    return interaction.reply({
+      content: '❌ Admin only.',
+      ephemeral: true,
+    });
+  }
+  if (interaction.commandName === 'watchtower') {
+  if (!isAdmin(interaction.member)) {
+    return interaction.reply({
+      content: '❌ Admin only.',
+      ephemeral: true,
+    });
+  }
+
+  await sendWatchtowerPanel(interaction.channel);
+
+  return interaction.reply({
+    content: '✅ Watchtower base protection panel posted.',
+    ephemeral: true,
+  });
+}
+  
+  await sendWatchtowerPanel(interaction.channel);
+
+  return interaction.reply({
+    content: '✅ Watchtower panel posted.',
+    ephemeral: true,
+  });
+}
+
 // ══════════════════════════════════════════════════════════════════════
 // INTERACTION HANDLER
 // ══════════════════════════════════════════════════════════════════════
@@ -874,11 +906,11 @@ bot.on('interactionCreate', async (interaction) => {
   try {
     // 🔥 WATCHTOWER HANDLER (ADD THIS LINE)
     if (await handleWatchtowerInteraction(interaction, bot)) return;
-
     // ⬇️ your existing logic continues below
 bot.on(Events.InteractionCreate, async interaction => {
 
   // ── GIVEAWAY BUTTON ──
+  if (await handleWatchtowerInteraction(interaction, bot)) return;
   if (interaction.isButton() && interaction.customId === 'giveaway_enter') {
     const gw = activeGiveaways.get(interaction.message.id);
     if (!gw) return interaction.reply({ content: '⚠️ Giveaway no longer active.', ephemeral: true });
