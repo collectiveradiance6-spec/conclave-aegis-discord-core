@@ -875,13 +875,14 @@ if (interaction.commandName === 'watchtower') {
       ephemeral: true,
     });
   }
-  if (interaction.commandName === 'watchtower') {
-  if (!isAdmin(interaction.member)) {
-    return interaction.reply({
-      content: '❌ Admin only.',
-      ephemeral: true,
-    });
-  }
+
+  await sendWatchtowerPanel(interaction.channel);
+
+  return interaction.reply({
+    content: '✅ Watchtower base protection panel posted.',
+    ephemeral: true,
+  });
+}
 
   await sendWatchtowerPanel(interaction.channel);
 
