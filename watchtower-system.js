@@ -1,6 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════
 // AEGIS WATCHTOWER — Base Watch Request System
 // Button → Modal Form → Public Forum/Channel Post + Admin Log
+// Staff actions → Claim / In Progress / Complete / Extension Review
 // ═══════════════════════════════════════════════════════════════════════
 'use strict';
 
@@ -22,6 +23,18 @@ const WATCHTOWER_STAFF_ROLE_ID = process.env.WATCHTOWER_STAFF_ROLE_ID || process
 const IDS = {
   openForm: 'watchtower_open_base_watch_form',
   submitForm: 'watchtower_submit_base_watch_form',
+  claim: 'watchtower_claim',
+  progress: 'watchtower_progress',
+  complete: 'watchtower_complete',
+  extension: 'watchtower_extension',
+};
+
+const STATUS = {
+  pending: { label: '🟡 Pending Review', color: 0x7b2fff },
+  claimed: { label: '🟢 Assigned / Claimed', color: 0x35ed7e },
+  progress: { label: '🔵 In Progress', color: 0x00d4ff },
+  complete: { label: '✅ Completed', color: 0x35ed7e },
+  extension: { label: '🟣 Extension Review', color: 0xff4cd2 },
 };
 
 function buildWatchtowerButton() {
@@ -30,6 +43,15 @@ function buildWatchtowerButton() {
       .setCustomId(IDS.openForm)
       .setLabel('🛡️ Open Base Watch Request')
       .setStyle(ButtonStyle.Primary)
+  );
+}
+
+function buildStaffActionRow(disabled = false) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(IDS.claim).setLabel('🟢 Claim').setStyle(ButtonStyle.Success).setDisabled(disabled),
+    new ButtonBuilder().setCustomId(IDS.progress).setLabel('🔵 In Progress').setStyle(ButtonStyle.Primary).setDisabled(disabled),
+    new ButtonBuilder().setCustomId(IDS.complete).setLabel('✅ Complete').setStyle(ButtonStyle.Success).setDisabled(disabled),
+    new ButtonBuilder().setCustomId(IDS.extension).setLabel('🟣 Extension').setStyle(ButtonStyle.Secondary).setDisabled(disabled),
   );
 }
 
@@ -54,6 +76,11 @@ function buildWatchtowerPanelContent() {
     '• Requests may be held for one **3-month segment** at a time.',
     '• Extensions may be approved only for special circumstances.',
     '',
+    '📍 **Multiple Bases**',
+    'List every map and base location clearly. One base per line is best.',
+    '`Valguero — 45/62 — cliff base`',
+    '`The Island — 72/34 — ocean pen`',
+    '',
     '🚫 **Not for**',
     '• Full base management',
     '• Constant supervision',
@@ -74,15 +101,41 @@ function safeField(value, fallback = 'Not provided') {
   return String(value || fallback).slice(0, 1024);
 }
 
-function buildRequestEmbed({ interaction, playerTribe, discordName, baseLocations, dates, upkeep, accessNotes }) {
+function parseBaseLines(baseLocations) {
+  return String(baseLocations || '')
+    .split(/\n|;/g)
+    .map(line => line.trim())
+    .filter(Boolean);
+}
+
+function inferPriority(upkeep, baseLocations, dates) {
+  const raw = `${upkeep || ''} ${baseLocations || ''} ${dates || ''}`.toLowerCase();
+  const urgentWords = ['urgent', 'emergency', 'decay', 'timer', 'almost out', 'out of fuel', 'starving', 'low food', 'cryofridge', 'generator off', 'offline soon'];
+  const extensionWords = ['extension', 'longer', 'delayed', '3 month', 'three month', 'special circumstance'];
+  if (extensionWords.some(w => raw.includes(w))) return '🟣 Extension Review';
+  if (urgentWords.some(w => raw.includes(w))) return '🔴 Urgent Review';
+  return '🟡 Standard';
+}
+
+function buildLocationSummary(baseLocations) {
+  const lines = parseBaseLines(baseLocations);
+  if (!lines.length) return 'No parsed locations.';
+  return lines.map((line, index) => `**${index + 1}.** ${line}`).join('\n').slice(0, 1024);
+}
+
+function buildRequestEmbed({ interaction, playerTribe, discordName, baseLocations, dates, upkeep, accessNotes, statusKey = 'pending' }) {
+  const status = STATUS[statusKey] || STATUS.pending;
+  const priority = inferPriority(upkeep, baseLocations, dates);
+  const baseCount = parseBaseLines(baseLocations).length || 1;
+
   return new EmbedBuilder()
-    .setColor(0x7b2fff)
+    .setColor(status.color)
     .setTitle('🛡️ Base Watch Request')
-    .setDescription('📊 Status: 🟡 Pending Review')
+    .setDescription(`📊 Status: **${status.label}**\n🚨 Priority: **${priority}**\n📍 Base Entries: **${baseCount}**`)
     .addFields(
       { name: '👤 Player / Tribe', value: safeField(playerTribe), inline: false },
       { name: '💬 Discord', value: safeField(discordName), inline: true },
-      { name: '🗺️ Maps + Base Locations', value: safeField(baseLocations), inline: false },
+      { name: '🗺️ Parsed Base Locations', value: safeField(buildLocationSummary(baseLocations)), inline: false },
       { name: '⏳ Away → Return', value: safeField(dates), inline: false },
       { name: '⚙️ Upkeep Needed', value: safeField(upkeep), inline: false },
       { name: '🔐 Access / Urgency Notes', value: safeField(accessNotes, 'No special access or urgency notes provided.'), inline: false },
@@ -91,7 +144,51 @@ function buildRequestEmbed({ interaction, playerTribe, discordName, baseLocation
     .setTimestamp();
 }
 
+function updateEmbedStatus(oldEmbed, statusKey, actorTag) {
+  const status = STATUS[statusKey] || STATUS.pending;
+  const embed = EmbedBuilder.from(oldEmbed)
+    .setColor(status.color)
+    .setDescription(`${oldEmbed.description || ''}\n\n🧭 Staff Update: **${status.label}** by **${actorTag}**`)
+    .setTimestamp();
+  return embed;
+}
+
+async function handleStaffAction(interaction, statusKey) {
+  if (!interaction.member?.permissions?.has?.('ManageMessages') && WATCHTOWER_STAFF_ROLE_ID && !interaction.member?.roles?.cache?.has(WATCHTOWER_STAFF_ROLE_ID)) {
+    await interaction.reply({ content: '⛔ Watchtower staff only.', ephemeral: true });
+    return true;
+  }
+
+  const oldEmbed = interaction.message.embeds?.[0];
+  if (!oldEmbed) {
+    await interaction.reply({ content: '⚠️ No Watchtower embed found on this message.', ephemeral: true });
+    return true;
+  }
+
+  const updated = updateEmbedStatus(oldEmbed, statusKey, interaction.user.tag);
+  const disableActions = statusKey === 'complete';
+
+  await interaction.message.edit({
+    embeds: [updated],
+    components: [buildStaffActionRow(disableActions)],
+  });
+
+  await interaction.reply({
+    content: `✅ Watchtower request updated to **${(STATUS[statusKey] || STATUS.pending).label}**.`,
+    ephemeral: true,
+  });
+
+  return true;
+}
+
 async function handleWatchtowerInteraction(interaction, client) {
+  if (interaction.isButton()) {
+    if (interaction.customId === IDS.claim) return handleStaffAction(interaction, 'claimed');
+    if (interaction.customId === IDS.progress) return handleStaffAction(interaction, 'progress');
+    if (interaction.customId === IDS.complete) return handleStaffAction(interaction, 'complete');
+    if (interaction.customId === IDS.extension) return handleStaffAction(interaction, 'extension');
+  }
+
   if (interaction.isButton() && interaction.customId === IDS.openForm) {
     const modal = new ModalBuilder()
       .setCustomId(IDS.submitForm)
@@ -116,7 +213,7 @@ async function handleWatchtowerInteraction(interaction, client) {
     const baseLocations = new TextInputBuilder()
       .setCustomId('base_locations')
       .setLabel('Maps + Base Locations / Coords')
-      .setPlaceholder('Example: Valguero 45/62 cliff base; Island 72/34 water pen; Amissa 50/50 outpost')
+      .setPlaceholder('One per line: Valguero 45/62 cliff base; Island 72/34 water pen')
       .setStyle(TextInputStyle.Paragraph)
       .setRequired(true)
       .setMaxLength(900);
@@ -156,6 +253,8 @@ async function handleWatchtowerInteraction(interaction, client) {
     const dates = interaction.fields.getTextInputValue('dates');
     const upkeep = interaction.fields.getTextInputValue('upkeep');
     const accessNotes = upkeep;
+    const priority = inferPriority(upkeep, baseLocations, dates);
+    const baseCount = parseBaseLines(baseLocations).length || 1;
 
     if (!WATCHTOWER_PUBLIC_CHANNEL_ID || !WATCHTOWER_ADMIN_LOG_CHANNEL_ID) {
       await interaction.reply({
@@ -183,9 +282,11 @@ async function handleWatchtowerInteraction(interaction, client) {
       '',
       `👤 Player / Tribe: ${playerTribe}`,
       `💬 Discord: ${discordName}`,
+      `🚨 Priority: ${priority}`,
+      `📍 Base Entries: ${baseCount}`,
       '',
       '🗺️ Maps + Base Locations:',
-      baseLocations,
+      buildLocationSummary(baseLocations),
       '',
       `⏳ Away → Return: ${dates}`,
       '',
@@ -203,9 +304,11 @@ async function handleWatchtowerInteraction(interaction, client) {
       `🆔 Discord ID: ${interaction.user.id}`,
       `👤 Player / Tribe: ${playerTribe}`,
       `💬 Discord Name: ${discordName}`,
+      `🚨 Priority: ${priority}`,
+      `📍 Base Entries: ${baseCount}`,
       '',
       '🗺️ Maps + Base Locations:',
-      baseLocations,
+      buildLocationSummary(baseLocations),
       '',
       `⏳ Away → Return: ${dates}`,
       '',
@@ -217,14 +320,18 @@ async function handleWatchtowerInteraction(interaction, client) {
 
     if (publicChannel.type === ChannelType.GuildForum) {
       await publicChannel.threads.create({
-        name: `🛡️ Base Watch // ${playerTribe}`.slice(0, 100),
+        name: `🛡️ ${priority.replace(/^[^A-Za-z]+/, '')} // ${playerTribe}`.slice(0, 100),
         message: { content: publicContent, embeds: [embed] },
       });
     } else {
       await publicChannel.send({ content: publicContent, embeds: [embed] });
     }
 
-    await adminLog.send({ content: adminContent, embeds: [embed] });
+    await adminLog.send({
+      content: adminContent,
+      embeds: [embed],
+      components: [buildStaffActionRow(false)],
+    });
 
     await interaction.reply({
       content: '✅ Your Base Watch Request has been submitted to the Watchtower.',
