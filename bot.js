@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════
-// CONCLAVE AEGIS BOT — v12.0 SOVEREIGN EDITION
+// CONCLAVE AEGIS BOT — v12.1 SOVEREIGN EDITION
 // TheConclave Dominion · 5× Crossplay ARK: Survival Ascended
 // ─────────────────────────────────────────────────────────────────────
 // ✅ Anthropic Haiku 4.5 PRIMARY · Groq free fallback
@@ -13,20 +13,22 @@
 // ✅ AEGIS Persona mode — per-channel style override
 // ✅ Bulk admin ops — bulk grant/deduct, audit trail
 // ✅ Server vote — community voting system
-// ✅ NEW: /council — show full council roster
-// ✅ NEW: /digest — economy activity digest
-// ✅ NEW: /streaks — weekly claim streak leaderboard
-// ✅ NEW: /ask-council — AI answers as a specific council member
-// ✅ NEW: /trivia — ARK survival trivia game
-// ✅ NEW: /compare — compare two dinos side by side via AI
-// ✅ NEW: /boss-guide — detailed boss fight guide
-// ✅ NEW: /base-tips — base building advice for specific map
-// ✅ NEW: /modlog — view recent mod actions
-// ✅ NEW: /economy-reset — admin reset a player wallet
+// ✅ /council — show full council roster
+// ✅ /digest — economy activity digest
+// ✅ /streaks — weekly claim streak leaderboard
+// ✅ /trivia — 200 hard ARK trivia → 15,000 ConCoins per win
+// ✅ /concoin-booty — check ConCoin trivia balance
+// ✅ /concoin-leaderboard — top trivia earners
+// ✅ /grant-concoins — admin pay out booty to UnbelievaBoat
+// ✅ /grant-concoins-manual — admin direct UB grant
+// ✅ /compare — compare two dinos side by side via AI
+// ✅ /boss-guide — detailed boss fight guide
+// ✅ /base-tips — base building advice for specific map
+// ✅ /modlog — view recent mod actions
 // ═══════════════════════════════════════════════════════════════════════
 'use strict';
 require('dotenv').config();
-
+ 
 const { sendWatchtowerPanel, handleWatchtowerInteraction } = require('./watchtower-system');
 const http = require('http');
 const axios = require('axios');
@@ -40,7 +42,7 @@ const { createClient } = require('@supabase/supabase-js');
 const Groq      = require('groq-sdk');
 const Anthropic = require('@anthropic-ai/sdk');
 const P         = require('./panels.js');
-
+ 
 // ══════════════════════════════════════════════════════════════════════
 // ENV
 // ══════════════════════════════════════════════════════════════════════
@@ -51,27 +53,26 @@ const {
   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
   AEGIS_CHANNEL_ID,
 } = process.env;
-
+ 
 if (!DISCORD_BOT_TOKEN) { console.error('❌ DISCORD_BOT_TOKEN missing'); process.exit(1); }
-
-const BOT_PORT    = parseInt(process.env.BOT_PORT || '3001');
-const GROQ_FAST   = 'llama-3.1-8b-instant';
-const GROQ_SMART  = 'llama-3.3-70b-versatile';
-const ANT_MODEL   = 'claude-haiku-4-5-20251001';
-
+ 
+const BOT_PORT   = parseInt(process.env.BOT_PORT || '3001');
+const GROQ_FAST  = 'llama-3.1-8b-instant';
+const GROQ_SMART = 'llama-3.3-70b-versatile';
+const ANT_MODEL  = 'claude-haiku-4-5-20251001';
+ 
+// ── ConCoin / UnbelievaBoat ───────────────────────────────────────────
+const UNBELIEVABOAT_API_TOKEN = process.env.UNBELIEVABOAT_API_TOKEN || null;
+const UNBELIEVABOAT_CURRENCY  = process.env.UNBELIEVABOAT_CURRENCY  || 'cash';
+const CONCOIN_TRIVIA_REWARD   = 15000;
+ 
 // ── CLIENTS ──────────────────────────────────────────────────────────
-const anthropic = ANTHROPIC_API_KEY
-  ? new Anthropic({ apiKey: ANTHROPIC_API_KEY })
-  : null;
-
-const groq = GROQ_API_KEY
-  ? new Groq({ apiKey: GROQ_API_KEY })
-  : null;
-
+const anthropic = ANTHROPIC_API_KEY ? new Anthropic({ apiKey: ANTHROPIC_API_KEY }) : null;
+const groq       = GROQ_API_KEY     ? new Groq({ apiKey: GROQ_API_KEY })           : null;
 const sb = (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY)
   ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } })
   : null;
-
+ 
 const bot = new Client({
   intents: [
     GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages,
@@ -82,14 +83,14 @@ const bot = new Client({
   rest: { timeout: 15000 },
   allowedMentions: { parse: ['users','roles'], repliedUser: false },
 });
-
+ 
 // ══════════════════════════════════════════════════════════════════════
 // PERMISSION HELPERS
 // ══════════════════════════════════════════════════════════════════════
 const isOwner = m => m?.roles?.cache?.has(ROLE_OWNER_ID) || m?.permissions?.has(PermissionFlagsBits.Administrator);
 const isAdmin = m => isOwner(m) || m?.roles?.cache?.has(ROLE_ADMIN_ID);
 const isMod   = m => isAdmin(m) || m?.roles?.cache?.has(ROLE_HELPER_ID) || m?.permissions?.has(PermissionFlagsBits.ModerateMembers);
-
+ 
 // ══════════════════════════════════════════════════════════════════════
 // RATE LIMITER
 // ══════════════════════════════════════════════════════════════════════
@@ -100,7 +101,7 @@ function checkRate(uid, ms = 6000) {
   rates.set(uid, n); return 0;
 }
 setInterval(() => { const cut = Date.now()-120_000; for (const [k,v] of rates) if (v<cut) rates.delete(k); }, 5*60_000);
-
+ 
 // ══════════════════════════════════════════════════════════════════════
 // SUPABASE CIRCUIT BREAKER
 // ══════════════════════════════════════════════════════════════════════
@@ -114,19 +115,17 @@ async function sbQuery(fn) {
   try { const r = await fn(sb); sbSucc(); return r; }
   catch (e) { sbFail(); throw e; }
 }
-
+ 
 // ══════════════════════════════════════════════════════════════════════
 // MOD LOG
 // ══════════════════════════════════════════════════════════════════════
 const MOD_LOG_CHANNEL = process.env.MOD_LOG_CHANNEL_ID || null;
-const recentModActions = []; // in-memory last 20 for /modlog
-
+const recentModActions = [];
+ 
 async function modLog(guild, action, target, actor, reason, extra={}) {
   const chId = MOD_LOG_CHANNEL || process.env.MONITOR_ACTIVITY_CHANNEL_ID;
-  // Store in memory
   recentModActions.unshift({ action, targetTag: target?.username||String(target), actorTag: actor?.username||'SYSTEM', reason, ts: Date.now(), extra });
   if (recentModActions.length > 50) recentModActions.pop();
-
   if (!chId || !guild) return;
   try {
     const ch = guild.channels.cache.get(chId); if (!ch) return;
@@ -137,7 +136,7 @@ async function modLog(guild, action, target, actor, reason, extra={}) {
       .setThumbnail(target?.displayAvatarURL?.({size:64})||null)
       .addFields(
         { name:'👤 Target', value: target?.id ? `<@${target.id}> \`${target.id}\`` : String(target), inline:true },
-        { name:'👮 Actor',  value: actor?.id  ? `<@${actor.id}>`                   : String(actor||'SYSTEM'), inline:true },
+        { name:'👮 Actor',  value: actor?.id  ? `<@${actor.id}>` : String(actor||'SYSTEM'), inline:true },
         { name:'📋 Reason', value: reason?.slice(0,256)||'No reason', inline:false },
         ...Object.entries(extra).map(([k,v])=>({ name:k, value:String(v).slice(0,256), inline:true })),
       )
@@ -152,42 +151,36 @@ async function modLog(guild, action, target, actor, reason, extra={}) {
     }).catch(()=>{});
   } catch {}
 }
-
+ 
 // ══════════════════════════════════════════════════════════════════════
 // AUTO-MOD
 // ══════════════════════════════════════════════════════════════════════
 const AUTOMOD = {
-  linkFilter:  process.env.AUTOMOD_LINK_FILTER !== 'false',
-  capsThresh:  parseInt(process.env.AUTOMOD_CAPS_PCT  || '70'),
-  capsMinLen:  parseInt(process.env.AUTOMOD_CAPS_LEN  || '20'),
-  spamWindow:  parseInt(process.env.AUTOMOD_SPAM_MS   || '5000'),
-  spamCount:   parseInt(process.env.AUTOMOD_SPAM_MAX  || '5'),
+  linkFilter: process.env.AUTOMOD_LINK_FILTER !== 'false',
+  capsThresh: parseInt(process.env.AUTOMOD_CAPS_PCT  || '70'),
+  capsMinLen: parseInt(process.env.AUTOMOD_CAPS_LEN  || '20'),
+  spamWindow: parseInt(process.env.AUTOMOD_SPAM_MS   || '5000'),
+  spamCount:  parseInt(process.env.AUTOMOD_SPAM_MAX  || '5'),
 };
 const msgHistory = new Map();
-
+ 
 async function runAutoMod(msg) {
   if (!msg.guild || msg.author.bot) return;
   const member = msg.member;
   if (isAdmin(member) || isMod(member)) return;
-
   const content = msg.content;
   const violations = [];
-
   if (AUTOMOD.linkFilter && /discord\.gg\/|discord\.com\/invite\//i.test(content))
     violations.push('Discord invite link');
-
   if (content.length >= AUTOMOD.capsMinLen) {
     const upper = (content.match(/[A-Z]/g)||[]).length;
     const alpha = (content.match(/[a-zA-Z]/g)||[]).length;
     if (alpha>0 && (upper/alpha)*100 >= AUTOMOD.capsThresh) violations.push('Caps flood');
   }
-
   const now = Date.now();
   const hist = (msgHistory.get(msg.author.id)||[]).filter(t=>now-t<AUTOMOD.spamWindow);
-  hist.push(now);
-  msgHistory.set(msg.author.id, hist);
+  hist.push(now); msgHistory.set(msg.author.id, hist);
   if (hist.length >= AUTOMOD.spamCount) violations.push('Message spam');
-
   if (!violations.length) return;
   try {
     await msg.delete();
@@ -198,7 +191,7 @@ async function runAutoMod(msg) {
   } catch {}
 }
 setInterval(()=>{ const cut=Date.now()-60_000; for (const [k,v] of msgHistory) if (!v.some(t=>t>cut)) msgHistory.delete(k); }, 2*60_000);
-
+ 
 // ══════════════════════════════════════════════════════════════════════
 // AI ENGINE — ANTHROPIC PRIMARY + GROQ FALLBACK
 // ══════════════════════════════════════════════════════════════════════
@@ -213,17 +206,17 @@ async function getKnowledge() {
     _kTs = now; return _kCache;
   } catch { _kCache=''; return ''; }
 }
-
+ 
 const personaOverrides = new Map();
-
+ 
 const CORE_PROMPT = `You are AEGIS — the living sovereign intelligence of TheConclave Dominion, a 5× crossplay ARK: Survival Ascended community (Guild: 1438103556610723922) run by Tw_ (High Curator/Owner) with co-owners Slothie (Archmaestro) and Sandy (Wildheart).
-
+ 
 CLUSTER (10 maps, crossplay Xbox·PS·PC):
 The Island 217.114.196.102:5390 · Volcano 217.114.196.59:5050 · Extinction 31.214.196.102:6440
 The Center 31.214.163.71:5120 · Lost Colony 217.114.196.104:5150 · Astraeos 217.114.196.9:5320
 Valguero 85.190.136.141:5090 · Scorched Earth 217.114.196.103:5240
 Aberration 217.114.196.80:5540 (PvP) · Amissa 217.114.196.80:5180 (Patreon-Elite exclusive)
-
+ 
 RATES: 5× XP/Harvest/Taming/Breeding · 1M weight · No fall damage · Max wild 350
 MODS: Death Inventory Keeper · ARKomatic · Awesome Spyglass · Teleporter
 SHOP: theconclavedominion.com/shop · $1 = 1 ClaveShard
@@ -231,11 +224,11 @@ PAYMENTS: CashApp $TheConclaveDominion · Chime $TheConclaveDominion
 MINECRAFT: 134.255.214.44:10090 (Bedrock)
 PATREON: patreon.com/theconclavedominion · Amissa access at Elite ($20/mo)
 COUNCIL: Tw_ (High Curator) · Slothie (Archmaestro) · Sandy (Wildheart) · Jenny (Skywarden) · Arbanion (Oracle of Veils) · Okami (Hazeweaver) · Rookiereaper (Gatekeeper) · Icyreaper (Veilcaster) · Jake (ForgeSmith) · CredibleDevil (Iron Vanguard)
-
+ 
 CLAVESHARD TIERS: T1(1) T2(2) T3(3) T5(5) T6(6) T8(8) T10(10) T12(12) T15(15) T20(20) T30(30) + Dino Insurance
-
+ 
 VOICE: Precise, sovereign, cosmic — speak with authority and a touch of mythos. Use Discord markdown. Keep responses under 1800 chars unless detail is specifically requested.`;
-
+ 
 const convMem = new Map();
 function getHist(uid) { return convMem.get(uid)||[]; }
 function addHist(uid, role, content) {
@@ -246,86 +239,56 @@ function addHist(uid, role, content) {
 }
 function clearHist(uid) { convMem.delete(uid); }
 setInterval(()=>{ for (const [k,v] of convMem) if (!v?.length) convMem.delete(k); }, 30*60_000);
-
-// AI log helper
+ 
 function logAiUsage(model, usage, engine='anthropic') {
   if (!sb || !sbOk()) return;
   sb.from('aegis_ai_usage').insert({
     model, engine,
     input_tokens:  engine==='anthropic' ? (usage?.input_tokens||0)  : (usage?.prompt_tokens||0),
     output_tokens: engine==='anthropic' ? (usage?.output_tokens||0) : (usage?.completion_tokens||0),
-    used_search: false,
-    created_at: new Date().toISOString(),
+    used_search: false, created_at: new Date().toISOString(),
   }).catch(()=>{});
 }
-
+ 
 async function askAegis(msg, uid=null, extraCtx='', channelId=null) {
   if (!anthropic && !groq) return '⚠️ AI not configured. Set ANTHROPIC_API_KEY in Render.';
-
   const knowledge  = await getKnowledge();
   const persona    = channelId ? (personaOverrides.get(channelId)||null) : null;
   const personaCtx = persona ? `\n\nCHANNEL PERSONA:\nStyle: ${persona.style}\nNote: ${persona.note}` : '';
   const system     = CORE_PROMPT + knowledge + personaCtx + (extraCtx ? '\n\n'+extraCtx : '');
   const history    = uid ? getHist(uid) : [];
-
-  // ── ANTHROPIC PRIMARY ────────────────────────────────────────────
   if (anthropic) {
     try {
       const res = await anthropic.messages.create({
-        model: ANT_MODEL,
-        max_tokens: 1024,
-        system,
-        messages: [
-          ...history.map(h => ({ role:h.role, content:h.content })),
-          { role:'user', content: msg },
-        ],
+        model: ANT_MODEL, max_tokens: 1024, system,
+        messages: [...history.map(h=>({ role:h.role, content:h.content })), { role:'user', content: msg }],
       });
-
       const text = res.content?.[0]?.text?.trim();
       if (!text) return '⚠️ Empty response from AI.';
-
       if (uid) { addHist(uid,'user',msg); addHist(uid,'assistant',text); }
       logAiUsage(ANT_MODEL, res.usage, 'anthropic');
       return text;
-
     } catch (e) {
       const status = e.status || e.error?.status;
-      // Rate limit / overload — fall through to Groq
-      if (status===429 || status===529 || status===503) {
-        console.warn(`[ANTHROPIC] ${status} — falling back to Groq`);
-      } else {
-        console.error('[ANTHROPIC]', e.message||e);
-        // Still fall through — Groq may succeed
-      }
+      if (status===429||status===529||status===503) console.warn(`[ANTHROPIC] ${status} — falling back to Groq`);
+      else console.error('[ANTHROPIC]', e.message||e);
     }
   }
-
-  // ── GROQ FALLBACK ────────────────────────────────────────────────
   if (groq) {
     const isComplex = /explain|analyz|compar|strateg|guide|lore|boss|dino|build/i.test(msg);
     const groqModel = isComplex ? GROQ_SMART : GROQ_FAST;
     let retries = 0;
-
     while (retries < 3) {
       try {
         const res = await groq.chat.completions.create({
-          model: groqModel,
-          max_tokens: groqModel.includes('8b') ? 600 : 1000,
-          temperature: 0.78,
-          messages: [
-            { role:'system', content: system },
-            ...history,
-            { role:'user', content: msg },
-          ],
+          model: groqModel, max_tokens: groqModel.includes('8b') ? 600 : 1000, temperature: 0.78,
+          messages: [{ role:'system', content: system }, ...history, { role:'user', content: msg }],
         });
-
         const text = res.choices?.[0]?.message?.content?.trim();
         if (!text) return '⚠️ Empty response from AI.';
-
         if (uid) { addHist(uid,'user',msg); addHist(uid,'assistant',text); }
         logAiUsage(groqModel, res.usage, 'groq');
         return text;
-
       } catch (e) {
         if ((e.message||'').includes('rate_limit') || e.status===429) {
           retries++;
@@ -337,33 +300,25 @@ async function askAegis(msg, uid=null, extraCtx='', channelId=null) {
       }
     }
   }
-
   return '⚠️ All AI backends unavailable. Try again shortly.';
 }
-
-// ── AI SUMMARIZE (no history, internal use) ──────────────────────────
+ 
 async function aiSummarize(prompt) {
   if (anthropic) {
     try {
-      const res = await anthropic.messages.create({
-        model: ANT_MODEL, max_tokens: 400,
-        messages: [{ role:'user', content: prompt }],
-      });
+      const res = await anthropic.messages.create({ model: ANT_MODEL, max_tokens: 400, messages: [{ role:'user', content: prompt }] });
       return res.content?.[0]?.text?.trim()||null;
     } catch {}
   }
   if (groq) {
     try {
-      const res = await groq.chat.completions.create({
-        model: GROQ_FAST, max_tokens: 300, temperature:0.5,
-        messages: [{ role:'user', content: prompt }],
-      });
+      const res = await groq.chat.completions.create({ model: GROQ_FAST, max_tokens: 300, temperature:0.5, messages: [{ role:'user', content: prompt }] });
       return res.choices?.[0]?.message?.content?.trim()||null;
     } catch {}
   }
   return null;
 }
-
+ 
 // ══════════════════════════════════════════════════════════════════════
 // WALLET ENGINE
 // ══════════════════════════════════════════════════════════════════════
@@ -506,7 +461,90 @@ async function resetWallet(targetId, targetTag, actorId, actorTag) {
     return data;
   });
 }
-
+ 
+// ══════════════════════════════════════════════════════════════════════
+// CONCOIN BOOTY ENGINE
+// Tracks per-user trivia ConCoin winnings for UnbelievaBoat payout
+// ══════════════════════════════════════════════════════════════════════
+async function addConcoinBooty(discordId, discordTag, amount, reason = 'Trivia Win') {
+  if (!sb || !sbOk()) return null;
+  try {
+    const { data: existing } = await sb.from('aegis_concoin_booty').select('*').eq('discord_id', discordId).single().catch(()=>({data:null}));
+    if (existing) {
+      const { data } = await sb.from('aegis_concoin_booty').update({
+        total_earned:  (existing.total_earned  || 0) + amount,
+        pending_grant: (existing.pending_grant || 0) + amount,
+        trivia_wins:   (existing.trivia_wins   || 0) + 1,
+        discord_tag:   discordTag,
+        last_won:      new Date().toISOString(),
+        updated_at:    new Date().toISOString(),
+      }).eq('discord_id', discordId).select().single();
+      return data;
+    } else {
+      const { data } = await sb.from('aegis_concoin_booty').insert({
+        discord_id:    discordId,
+        discord_tag:   discordTag,
+        total_earned:  amount,
+        pending_grant: amount,
+        total_granted: 0,
+        trivia_wins:   1,
+        last_won:      new Date().toISOString(),
+        created_at:    new Date().toISOString(),
+        updated_at:    new Date().toISOString(),
+      }).select().single();
+      return data;
+    }
+  } catch (e) { console.error('[ConCoin Booty]', e.message); return null; }
+}
+ 
+async function getConcoinBooty(discordId) {
+  if (!sb || !sbOk()) return null;
+  try {
+    const { data } = await sb.from('aegis_concoin_booty').select('*').eq('discord_id', discordId).single().catch(()=>({data:null}));
+    return data;
+  } catch { return null; }
+}
+ 
+async function clearPendingBooty(discordId, grantedAmount, actorTag) {
+  if (!sb || !sbOk()) return false;
+  try {
+    const booty = await getConcoinBooty(discordId);
+    if (!booty) return false;
+    await sb.from('aegis_concoin_booty').update({
+      pending_grant:   0,
+      total_granted:   (booty.total_granted || 0) + grantedAmount,
+      last_granted_at: new Date().toISOString(),
+      last_granted_by: actorTag,
+      updated_at:      new Date().toISOString(),
+    }).eq('discord_id', discordId);
+    return true;
+  } catch { return false; }
+}
+ 
+async function getConcoinLeaderboard(limit = 10) {
+  if (!sb || !sbOk()) return [];
+  try {
+    const { data } = await sb.from('aegis_concoin_booty').select('discord_id,discord_tag,total_earned,trivia_wins,pending_grant').order('total_earned', { ascending: false }).limit(limit);
+    return data || [];
+  } catch { return []; }
+}
+ 
+async function grantToUnbelievaBoat(guildId, discordId, amount) {
+  if (!UNBELIEVABOAT_API_TOKEN) throw new Error('UNBELIEVABOAT_API_TOKEN not set in Render env.');
+  const url = `https://unbelievaboat.com/api/v1/guilds/${guildId}/users/${discordId}`;
+  const body = { [UNBELIEVABOAT_CURRENCY]: amount };
+  try {
+    const res = await axios.patch(url, body, {
+      headers: { Authorization: UNBELIEVABOAT_API_TOKEN, 'Content-Type': 'application/json' },
+      timeout: 10000,
+    });
+    return res.data;
+  } catch (e) {
+    const msg = e.response?.data?.message || e.message;
+    throw new Error(`UB API Error: ${msg}`);
+  }
+}
+ 
 // ══════════════════════════════════════════════════════════════════════
 // WARN ENGINE
 // ══════════════════════════════════════════════════════════════════════
@@ -527,12 +565,12 @@ async function clearWarns(guildId, targetId) {
   try { await sb.from('aegis_warns').delete().eq('guild_id',guildId).eq('discord_id',targetId); return true; }
   catch { return false; }
 }
-
+ 
 // ══════════════════════════════════════════════════════════════════════
 // GIVEAWAY ENGINE
 // ══════════════════════════════════════════════════════════════════════
 const activeGiveaways = new Map();
-
+ 
 async function drawGiveaway(msgId, guildId, client) {
   const gw = activeGiveaways.get(msgId); if (!gw) return;
   const entries = [...gw.entries];
@@ -551,12 +589,12 @@ async function drawGiveaway(msgId, guildId, client) {
   } catch {}
   activeGiveaways.delete(msgId);
 }
-
+ 
 // ══════════════════════════════════════════════════════════════════════
 // WIPE TRACKER
 // ══════════════════════════════════════════════════════════════════════
 const wipeData = { date:null, reason:null, setBy:null, setAt:null };
-
+ 
 // ══════════════════════════════════════════════════════════════════════
 // TRIBE REGISTRY
 // ══════════════════════════════════════════════════════════════════════
@@ -573,21 +611,21 @@ async function lookupTribe(guildId, query) {
   const { data } = await sb.from('aegis_tribes').select('*').eq('guild_id',guildId).or(`tribe_name.ilike.%${query}%,owner_tag.ilike.%${query}%`).limit(5);
   return data||[];
 }
-
+ 
 // ══════════════════════════════════════════════════════════════════════
 // SERVER MONITOR
 // ══════════════════════════════════════════════════════════════════════
 const MONITOR_SERVERS = [
-  { id:'island',     name:'The Island',    nitradoId:18266152, emoji:'🌿', ip:'217.114.196.102', port:5390, pvp:false, patreon:false },
-  { id:'volcano',    name:'Volcano',       nitradoId:18094678, emoji:'🌋', ip:'217.114.196.59',  port:5050, pvp:false, patreon:false },
-  { id:'extinction', name:'Extinction',    nitradoId:18106633, emoji:'🌑', ip:'31.214.196.102',  port:6440, pvp:false, patreon:false },
-  { id:'center',     name:'The Center',    nitradoId:18182839, emoji:'🏔️', ip:'31.214.163.71',   port:5120, pvp:false, patreon:false },
-  { id:'lostcolony', name:'Lost Colony',   nitradoId:18307276, emoji:'🪐', ip:'217.114.196.104', port:5150, pvp:false, patreon:false },
-  { id:'astraeos',   name:'Astraeos',      nitradoId:18393892, emoji:'✨', ip:'217.114.196.9',   port:5320, pvp:false, patreon:false },
-  { id:'valguero',   name:'Valguero',      nitradoId:18509341, emoji:'🏞️', ip:'85.190.136.141',  port:5090, pvp:false, patreon:false },
-  { id:'scorched',   name:'Scorched Earth',nitradoId:18598049, emoji:'☀️', ip:'217.114.196.103', port:5240, pvp:false, patreon:false },
-  { id:'aberration', name:'Aberration',    nitradoId:18655529, emoji:'⚔️', ip:'217.114.196.80',  port:5540, pvp:true,  patreon:false },
-  { id:'amissa',     name:'Amissa',        nitradoId:18680162, emoji:'⭐', ip:'217.114.196.80',  port:5180, pvp:false, patreon:true },
+  { id:'island',     name:'The Island',     nitradoId:18266152, emoji:'🌿', ip:'217.114.196.102', port:5390, pvp:false, patreon:false },
+  { id:'volcano',    name:'Volcano',        nitradoId:18094678, emoji:'🌋', ip:'217.114.196.59',  port:5050, pvp:false, patreon:false },
+  { id:'extinction', name:'Extinction',     nitradoId:18106633, emoji:'🌑', ip:'31.214.196.102',  port:6440, pvp:false, patreon:false },
+  { id:'center',     name:'The Center',     nitradoId:18182839, emoji:'🏔️', ip:'31.214.163.71',   port:5120, pvp:false, patreon:false },
+  { id:'lostcolony', name:'Lost Colony',    nitradoId:18307276, emoji:'🪐', ip:'217.114.196.104', port:5150, pvp:false, patreon:false },
+  { id:'astraeos',   name:'Astraeos',       nitradoId:18393892, emoji:'✨', ip:'217.114.196.9',   port:5320, pvp:false, patreon:false },
+  { id:'valguero',   name:'Valguero',       nitradoId:18509341, emoji:'🏞️', ip:'85.190.136.141',  port:5090, pvp:false, patreon:false },
+  { id:'scorched',   name:'Scorched Earth', nitradoId:18598049, emoji:'☀️', ip:'217.114.196.103', port:5240, pvp:false, patreon:false },
+  { id:'aberration', name:'Aberration',     nitradoId:18655529, emoji:'⚔️', ip:'217.114.196.80',  port:5540, pvp:true,  patreon:false },
+  { id:'amissa',     name:'Amissa',         nitradoId:18680162, emoji:'⭐', ip:'217.114.196.80',  port:5180, pvp:false, patreon:true  },
 ];
 const EXISTING_STATUS_CHANNELS = {
   aberration:'1491714622959390830', amissa:'1491714743797416056', astraeos:'1491714926862008320',
@@ -597,7 +635,7 @@ const EXISTING_STATUS_CHANNELS = {
 const channelRenameCooldowns = new Map();
 const RENAME_COOLDOWN_MS = 12*60*1000;
 const monitorState = new Map();
-
+ 
 async function safeRenameChannel(ch, newName) {
   if (!ch||ch.name===newName) return false;
   const now=Date.now(), last=channelRenameCooldowns.get(ch.id)||0;
@@ -669,26 +707,26 @@ setInterval(async()=>{
     }
   } catch (e) { console.error('❌ Monitor tick:', e.message); }
 }, 5*60_000);
-
+ 
 // ══════════════════════════════════════════════════════════════════════
 // EMBED HELPERS
 // ══════════════════════════════════════════════════════════════════════
 const C = { gold:0xFFB800, pl:0x7B2FFF, cy:0x00D4FF, gr:0x35ED7E, rd:0xFF4500, pk:0xFF4CD2, am:0xFF8C00 };
 const FT = { text:'TheConclave Dominion • 5× Crossplay • 10 Maps', iconURL:'https://theconclavedominion.com/conclave-badge.png' };
 const base = (title, color=C.pl) => new EmbedBuilder().setTitle(title).setColor(color).setFooter(FT).setTimestamp();
-
+ 
 function walletEmbed(title, w, color=C.pl) {
   const total=(w.wallet_balance||0)+(w.bank_balance||0);
   return base(title,color).setDescription(`**${w.discord_tag||w.discord_id}**`).addFields(
     { name:'💎 Wallet', value:`**${(w.wallet_balance||0).toLocaleString()}**`, inline:true },
-    { name:'🏦 Bank',   value:`**${(w.bank_balance||0).toLocaleString()}**`, inline:true },
-    { name:'📊 Total',  value:`**${total.toLocaleString()}**`, inline:true },
-    { name:'📈 Earned', value:`${(w.lifetime_earned||0).toLocaleString()}`, inline:true },
-    { name:'📉 Spent',  value:`${(w.lifetime_spent||0).toLocaleString()}`, inline:true },
-    { name:'🔥 Streak', value:`Week ${w.daily_streak||0}`, inline:true },
+    { name:'🏦 Bank',   value:`**${(w.bank_balance||0).toLocaleString()}**`,   inline:true },
+    { name:'📊 Total',  value:`**${total.toLocaleString()}**`,                  inline:true },
+    { name:'📈 Earned', value:`${(w.lifetime_earned||0).toLocaleString()}`,     inline:true },
+    { name:'📉 Spent',  value:`${(w.lifetime_spent||0).toLocaleString()}`,      inline:true },
+    { name:'🔥 Streak', value:`Week ${w.daily_streak||0}`,                      inline:true },
   );
 }
-
+ 
 // ══════════════════════════════════════════════════════════════════════
 // SHOP DATA
 // ══════════════════════════════════════════════════════════════════════
@@ -704,9 +742,9 @@ const SHOP_TIERS = [
   { shards:15, emoji:'👑', name:'15 Clave Shards', items:['30,000 Element','Level 900 Rhyniognatha / Reaper / Aureliax','XLarge Bundle (300k Resources)'] },
   { shards:20, emoji:'🏰', name:'20 Clave Shards', items:['1x1 Behemoth Gate Expansion (10/max)'] },
   { shards:30, emoji:'💰', name:'30 Clave Shards', items:['2 Dedicated Storage Admin Refill','1.6 Million Total Resources'] },
-  { shards:0,  emoji:'🛡', name:'Dino Insurance',   items:['One Time Use','Must Be Named','Backup May Not Save','May Require Respawn','One Per Dino'] },
+  { shards:0,  emoji:'🛡',  name:'Dino Insurance',  items:['One Time Use','Must Be Named','Backup May Not Save','May Require Respawn','One Per Dino'] },
 ];
-
+ 
 const MAP_INFO = {
   island:     { name:'The Island',    ip:'217.114.196.102:5390', emoji:'🌿', desc:'Classic starter map. Lush biomes, all original boss arenas.', pvp:false, patreon:false },
   volcano:    { name:'Volcano',       ip:'217.114.196.59:5050',  emoji:'🌋', desc:'Dramatic volcanic biomes with rich resources.', pvp:false, patreon:false },
@@ -719,17 +757,15 @@ const MAP_INFO = {
   aberration: { name:'Aberration',    ip:'217.114.196.80:5540',  emoji:'⚔️', desc:'Underground PvP — Rock Drakes, Reapers, Nameless.', pvp:true, patreon:false },
   amissa:     { name:'Amissa',        ip:'217.114.196.80:5180',  emoji:'⭐', desc:'Patreon-exclusive map for Elite tier patrons.', pvp:false, patreon:true },
 };
-
-// ARK TRIVIA
+ 
+// ══════════════════════════════════════════════════════════════════════
+// ARK TRIVIA — 200 HARD QUESTIONS (fact-checked)
+// Reward: 15,000 ConCoins per correct answer (tracked in aegis_concoin_booty)
+// Admin uses /grant-concoins to pay out to UnbelievaBoat
+// ══════════════════════════════════════════════════════════════════════
 const TRIVIA_QUESTIONS = [
- 
-  // ══════════════════════════════════════════════════════════════════
-  // THECONCLAVE DEEP CUTS
-  // Only regulars and server veterans would know these
-  // Source: bot.js CORE_PROMPT, MONITOR_SERVERS, SHOP_TIERS, economy code
-  // ══════════════════════════════════════════════════════════════════
- 
-  { q:'What is the Nitrado service ID for TheConclave\'s The Island server?', a:'18266152', hint:'TheConclave server registry.' },
+  // ── TheConclave Deep Cuts ──────────────────────────────────────────
+  { q:'What is the Nitrado service ID for TheConclave\'s The Island server?', a:'18266152', hint:'Check the bot server registry.' },
   { q:'What is the Nitrado service ID for TheConclave\'s Aberration server?', a:'18655529', hint:'The PvP map.' },
   { q:'What is the Nitrado service ID for the Amissa server?', a:'18680162', hint:'Patreon-exclusive map ID.' },
   { q:'What port does TheConclave\'s Volcano server run on?', a:'5050', hint:'IP is 217.114.196.59.' },
@@ -748,307 +784,195 @@ const TRIVIA_QUESTIONS = [
   { q:'What Tier gets you 1.6 million resources via Dedicated Storage refill?', a:'30', hint:'Most expensive standard tier.' },
   { q:'What is the maximum number of Behemoth Gate Expansions per account?', a:'10', hint:'From the Tier 20 shop item.' },
   { q:'How many ClaveShards does a Tek Suit Blueprint Set cost?', a:'10', hint:'Tier 10 item.' },
-  { q:'What Tier includes a Floating Platform?', a:'10', hint:'Tier 10 bundle.' },
-  { q:'What Tier gives you 50 Raw Shiny Essence?', a:'5', hint:'Five-shard tier.' },
   { q:'How many ConCoins do you earn per correct trivia answer?', a:'15000', hint:'Fifteen thousand.' },
   { q:'How many hours must pass between weekly ClaveShard claims?', a:'168', hint:'That is exactly 7 days in hours.' },
-  { q:'What is the AEGIS bot version shown at runtime?', a:'12', hint:'v12.0 Sovereign Edition.' },
   { q:'What AI model does AEGIS use as its primary brain?', a:'claude haiku 4.5', hint:'Anthropic Haiku, not Sonnet.' },
   { q:'What AI provider does AEGIS fall back to if Anthropic is unavailable?', a:'groq', hint:'Free Llama-based fallback.' },
   { q:'What Groq model does AEGIS use for complex queries?', a:'llama-3.3-70b-versatile', hint:'The smarter free tier model.' },
   { q:'What Groq model does AEGIS use for fast simple queries?', a:'llama-3.1-8b-instant', hint:'Fast and lightweight.' },
-  { q:'What is the Supabase project URL for TheConclave?', a:'idbexlahxuelfrcbhfqs.supabase.co', hint:'Found in the .env config.' },
   { q:'How many messages does AEGIS keep in its per-user conversation memory?', a:'24', hint:'It trims history to 24 entries.' },
   { q:'How often does the server monitor refresh live player counts?', a:'every 5 minutes', hint:'300 second interval.' },
   { q:'What is the minimum interval between Nitrado channel renames?', a:'12 minutes', hint:'Prevents Discord rate-limiting.' },
   { q:'How many Supabase circuit breaker failures before it opens?', a:'5', hint:'CB threshold in bot.js.' },
   { q:'How long does the Supabase circuit breaker stay open before resetting?', a:'60 seconds', hint:'resetMs value.' },
-  { q:'What rate limit cooldown does AEGIS enforce per user on AI queries?', a:'5 seconds', hint:'Per user, not per channel.' },
   { q:'What rate limit does the AEGIS auto-reply channel enforce per user?', a:'8 seconds', hint:'Slightly longer than slash commands.' },
- 
-  // ══════════════════════════════════════════════════════════════════
-  // ARK BREEDING & MUTATION MECHANICS — HARD
-  // Source: ark.wiki.gg/wiki/Mutations, verified numbers
-  // ══════════════════════════════════════════════════════════════════
- 
+  { q:'What two maps on TheConclave share the IP address 217.114.196.80?', a:'aberration and amissa', hint:'Same IP, different ports.' },
+  { q:'What map on TheConclave uses a completely different IP from all others?', a:'valguero', hint:'Runs on 85.190.136.141.' },
+  { q:'What is the tamed dino level cap on TheConclave?', a:'600', hint:'Well above vanilla 450.' },
+  { q:'What Nitrado service ID belongs to TheConclave\'s Astraeos server?', a:'18393892', hint:'One of the custom ASA maps.' },
+  { q:'What Nitrado service ID belongs to TheConclave\'s Valguero server?', a:'18509341', hint:'Rolling meadows map.' },
+  { q:'What is Sandy\'s council title?', a:'wildheart', hint:'Nature-themed council title.' },
+  { q:'What is Jenny\'s council title?', a:'skywarden', hint:'Sky-related.' },
+  { q:'What is Arbanion\'s council title?', a:'oracle of veils', hint:'Mystic and mysterious.' },
+  { q:'What is the maximum tribe size on TheConclave?', a:'8 players', hint:'From the Dominion Codex.' },
+  { q:'How many bases is each tribe allowed per map on TheConclave?', a:'1', hint:'One base per map per tribe.' },
+  { q:'What is the maximum tame limit per tribe on TheConclave?', a:'100', hint:'From the Dominion Codex.' },
+  { q:'What is the consequence for advertising another server in TheConclave?', a:'permanent ban', hint:'Zero tolerance rule.' },
+  { q:'What is the rule about raiding or stealing on PvE maps on TheConclave?', a:'instant ban', hint:'Zero tolerance — only Aberration is PvP.' },
+  { q:'How many warnings does it take to receive a ban on TheConclave?', a:'3', hint:'Admin abuse is instant ban regardless.' },
+  { q:'What must your Discord name match according to TheConclave rules?', a:'your in game name', hint:'Identity rule for accountability.' },
+  { q:'What does "first torpor equals tame ownership" mean on TheConclave?', a:'whoever applies the first tranq shot owns that tame', hint:'No calling dibs before you fire.' },
+  // ── ARK Breeding & Mutation Mechanics ─────────────────────────────
   { q:'What is the exact percentage chance of getting at least one mutation when both parents are under 20 mutations?', a:'7.31', hint:'Calculated from three independent 2.5% checks.' },
   { q:'Each mutation adds how many wild levels to the mutated stat?', a:'2', hint:'Every single time, exactly 2.' },
-  { q:'How many mutation "rolls" happen per breeding event?', a:'3', hint:'Three independent checks per clutch.' },
-  { q:'What happens to the mutation chance if one parent has over 20 combined mutations?', a:'it gets cut roughly in half', hint:'~45-55% reduction depending on stat.' },
+  { q:'How many mutation rolls happen per breeding event?', a:'3', hint:'Three independent checks per clutch.' },
   { q:'If BOTH parents have over 20 combined mutations, what is the mutation chance?', a:'zero', hint:'Completely impossible once both exceed 20.' },
   { q:'What is the default mutation level cap per stat in ARK Survival Ascended?', a:'255', hint:'Server configurable but 255 by default.' },
   { q:'What percentage chance does the stronger stat have of being inherited by offspring?', a:'55', hint:'55% chance the higher stat wins.' },
-  { q:'In ASA, are mutations able to transfer independently from their associated stats?', a:'yes', hint:'Unlike ASE where they were tied together.' },
-  { q:'What is the maximum combined mutation counter before a parent can no longer SOURCE mutations?', a:'20', hint:'Matrilineal + Patrilineal total.' },
-  { q:'What is the imprint stat bonus breakdown on 100% imprint in ASA?', a:'20 percent base stats plus 30 percent damage and 30 percent damage reduction', hint:'When ridden by the imprinter.' },
-  { q:'What does a mate-boosted female Procoptodon\'s pouch do to baby food consumption?', a:'reduces it by 50 percent', hint:'Also doubles imprint gain per interaction.' },
-  { q:'Can Megalosaurus babies starve to death during daytime if you are not careful?', a:'yes', hint:'They sleep during the day and burn food faster than you can fill them.' },
-  { q:'What mechanic makes wild Megalosaurus automatically wake up regardless of torpor level?', a:'the day and night cycle', hint:'At approximately 20:30 in-game time.' },
-  { q:'What status effect builds on a Megalosaurus forced to stay awake during the day?', a:'sleep debt', hint:'Maxes at 120 and then torpor starts rising fast.' },
-  { q:'Which version of Megalosaurus found on Aberration does NOT have a sleep/wake cycle?', a:'aberrant megalosaurus', hint:'Permanently awake, no day debuff.' },
-  { q:'How does breeding work for Beelzebufo and Diplocaulus differently from land creatures?', a:'they can only mate while in water', hint:'Aquatic breeding requirement.' },
-  { q:'What unique breeding condition does a female Magmasaur need?', a:'she must be submerged in lava', hint:'Only possible on Genesis and Scorched areas.' },
-  { q:'What new ASA mechanic from the Aberration update allows stat-specific breeding boosts?', a:'traits', hint:'Extracted with a Gene Scanner.' },
+  { q:'What is the maximum combined mutation counter before a parent can no longer source mutations?', a:'20', hint:'Matrilineal + Patrilineal total.' },
+  { q:'What does 100 percent imprint provide in ASA?', a:'20 percent base stats plus 30 percent damage and 30 percent damage reduction when ridden by imprinter', hint:'Multiplicative bonus.' },
+  { q:'What does a mate-boosted female Procoptodon pouch do to baby food consumption?', a:'reduces it by 50 percent', hint:'Also doubles imprint gain per interaction.' },
   { q:'How many traits can a single Gene Scanner hold at once?', a:'10', hint:'Storage limit of the scanner device.' },
   { q:'What creature in ASA produces feathers used to speed up finding good breeding stats?', a:'gigantoraptor', hint:'Its feathers reflect stat percentages.' },
- 
-  // ══════════════════════════════════════════════════════════════════
-  // CREATURE MECHANICS — DEEP KNOWLEDGE
-  // Source: ark.wiki.gg individual creature pages
-  // ══════════════════════════════════════════════════════════════════
- 
+  // ── Creature Mechanics ─────────────────────────────────────────────
   { q:'The Shadowmane does not need a crafted saddle — what replaces it?', a:'natural armor based on tame level', hint:'Higher base level = higher armor cap of 80.' },
+  { q:'What is the Shadowmane armor cap?', a:'80', hint:'Determined by base level at taming.' },
   { q:'What is the Thornmail Poison stack limit on a Shadowmane?', a:'5 stacks', hint:'Each stack deals DOT and reduces attacker damage.' },
-  { q:'What ability can a mate-boosted FEMALE Shadowmane apply to nearby allies?', a:'the cloaked status effect', hint:'Makes surrounding tames temporarily invisible too.' },
+  { q:'What ability can a mate-boosted female Shadowmane apply to nearby allies?', a:'the cloaked status effect', hint:'Makes surrounding tames temporarily invisible too.' },
   { q:'What is the exact percentage damage boost the Megatherium receives after killing an insect?', a:'75 percent', hint:'Bug slayer buff, key for Broodmother fights.' },
-  { q:'How many seconds does the Shadowmane\'s Thornmail Poison last per stack?', a:'7 seconds', hint:'From the ARK official wiki.' },
-  { q:'What unique taming problem makes the Megalosaurus far harder to tame on a night server?', a:'it wakes up at night no matter its torpor level', hint:'Forces starve taming as a strategy.' },
+  { q:'What mechanic makes wild Megalosaurus automatically wake up regardless of torpor level?', a:'the day and night cycle', hint:'At approximately 20:30 in-game time.' },
   { q:'What is the maximum Sleep Debt value a Megalosaurus can accumulate?', a:'120', hint:'Once maxed, torpor builds very fast.' },
   { q:'How many wild Megalosaurus can spawn on a single map at one time?', a:'4', hint:'Excluding Aberration, which has unlimited spawns.' },
   { q:'What feature makes the Shadowmane taming unique versus nearly all other predators?', a:'it is tamed passively using a fish basket', hint:'No knockout required.' },
+  { q:'What is the minimum fish basket quality multiplier needed to tame a Shadowmane?', a:'0.5', hint:'Fish must be at least 0.5 multiplier.' },
   { q:'Why does the Mosasaurus have an advantage over the Plesiosaur for weight transport?', a:'it has a platform saddle and higher weight capacity', hint:'Plesiosaur has no platform saddle.' },
-  { q:'What is the Achatina\'s passive production and why is it useful?', a:'it produces cementing paste and oil over time', hint:'Giant snail that makes paste while on wander.' },
-  { q:'Which stat specifically boosts the quality of crafted items in ARK?', a:'crafting skill', hint:'Higher crafting skill = better blueprint output.' },
-  { q:'What creature can pick up and throw boulders at enemy structures?', a:'chalicotherium', hint:'Boulder-throwing mammal from cold biomes.' },
-  { q:'What makes the Basilosaurus uniquely valuable for ocean travel in Aberration?', a:'it is immune to jellyfish shocks and other debuffs', hint:'Safe to navigate shock-heavy waters.' },
-  { q:'Which creature produces Black Pearls when killed in the ocean?', a:'eurypterid', hint:'Horseshoe crab-like creature in ocean caves.' },
-  { q:'What debuff makes a Giganotosaurus extremely dangerous to ride in high-stress situations?', a:'rage state', hint:'It can throw you off and attack allies when enraged.' },
-  { q:'What taming food is exclusive to the Procoptodon and cannot be substituted during taming?', a:'rare mushroom', hint:'Plant Species X Seed also works.' },
-  { q:'Which dino has a pack leader mechanic that boosts the entire pack\'s stats?', a:'allosaurus', hint:'The alpha of the pack applies a bleed and a pack buff.' },
-  { q:'What happens to a Cryopod and its stored creature if the pod expires after 30 days?', a:'the creature inside dies permanently', hint:'Cannot be recovered after expiry.' },
-  { q:'What is the Gacha\'s unusual feeding mechanic that determines what crystals it produces?', a:'it can consume almost any item and produce random resource crystals', hint:'Slot machine creature.' },
-  { q:'What unique effect does a Daeodon provide when on wander behavior?', a:'it heals nearby allied dinos using its own food', hint:'Living mobile heal station.' },
-  { q:'Which creature is the only theropod in ARK to have visible feathers on its body?', a:'megalosaurus', hint:'Feathered nocturnal cave predator.' },
-  { q:'What bite mechanic does the Megalosaurus have that immobilizes even Argentavis-sized creatures?', a:'a jaw lock grab attack', hint:'It bites and holds, then swings the prey around.' },
-  { q:'The Karkinos cannot be healed by what common healing method?', a:'veggie cakes', hint:'It is a non-herbivore arthropod — raw meat only.' },
-  { q:'What stat on a Thylacoleo makes it extremely strong at ambushing from trees?', a:'it can latch onto and cling to trees passively', hint:'Leaping and pouncing predator.' },
-  { q:'Which creature on TheConclave\'s Scorched Earth is the most effective at gathering Wood and Thatch simultaneously?', a:'mammoth', hint:'Wide trunk sweep hits multiple resource nodes.' },
-  { q:'What is the Stryder\'s unique harvesting mechanic compared to normal tames?', a:'it has modular attachment slots that can be swapped for different harvesting roles', hint:'TEK robot with swappable mining heads.' },
-  { q:'What does the Maewing do that makes it the best baby-raising tame in ASA?', a:'it passively nurses and feeds nearby babies', hint:'Its milk glands feed any compatible baby tame nearby.' },
- 
-  // ══════════════════════════════════════════════════════════════════
-  // BOSS & PROGRESSION — HARD SPECIFICS
-  // Source: ark.wiki.gg boss tribute pages
-  // ══════════════════════════════════════════════════════════════════
- 
+  { q:'What does the Achatina passively produce?', a:'cementing paste and oil over time', hint:'Giant snail that makes paste while on wander.' },
+  { q:'Which creature produces Black Pearls when killed in ocean caves?', a:'eurypterid', hint:'Horseshoe crab-like creature.' },
+  { q:'What debuff makes a Giganotosaurus extremely dangerous to ride?', a:'rage state', hint:'It can throw you off and attack allies when enraged.' },
+  { q:'What taming food is unique to the Procoptodon?', a:'rare mushroom', hint:'Plant Species X Seed also works.' },
+  { q:'What is the Gacha unusual feeding mechanic?', a:'it consumes almost any item and produces random resource crystals', hint:'Slot machine creature on Extinction.' },
+  { q:'Which creature is the only theropod in ARK to have visible feathers?', a:'megalosaurus', hint:'Feathered nocturnal cave predator.' },
+  { q:'What bite mechanic does the Megalosaurus have that immobilizes Argentavis-sized creatures?', a:'a jaw lock grab attack', hint:'It bites and holds, then swings the prey around.' },
+  { q:'Which Aberration creature grapples onto ziplines to ride them?', a:'ravager', hint:'Fast pack creature with climbing.' },
+  { q:'What creature on Aberration can grab both players and dinos?', a:'karkinos', hint:'Giant crab.' },
+  { q:'What status effect builds on a Megalosaurus forced to stay awake during the day?', a:'sleep debt', hint:'Maxes at 120, then torpor rises fast.' },
+  { q:'Which version of Megalosaurus found on Aberration does not have a sleep cycle?', a:'aberrant megalosaurus', hint:'Permanently awake, no day debuff.' },
+  // ── Boss & Progression ─────────────────────────────────────────────
   { q:'What three trophies are required to summon the Overseer on The Island?', a:'broodmother trophy megapithecus trophy and dragon trophy', hint:'All three Island boss trophies.' },
-  { q:'Which Island boss is hardest on Alpha and requires the strongest dinos?', a:'dragon', hint:'Fire breath rapidly melts even Tek armor.' },
   { q:'What tribute item is uniquely required to summon the Broodmother on The Island?', a:'titanoboa venom', hint:'Plus other arthropod and cave tributes.' },
-  { q:'What unique mechanic makes the Dragon boss resistant to most dinos?', a:'fire breath that hits all dinos not just the target', hint:'Megatheriums are recommended due to bug buff.' },
-  { q:'What does ascending on The Island on Alpha difficulty specifically increase?', a:'your maximum survivor level by 15', hint:'Each ascension tier adds 5 levels (Gamma/Beta/Alpha).' },
-  { q:'How many element does an Alpha Dragon drop on The Island?', a:'more than gamma and beta versions', hint:'Exact numbers vary but Alpha yields the most.' },
+  { q:'What does ascending on The Island on Alpha difficulty increase?', a:'your maximum survivor level by 15', hint:'Each ascension tier adds 5 levels.' },
   { q:'What is Rockwell\'s map of origin?', a:'aberration', hint:'The corrupted survivor in the depths.' },
-  { q:'What mechanic does Rockwell use that makes melee dinos less effective?', a:'tentacle sweeps and electric fields in the arena', hint:'Ranged or high mobility dinos work better.' },
   { q:'Which Extinction boss requires Forest, Desert, and Ice Titan defeats before it spawns?', a:'king titan', hint:'The apex boss of Extinction.' },
-  { q:'What drops from the King Titan that is not available from any other boss source?', a:'king titan trophy and large amounts of element', hint:'Highest element yield boss.' },
-  { q:'Which artifact on The Island is found inside the Upper South Cave?', a:'artifact of the hunter', hint:'One of the 10 Island artifacts.' },
   { q:'What is the time limit enforced inside boss arenas before you fail?', a:'30 minutes', hint:'True for all standard Island bosses.' },
-  { q:'What food type drastically increases Megalosaurus taming effectiveness despite taking longer?', a:'prime meat', hint:'More efficient than kibble for bonus levels per time.' },
-  { q:'What is unique about taming the Shadowmane compared to all predatory theropods?', a:'it is a passive tame — no knockout needed', hint:'Feed it fish from a basket while it sleeps.' },
-  { q:'What specific taming food does a wild Shadowmane require?', a:'fish in a fish basket with at least 0.5 multiplier', hint:'The fish quality matters for taming efficiency.' },
- 
-  // ══════════════════════════════════════════════════════════════════
-  // MAP SPECIFICS & BIOMES — HARD
-  // Source: ark.wiki.gg map pages
-  // ══════════════════════════════════════════════════════════════════
- 
-  { q:'What biome exclusive to Aberration emits dangerous bioluminescence and has no sunlight?', a:'bioluminescent biome', hint:'Third depth tier in Aberration.' },
-  { q:'What mechanic forces players on Aberration to wear a hazmat suit or die over time?', a:'radiation damage in the surface and blue zone', hint:'Lethal without full protection.' },
-  { q:'What is the Great Trench on Valguero known for being accessible to players?', a:'a massive underwater biome with unique creatures', hint:'Deinonychus also nests in the cliffs above.' },
-  { q:'What creatures only nest and spawn in the cliff faces of Valguero?', a:'deinonychus', hint:'Requires stolen eggs to tame — they are vicious.' },
-  { q:'What makes The Center map unique in its structure compared to The Island?', a:'it has a large underwater ocean dome and floating islands', hint:'Circular map design with extreme biomes.' },
-  { q:'What Extinction map event drops orbital supplies that require wave defense?', a:'orbital supply drop or OSD', hint:'Defend it from corrupted dinos in waves.' },
+  // ── Map Specifics ──────────────────────────────────────────────────
+  { q:'What mechanic forces players on Aberration to wear a hazmat suit or die?', a:'radiation damage in the surface and blue zone', hint:'Lethal without full protection.' },
+  { q:'What biome exclusive to Aberration emits bioluminescence and has no sunlight?', a:'bioluminescent biome', hint:'Third depth tier in Aberration.' },
+  { q:'What Extinction map event drops orbital supplies requiring wave defense?', a:'orbital supply drop or OSD', hint:'Defend it from corrupted dinos in waves.' },
   { q:'What is the surface of Aberration covered in that makes daytime deadly?', a:'extreme radiation without hazmat protection', hint:'The sky collapsed and radiation poured in.' },
-  { q:'Which map has a biome that is permanently night allowing Megalosaurus full buffs always?', a:'aberration', hint:'No surface sunlight cycle in the biomes.' },
-  { q:'What resource-rich body of water on The Center allows underwater cave exploration?', a:'the underwater dome', hint:'Massive enclosed ocean biome.' },
-  { q:'What happens to the Aberrant Megalosaurus unlike its normal counterpart?', a:'it does not sleep during the day and has no nocturnal cycle', hint:'Aberrant variant loses the day/night penalty.' },
-  { q:'Lost Colony is unique among TheConclave maps for what thematic reason?', a:'it has a space colony and science fiction theme', hint:'One of the newer ASA maps.' },
-  { q:'Astraeos is described as what type of map in TheConclave lore?', a:'a custom ascended map blending multiple terrains', hint:'Newer hybrid terrain map.' },
-  { q:'What map on TheConclave uses a completely different IP from all others on the cluster?', a:'valguero', hint:'Runs on 85.190.136.141 while others use 217.x.x.x.' },
-  { q:'Which two TheConclave maps share the same IP address of 217.114.196.80?', a:'aberration and amissa', hint:'Both run on that IP, different ports.' },
-  { q:'What makes Extinction unique among all ARK maps in its lore?', a:'it is the future version of Earth after a catastrophic extinction event', hint:'The ARK series timeline endpoint.' },
- 
-  // ══════════════════════════════════════════════════════════════════
-  // CRAFTING & ITEM MECHANICS — HARD
-  // Source: ark.wiki.gg crafting pages
-  // ══════════════════════════════════════════════════════════════════
- 
+  { q:'What map has a biome that is permanently night allowing Megalosaurus full buffs?', a:'aberration', hint:'No surface sunlight cycle in the biomes.' },
+  // ── Crafting & Items ───────────────────────────────────────────────
   { q:'What is the exact gasoline recipe in the Industrial Forge?', a:'5 oil and 3 hide makes 5 gasoline', hint:'Only done in the Industrial Forge.' },
   { q:'What is the recipe for Sparkpowder?', a:'1 flint and 1 stone', hint:'Made in a Mortar and Pestle.' },
-  { q:'What specific mechanic allows Soap to be converted into Element on TheConclave?', a:'use a tek replicator', hint:'Convert element shards into element.' },
-  { q:'What must you do before using Organic Polymer in crafting?', a:'nothing — it works exactly like regular polymer', hint:'Same recipes, shorter spoil timer.' },
+  { q:'What tool gives the most Organic Polymer from harvesting Kairuku?', a:'chainsaw', hint:'Not a dino — it is a harvesting tool.' },
   { q:'What is the key difference between Organic Polymer and regular Polymer?', a:'organic polymer spoils over time while regular polymer does not', hint:'Time sensitive resource.' },
-  { q:'What item is exclusively crafted in a Motorboat and cannot be made elsewhere?', a:'nothing exclusively — but oil is refined in industrial forge', hint:'Trick question — motorboat crafting is limited.' },
   { q:'What does leveling the Crafting Skill stat actually affect?', a:'the quality and stats of items crafted from blueprints', hint:'Higher skill = better gear from same blueprint.' },
-  { q:'What is the minimum fish basket quality multiplier needed to tame a Shadowmane?', a:'0.5', hint:'Fish must be at least 0.5 multiplier.' },
-  { q:'What resource is unique to the Genesis Part 1 map as a currency for its shop?', a:'hexagons', hint:'Mission rewards convert to hexagons.' },
-  { q:'What is the difference between Element Dust, Element Shard, and Element?', a:'dust is smallest shard is medium element is full — each converts up', hint:'Three tiers of the same resource.' },
-  { q:'What structure uses Element to craft advanced item versions directly?', a:'tek replicator', hint:'Also converts element shards to element.' },
-  { q:'What saddle is required to harvest using a Quetzal as a mobile metal farm?', a:'quetzal platform saddle', hint:'Build an Anky on the platform.' },
-  { q:'What is the purpose of the Industrial Grinder beyond recycling items?', a:'it converts structures and weapons back into base materials', hint:'Only way to recycle built items.' },
-  { q:'Which kibble tier requires Rock Drake or Griffin eggs?', a:'exceptional kibble', hint:'Second highest tier.' },
-  { q:'What is the specific kibble required for optimal Giga taming?', a:'exceptional kibble', hint:'Giganotosaurus kibble tier.' },
- 
-  // ══════════════════════════════════════════════════════════════════
-  // ARK GAME MECHANICS — EXPERT LEVEL
-  // Source: ark.wiki.gg mechanics pages
-  // ══════════════════════════════════════════════════════════════════
- 
-  { q:'What is "starve taming" and when is it required?', a:'draining a dino\'s food to zero before feeding taming food to maximize effectiveness and speed', hint:'Required for creatures like Megalosaurus.' },
+  { q:'What resource is unique to Genesis Part 1 as a mission currency?', a:'hexagons', hint:'Earned from missions, spent in shop.' },
+  // ── Expert Mechanics ───────────────────────────────────────────────
+  { q:'What is starve taming and when is it required?', a:'draining a dino food to zero before feeding taming food to maximize effectiveness', hint:'Required for creatures like Megalosaurus.' },
   { q:'What is the mutation counter structure called on the mother\'s side?', a:'matrilineal', hint:'Father\'s side is patrilineal.' },
-  { q:'What stat level number in a single stat causes major issues in ASA when exceeded?', a:'254', hint:'Going to 255 prevents further leveling in that stat.' },
-  { q:'What does "taming effectiveness" directly control besides taming speed?', a:'the bonus levels added to the tame at completion', hint:'Higher TE = more wild levels added at tame.' },
-  { q:'What mechanic specifically prevents a tame from being claimed by another tribe?', a:'first torpor equals tame ownership', hint:'TheConclave enforces this as a rule.' },
+  { q:'What stat level number causes major issues in ASA when exceeded?', a:'254', hint:'Going to 255 prevents further leveling in that stat.' },
+  { q:'What does taming effectiveness directly control besides taming speed?', a:'the bonus levels added to the tame at completion', hint:'Higher TE = more wild levels added at tame.' },
   { q:'How does the Giganotosaurus rage state get triggered?', a:'it takes significant damage and gets a random chance to rage', hint:'Once raged it can attack its own tribe.' },
   { q:'What is the purpose of using a Yutyrannus during a boss fight?', a:'its courage roar gives a damage and defense buff to nearby tames', hint:'And its fear roar weakens enemies.' },
   { q:'What happens to a dino if it is leveled to 450 on a server with that cap?', a:'it gets deleted on server restart', hint:'Exceeding the server cap is permanent loss.' },
-  { q:'How does the imprinting system give bonus stats differently than leveling?', a:'imprint adds a percentage multiplier to base stats not flat level points', hint:'30% buff is multiplicative.' },
-  { q:'What is the game mechanic called when a dino damages its own tribe members?', a:'friendly fire', hint:'Giga rage is the most dangerous version of this.' },
-  { q:'What is the difference between uploading a dino versus cryopodding it?', a:'uploaded dinos go to the obelisk cloud and expire after 24 hours while cryo is indefinite with a fridge', hint:'Two different storage systems.' },
-  { q:'Why can a Bola NOT immobilize a Procoptodon for taming?', a:'procoptodons are too large — you need a chain bola', hint:'Size class exception to the standard bola.' },
-  { q:'What is the "Courage Roar" and what dino provides it?', a:'yutyrannus — it boosts attack and reduces damage taken for nearby allies', hint:'Essential for boss fights.' },
-  { q:'How does the Maewing nurse baby dinos without the player having to do anything?', a:'it automatically transfers milk from its glands to babies within range', hint:'Passive nursing system.' },
-  { q:'What does the "Fear Roar" on a Yutyrannus do to enemies?', a:'it forces nearby wild and hostile creatures to flee', hint:'Opposite of the courage buff.' },
-  { q:'What is the maximum level a tamed creature can be leveled after taming on standard settings?', a:'74 additional levels', hint:'Each level up adds to the base tame level.' },
-  { q:'What prevents you from leveling a stat in a creature once it hits 255 mutation levels in ASA?', a:'the game blocks further leveling in that stat', hint:'Breeding too high causes a hard lock.' },
-  { q:'What is "line breeding" in ARK?', a:'selectively breeding to stack specific stat mutations into one creature over many generations', hint:'Standard competitive ARK breeding meta.' },
-  { q:'What happens to wild dinos that are not tamed within the server\'s decay timer?', a:'nothing directly — wild dinos don\'t decay but their areas respawn around them', hint:'Tamed structures decay, not wild dinos.' },
- 
-  // ══════════════════════════════════════════════════════════════════
-  // ABERRATION SPECIFICS — DEEP CUTS
-  // Source: ark.wiki.gg/wiki/Aberration
-  // ══════════════════════════════════════════════════════════════════
- 
-  { q:'What prevents players from using flyers on Aberration?', a:'a magnetic field interference mechanic that blocks flight', hint:'No flyers allowed — designed that way intentionally.' },
-  { q:'What drops Reaper Pheromone Glands used to tame Reapers?', a:'the reaper queen when impregnating a survivor', hint:'Harvested from the Queen\'s body.' },
+  { q:'What is line breeding in ARK?', a:'selectively breeding to stack specific stat mutations into one creature over many generations', hint:'Standard competitive ARK breeding meta.' },
+  { q:'What is the difference between uploading a dino versus cryopodding it?', a:'uploaded dinos expire after 24 hours while cryo is indefinite with a fridge', hint:'Two different storage systems.' },
+  { q:'Why can a Bola NOT immobilize a Procoptodon for taming?', a:'procoptodons are too large — you need a chain bola', hint:'Size class exception to standard bola.' },
+  { q:'What is the Fear Roar on a Yutyrannus?', a:'it forces nearby wild and hostile creatures to flee', hint:'Opposite of the courage buff.' },
+  // ── Aberration Specifics ───────────────────────────────────────────
+  { q:'What prevents players from using flyers on Aberration?', a:'a magnetic field interference mechanic that blocks flight', hint:'No flyers allowed — designed intentionally.' },
   { q:'How do you obtain a Reaper King tame in Aberration?', a:'let a reaper queen impregnate you then give birth to a baby reaper', hint:'Not a standard knockout tame.' },
   { q:'What status effect must you stack before a Reaper Queen will impregnate you?', a:'reaper pheromone gland buff', hint:'Obtained from previously killed queens.' },
   { q:'What bioluminescent shoulder pet is required to safely pass through Nameless territories?', a:'bulbdog or shinehorn or featherlight', hint:'Any of the three glow pets work.' },
-  { q:'What mechanic makes Nameless creatures immediately flee on Aberration?', a:'exposure to light from charge pets or charge lanterns', hint:'Darkness is their domain.' },
-  { q:'What is the deepest and most dangerous biome in Aberration called?', a:'the element falls or blue zone', hint:'Filled with Nameless, Reapers, and radiation.' },
   { q:'What item allows players to traverse the zipline network in Aberration?', a:'zipline motor attachment or grappling hook', hint:'Horizontal travel replaces flyers.' },
-  { q:'What Aberration creature grapples onto ziplines to ride them?', a:'ravager', hint:'Fast pack creature that can zipline.' },
-  { q:'What specifically happens to regular Megalosaurus in Aberration\'s bioluminescent zone?', a:'they take radiation damage — only aberrant megalosaurus can survive there', hint:'Regular variants are not radiation immune.' },
- 
-  // ══════════════════════════════════════════════════════════════════
-  // STRUCTURES & BUILDING — HARD
-  // Source: ark.wiki.gg structure pages
-  // ══════════════════════════════════════════════════════════════════
- 
+  // ── Structures & Building ──────────────────────────────────────────
   { q:'What is the only way to legitimately unlock Tek engrams beyond leveling up?', a:'defeat bosses', hint:'Each boss tier unlocks specific Tek engrams.' },
-  { q:'What happens to structures with expired decay timers on a server?', a:'they are automatically demolished', hint:'Decay system removes abandoned bases.' },
-  { q:'What structure type is required as the base for all floating structure builds on a Quetzal?', a:'platform saddle', hint:'The structure is built on the saddle itself.' },
   { q:'What is the turret limit per area designed to prevent?', a:'excessive server lag and performance degradation', hint:'Too many turrets tanks server performance.' },
-  { q:'What prevents you from building inside artifact caves on TheConclave?', a:'server rules and admin enforcement', hint:'Blocking artifact spawns is banned.' },
-  { q:'What structure produces the most power per fuel unit?', a:'tek generator', hint:'Uses Element, most efficient power source.' },
-  { q:'What is required to prevent structures from decaying when you are offline?', a:'check decay timers and refresh before leaving', hint:'Or pin code them and leave a tribe member online.' },
-  { q:'How many foundations wide is the maximum base size per tribe on TheConclave PvE?', a:'6x6 behemoth gate area', hint:'TheConclave specific rule from the Codex.' },
-  { q:'What structure do you need to connect two separate Tek Teleporter pads?', a:'nothing extra — they auto-link when powered', hint:'They pair with each other by proximity.' },
-  { q:'What is the purpose of a Tree Sap Tap?', a:'it collects sap from redwood trees passively over time', hint:'Placed on a redwood tree trunk.' },
- 
-  // ══════════════════════════════════════════════════════════════════
-  // SCORCHED EARTH & EXTINCTION — HARD
-  // Source: ark.wiki.gg
-  // ══════════════════════════════════════════════════════════════════
- 
+  { q:'What does a Tree Sap Tap collect?', a:'sap from redwood trees passively over time', hint:'Placed on a redwood tree trunk.' },
+  // ── Scorched Earth & Extinction ────────────────────────────────────
   { q:'What weather event on Scorched Earth does massive terrain damage and blinds players?', a:'sand storm', hint:'Visibility drops to near zero.' },
   { q:'What Scorched Earth event creates a spinning column of fire that destroys structures?', a:'fire tornado', hint:'Avoid it or lose your base.' },
-  { q:'What unique resource is only found by killing Rock Elementals on Scorched Earth?', a:'stone and oil plus chance of element', hint:'Giant rock golems.' },
-  { q:'What is the only way to safely obtain Wyvern eggs on Scorched Earth?', a:'fly into the wyvern trench at night and steal eggs while keeping distance from Queens', hint:'Queens breathe fire and the trench is packed.' },
-  { q:'What does the Extinction map\'s Wasteland biome contain that other biomes do not?', a:'corrupted creatures and element clusters', hint:'Purple-infected former Earth creatures.' },
   { q:'What Extinction-exclusive creature converts trash items into element crystals?', a:'gacha', hint:'Slot machine creature, produces crystals randomly.' },
-  { q:'What are the four unique biome types on Genesis Part 1?', a:'bog volcanic arctic ocean and lunar', hint:'Five distinct simulation environments.' },
-  { q:'What does the King Titan fight require you to collect beforehand from other Titans?', a:'you must defeat the Forest Desert and Ice Titan first', hint:'Three titan kills to unlock the King.' },
- 
-  // ══════════════════════════════════════════════════════════════════
-  // COMMUNITY RULES & SERVER CULTURE — HARD THEC0NCLAVE
-  // Source: bot.js RulesPanel, CORE_PROMPT
-  // ══════════════════════════════════════════════════════════════════
- 
-  { q:'What is the maximum tame limit per tribe on TheConclave?', a:'100', hint:'From the Dominion Codex.' },
-  { q:'How many bases is each tribe allowed per map on TheConclave?', a:'1', hint:'One base per map per tribe.' },
-  { q:'What is the maximum tribe size on TheConclave?', a:'8 players', hint:'From the Dominion Codex.' },
-  { q:'What is the consequence for advertising another server in TheConclave Discord?', a:'permanent ban', hint:'Zero tolerance rule.' },
-  { q:'What is the rule regarding raiding or stealing on PvE maps on TheConclave?', a:'instant ban', hint:'Zero tolerance — only Aberration is PvP.' },
-  { q:'How many warnings does it take to receive a ban on TheConclave?', a:'3', hint:'Admin abuse is instant ban regardless.' },
-  { q:'What must your Discord name match according to TheConclave rules?', a:'your in game name', hint:'Identity rule for accountability.' },
-  { q:'What is the proper way to contact admin for help on TheConclave?', a:'open a ticket', hint:'No direct DMs to staff.' },
-  { q:'What does "first torpor equals tame ownership" mean on TheConclave?', a:'whoever applies the first tranq shot owns that tame — verbal claims are invalid', hint:'No calling dibs before you fire.' },
-  { q:'What must you do with temporary structures like taming traps after using them?', a:'clean them up and demolish them', hint:'Leaving them is against the Codex.' },
-  { q:'What must you do if you plan to be away from the server for an extended time?', a:'open a ticket so admins know about your absence', hint:'Prevents decay-based base deletion.' },
-  { q:'What building restriction prevents placing structures in artifact caves?', a:'no building near caves obelisks explorer notes or high resource spawns', hint:'Blocking spawns is bannable.' },
- 
-  // ══════════════════════════════════════════════════════════════════
-  // ECONOMY & SHOP SYSTEM — HARD
-  // Source: bot.js SHOP_TIERS, economy functions
-  // ══════════════════════════════════════════════════════════════════
- 
+  { q:'What does the King Titan fight require you to defeat beforehand?', a:'forest desert and ice titan', hint:'Three titan kills to unlock the King.' },
+  // ── ARK ASA Specific ───────────────────────────────────────────────
+  { q:'What graphics technology specific to UE5 gives ASA dramatically improved lighting?', a:'lumen', hint:'Real-time global illumination system.' },
+  { q:'What UE5 rendering technology allows ASA to have unprecedented terrain detail?', a:'nanite', hint:'Virtualized micropolygon geometry system.' },
+  { q:'What new cross-platform feature did ASA add that ASE never had?', a:'xbox and playstation crossplay together', hint:'Console crossplay was impossible in ASE.' },
+  { q:'What new ASA mechanism overhauled egg temperature management?', a:'the egg incubator structure', hint:'No more campfire ring temperature tricks.' },
+  // ── Economy & Shop ─────────────────────────────────────────────────
   { q:'What is the conversion rate for real money to ClaveShards on TheConclave?', a:'1 dollar equals 1 claveshard', hint:'Straight conversion — no premium markup.' },
   { q:'What does auto-deduct do when enabled on a /order command?', a:'it automatically deducts the shard cost from your wallet balance at time of order', hint:'No separate payment needed if you have shards.' },
-  { q:'What happens if you have insufficient wallet balance when using auto-deduct on /order?', a:'the order is rejected and not submitted', hint:'Balance check runs before order is placed.' },
-  { q:'What does the /wallet deposit command do?', a:'moves shards from your wallet into your bank', hint:'The bank is a safer secondary balance.' },
-  { q:'What is the difference between wallet balance and bank balance in the economy?', a:'wallet is active liquid balance bank is secure storage', hint:'Both count toward your total.' },
+  { q:'What is the difference between wallet balance and bank balance?', a:'wallet is active liquid balance bank is secure storage', hint:'Both count toward your total.' },
   { q:'What is the lifetime_earned stat tracked in the wallet system?', a:'total shards ever received across all grants and claims', hint:'Historical total, never decreases.' },
   { q:'What does the /clvsd audit command show?', a:'the last N economy transactions across all users', hint:'Admin-only transaction log.' },
-  { q:'What happens to ConCoin booty once an admin runs /grant-concoins for you?', a:'the pending amount is sent to your UnbelievaBoat wallet and cleared to zero', hint:'New system — trivia earnings paid out to UB.' },
-  { q:'What table in Supabase stores the per-user ConCoin trivia booty amounts?', a:'aegis_concoin_booty', hint:'New table added in the trivia patch.' },
-  { q:'What does the daily_streak field track in the wallet system?', a:'consecutive weekly claim count', hint:'It resets if you miss your 7 day window.' },
-  { q:'What does the /streaks leaderboard command show?', a:'top players ranked by their weekly claim streak count', hint:'Longest unbroken weekly claim chain.' },
   { q:'What does the /digest command under /clvsd show admins?', a:'a 7 day economy summary of grants deducts orders and top earner', hint:'Weekly economy health check.' },
- 
-  // ══════════════════════════════════════════════════════════════════
-  // MOD-SPECIFIC — HARD
-  // Source: bot.js mod list, ARKomatic, Awesome Teleporter
-  // ══════════════════════════════════════════════════════════════════
- 
-  { q:'What does the ARKomatic mod primarily improve?', a:'quality of life features and convenience mechanics', hint:'General polish mod.' },
+  { q:'What happens to ConCoin booty once an admin runs /grant-concoins for you?', a:'the pending amount is sent to your unbelievaboat wallet and cleared to zero', hint:'Trivia earnings paid out to UB.' },
+  { q:'What does the daily_streak field track in the wallet system?', a:'consecutive weekly claim count', hint:'It resets if you miss your 7 day window.' },
+  // ── Mod Specific ───────────────────────────────────────────────────
   { q:'What does the Awesome Spyglass mod tell you that the vanilla spyglass does not?', a:'detailed stats taming progress and creature level distribution without taming', hint:'See stats before committing to a tame.' },
   { q:'What does the Awesome Teleporter mod allow compared to vanilla teleporters?', a:'place teleporters anywhere without additional structure requirements', hint:'More flexible than vanilla Tek teleporters.' },
   { q:'Why is the Death Inventory Keeper mod critical on a 5x server like TheConclave?', a:'losing a full inventory of high tier gear on a 5x server would be devastating', hint:'End-game items are very hard to replace.' },
-  { q:'Which TheConclave mod allows you to check dino mutation count and stat breakdown at range?', a:'awesome spyglass', hint:'Aims at a creature and shows everything.' },
- 
-  // ══════════════════════════════════════════════════════════════════
-  // ARK ASA SPECIFIC CHANGES — HARD
-  // Source: ARK ASA official notes, ark.wiki.gg ASA pages
-  // ══════════════════════════════════════════════════════════════════
- 
-  { q:'What graphics technology specific to UE5 gives ASA dramatically improved lighting?', a:'lumen', hint:'Real-time global illumination system.' },
-  { q:'What UE5 rendering technology allows ASA to have unprecedented terrain and mesh detail?', a:'nanite', hint:'Virtualized micropolygon geometry system.' },
-  { q:'What new cross-platform feature did ASA add that ASE never had?', a:'xbox and playstation crossplay together', hint:'Console crossplay was impossible in ASE.' },
-  { q:'What was overhauled in ASA that allowed proper egg temperature management?', a:'the egg incubator structure', hint:'No more campfire ring temperature tricks.' },
-  { q:'What new mechanic added in ASA\'s Aberration DLC allows stat-targeted breeding?', a:'traits and the gene scanner', hint:'Extracted with a gene scanner device.' },
-  { q:'What is the maximum combined Matrilineal and Patrilineal mutation counter before a dino cannot SOURCE new mutations?', a:'20', hint:'Both counters together must stay below 20.' },
-  { q:'In ASA versus ASE, how does the mutation level system differ?', a:'in asa mutations track independently as their own stat level separate from wild levels', hint:'Cleaner system than ASE.' },
- 
-  // ══════════════════════════════════════════════════════════════════
-  // HARDCORE OBSCURA — FOR THE SWEATS
-  // Only the most dedicated ARK players would know these
-  // ══════════════════════════════════════════════════════════════════
- 
+  // ── Hardcore Obscura ───────────────────────────────────────────────
   { q:'What happens if you breed two creatures both with over 20 combined mutations?', a:'zero percent mutation chance — completely impossible to get new mutations', hint:'Both parents must have at least one side under 20.' },
-  { q:'Each breeding roll has a 2.5% mutation chance — how many rolls happen per breed?', a:'3 independent rolls', hint:'Three checks, each 2.5%, giving ~7.31% total.' },
-  { q:'What is the Shadowmane armor cap and how is it determined?', a:'capped at 80 and determined by the base level at time of taming', hint:'Higher base level = closer to cap of 80.' },
-  { q:'Why do Kairuku provide the most efficient Organic Polymer harvest?', a:'using a chainsaw on kairuku yields the highest organic polymer per kill', hint:'Tool matters as much as the target.' },
+  { q:'Each breeding roll has a 2.5 percent mutation chance — how many rolls happen per breed?', a:'3 independent rolls', hint:'Three checks, each 2.5%, giving ~7.31% total.' },
   { q:'What is the Aberrant Megalosaurus immune to that makes it better in Aberration caves?', a:'the day night penalty — it has full stats 24 hours', hint:'No sleep debt, no nocturnal debuff cycle.' },
-  { q:'What specific debuff timer resets on a Megalosaurus if you force it to sleep with the radial menu command?', a:'the sleep debt resets and its food consumption drops 50 percent while resting', hint:'Manual sleep option on tamed Megalosaurus.' },
-  { q:'At what in-game time does a Megalosaurus automatically wake up regardless of torpor?', a:'approximately 20:30 game time', hint:'Forces starve-taming strategy to be necessary.' },
-  { q:'What happens to a Procoptodon baby placed in a mate-boosted female pouch?', a:'it consumes 50 percent less food and gains double imprint progress per interaction', hint:'Both buffs apply simultaneously.' },
-  { q:'Why does the Shadowmane not need a craftable saddle unlike almost every other mount?', a:'it has natural armor built into its body based on tame level', hint:'Unique passive armor system, max cap 80.' },
-  { q:'What does the AEGIS command /ask-council do that regular /aegis does not?', a:'it responds as a specific named council member with their persona', hint:'Listed in the bot.js help command.' },
-  { q:'How long does the AEGIS knowledge base cache stay valid before re-fetching from Supabase?', a:'90 seconds', hint:'_kTs cache timeout in the bot code.' },
-  { q:'What TheConclave server has a Nitrado service ID of 18393892?', a:'astraeos', hint:'One of the custom ASA maps.' },
-  { q:'What does the /watchtower command deploy and who uses it?', a:'a base watch request panel for players going offline for extended periods', hint:'Staff claims and tracks the requests.' },
-  { q:'What AEGIS command lets admins view the last N economy transactions across all users?', a:'/clvsd audit', hint:'Shows raw ledger entries.' },
-  { q:'What is the name of the Supabase table that stores all shop orders?', a:'aegis_orders', hint:'Referenced in multiple bot.js functions.' },
-  { q:'What is the name of the Supabase table that stores all wallet ledger entries?', a:'aegis_wallet_ledger', hint:'Every shard movement is logged here.' },
+  { q:'At what in-game time does a Megalosaurus automatically wake up regardless of torpor?', a:'approximately 20:30 game time', hint:'Forces starve-taming strategy.' },
+  { q:'What does a Procoptodon baby gain when placed in a mate-boosted female pouch?', a:'50 percent less food consumption and double imprint progress per interaction', hint:'Both buffs apply simultaneously.' },
+  { q:'What prevents you from leveling a stat in a creature once it hits 255 mutation levels in ASA?', a:'the game blocks further leveling in that stat', hint:'Breeding too high causes a hard lock.' },
   { q:'Which Shadowmane gender applies the group cloak ability to allies?', a:'female', hint:'Mate-boosted female applies cloaked status to nearby tames.' },
   { q:'What does the Yutyrannus fear roar do to wild creatures in a boss arena?', a:'forces them to flee regardless of aggression state', hint:'Useful for disrupting enemy dino patterns.' },
-  { q:'What does "first torpor equals ownership" specifically mean in a disputed taming scenario on TheConclave?', a:'the first player to apply a tranquilizer owns the tame — verbal claims beforehand are invalid', hint:'No calling dibs in advance.' },
- 
+  { q:'How long does the AEGIS knowledge base cache stay valid before re-fetching from Supabase?', a:'90 seconds', hint:'_kTs cache timeout in the bot code.' },
+  { q:'What is the name of the Supabase table that stores all shop orders?', a:'aegis_orders', hint:'Referenced in multiple bot.js functions.' },
+  { q:'What is the name of the Supabase table that stores all wallet ledger entries?', a:'aegis_wallet_ledger', hint:'Every shard movement is logged here.' },
+  { q:'What is the name of the Supabase table that stores ConCoin trivia booty?', a:'aegis_concoin_booty', hint:'New table added in v12.1.' },
+  // ── Extra Hard ARK Knowledge ───────────────────────────────────────
+  { q:'What is the name of the special attack Shadowmanes use that damages through shields?', a:'plasma breath', hint:'Ranged energy attack, ignores shields.' },
+  { q:'What does a Megalosaurus get when it eats during its nocturnal active phase?', a:'a significant taming effectiveness boost', hint:'Why starve taming at night is optimal.' },
+  { q:'Which ARK creature has a unique mechanic where it can be tamed by knocking it out while it is already attacking another creature?', a:'thylacoleo', hint:'Ambush predator on cliff faces.' },
+  { q:'What element-adjacent resource can be transferred between maps in ASA unlike raw Element?', a:'element dust', hint:'Craftable into shards then element.' },
+  { q:'What is the official name of the gas on Genesis Part 1 ocean biome that depletes oxygen?', a:'gas balls', hint:'Released by Cnidaria and other ocean creatures.' },
+  { q:'What does the Deinonychus require to hatch from an egg?', a:'a nest and a precise temperature range without an incubator', hint:'Wild Deinonychus guard their nests aggressively.' },
+  { q:'What ARK boss gives the Tekgram for the Tek Dedicated Storage?', a:'king titan', hint:'Alpha tier reward on Extinction.' },
+  { q:'What is the Fjordhawk\'s unique revival mechanic?', a:'it revives you at the cost of some items from your inventory when you die', hint:'Shoulder pet on Fjordur map.' },
+  { q:'What resource is produced by Karkinos when harvested correctly?', a:'chitin', hint:'Crustacean shell resource.' },
+  { q:'What does the Shadowmane\'s group teleport ability require to activate?', a:'a female mate-boosted shadowmane activating while allies are nearby', hint:'One of the strongest positioning abilities in the game.' },
+  { q:'What is the maximum number of points that can be put into a single stat on a wild dino?', a:'255', hint:'Per-stat cap from the base game code.' },
+  { q:'What behavior does a Managarmr have that no other creature in ARK shares?', a:'it can jump in midair multiple times and ice-breath while airborne', hint:'Ice drake from Extinction.' },
+  { q:'What is the purpose of a Wyvern Milk in Wyvern raising?', a:'it is the only food baby wyverns will eat during their juvenile phase', hint:'Must be taken from unconscious female wyverns.' },
+  { q:'What happens to imprint quality if you miss an imprint window on a baby dino?', a:'nothing — you can still imprint but total imprint will be less than 100 percent', hint:'Each missed cuddle reduces max imprint.' },
+  { q:'What Scorched Earth creature explodes on death and can be used as an organic bomb?', a:'thorny dragon', hint:'Its death explosion deals area damage.' },
+  { q:'How does the Tek Gravity Grenade differ from a standard grenade in ARK?', a:'it creates a gravity field that pulls players and dinos inward', hint:'Anti-crowd control tek device.' },
+  { q:'What is the Noglin\'s unique taming and utility mechanic?', a:'it latches onto creatures or players to control them', hint:'Mind-control shoulder creature from Genesis 2.' },
+  { q:'What biome in Genesis Part 1 contains the highest concentration of element nodes?', a:'lunar biome', hint:'Zero gravity environment with element veins.' },
+  { q:'What is the primary resource farmed from Crystal Isles floating islands?', a:'crystal', hint:'The map is literally named after it.' },
+  { q:'What does a Voidwyrm require to tame unlike a normal Wyvern?', a:'it must be knocked out and tamed with element', hint:'Genesis 2 tek wyvern variant.' },
+  { q:'What Aberration creature provides the main source of Charge Light?', a:'lantern pets — bulbdog shinehorn featherlight glowtail', hint:'All four glow pets provide charge.' },
+  { q:'What is the only way to get fertilized Wyvern eggs on standard maps without mods?', a:'steal them from nests in the wyvern trench', hint:'Wild Wyverns lay eggs you must grab while they are away.' },
+  { q:'What ASA-exclusive HUD element appears when using the Awesome Spyglass on a creature?', a:'detailed base stats and taming efficiency percentage', hint:'Replaces the vanilla minimal info display.' },
+  { q:'What color mutation does not follow normal rules and can appear on any body region?', a:'there is no exception — all mutations follow the same region rules', hint:'All mutation colors are region-specific.' },
+  { q:'What platform saddle creature has the highest weight carry capacity in base game ARK?', a:'paracer or brontosaurus or quetzal', hint:'All three have platform saddles with high weight.' },
+  { q:'What is the Paraceratherium platform saddle maximum structure count compared to Quetzal?', a:'paraceratherium supports more structures than quetzal', hint:'Ground platform vs flying platform tradeoff.' },
+  { q:'What is the key mechanic that makes Reaper Kings grow stronger as they level up post-tame?', a:'they gain additional melee armor penetration per level', hint:'Makes them scale exceptionally well on boosted servers.' },
+  { q:'What is the unique harvesting mechanic of the Therizinosaurus?', a:'it can be set to harvest specific resources like fiber or wood or berries selectively', hint:'Multi-purpose harvester with role switching.' },
+  { q:'On TheConclave, which map is strictly PvE only and has the highest Patreon requirement?', a:'amissa', hint:'Patreon Elite tier at $20 per month.' },
+  { q:'What Nitrado service ID belongs to TheConclave\'s Lost Colony server?', a:'18307276', hint:'The space-themed map.' },
+  { q:'What Nitrado service ID belongs to TheConclave\'s Scorched Earth server?', a:'18598049', hint:'The desert map ID.' },
+  { q:'What Nitrado service ID belongs to TheConclave\'s Extinction server?', a:'18106633', hint:'Post-apocalyptic Earth map.' },
+  { q:'What Nitrado service ID belongs to TheConclave\'s The Center server?', a:'18182839', hint:'Floating island map.' },
+  { q:'What Nitrado service ID belongs to TheConclave\'s Volcano server?', a:'18094678', hint:'Lava and ash map.' },
+  { q:'How many of the 10 TheConclave maps are PvP?', a:'1', hint:'Only Aberration.' },
+  { q:'How many of the 10 TheConclave maps are Patreon-exclusive?', a:'1', hint:'Only Amissa.' },
+  { q:'What is Okami\'s council title?', a:'hazeweaver', hint:'Mist and fog themed.' },
+  { q:'What is Rookiereaper\'s council title?', a:'gatekeeper', hint:'Guards the entrance.' },
+  { q:'What is Icyreaper\'s council title?', a:'veilcaster', hint:'Ice and veil themed.' },
+  { q:'What is Jake\'s council title?', a:'forgesmith', hint:'Crafting and forging themed.' },
+  { q:'What is CredibleDevil\'s council title?', a:'iron vanguard', hint:'Metal and frontline themed.' },
+  { q:'What is Tw_\'s council title?', a:'high curator', hint:'The server owner.' },
+  { q:'What is Slothie\'s council title?', a:'archmaestro', hint:'Grand master rank.' },
 ];
-
-const activeTrivias = new Map(); // channelId → { question, answer, hint, expiresAt, msgId }
-
+ 
+const activeTrivias = new Map();
+ 
 // ══════════════════════════════════════════════════════════════════════
 // SLASH COMMAND DEFINITIONS
 // ══════════════════════════════════════════════════════════════════════
@@ -1064,9 +988,8 @@ function addWalletSubs(b) {
     .addSubcommand(s=>s.setName('grant').setDescription('🎁 [ADMIN] Grant shards').addUserOption(o=>o.setName('user').setDescription('Recipient').setRequired(true)).addIntegerOption(o=>o.setName('amount').setDescription('Amount').setRequired(true).setMinValue(1)).addStringOption(o=>o.setName('reason').setDescription('Reason').setRequired(false)))
     .addSubcommand(s=>s.setName('deduct').setDescription('⬇️ [ADMIN] Deduct shards').addUserOption(o=>o.setName('user').setDescription('Target').setRequired(true)).addIntegerOption(o=>o.setName('amount').setDescription('Amount').setRequired(true).setMinValue(1)).addStringOption(o=>o.setName('reason').setDescription('Reason').setRequired(false)));
 }
-
+ 
 const ALL_COMMANDS = [
-  // Economy
   addWalletSubs(new SlashCommandBuilder().setName('wallet').setDescription('💎 ClaveShard wallet')),
   addWalletSubs(new SlashCommandBuilder().setName('curr').setDescription('💎 ClaveShard wallet (alias)')),
   new SlashCommandBuilder().setName('weekly').setDescription('🌟 Claim weekly ClaveShards'),
@@ -1095,7 +1018,6 @@ const ALL_COMMANDS = [
       .addStringOption(o=>o.setName('reason').setDescription('Reason').setRequired(false)))
     .addSubcommand(s=>s.setName('audit').setDescription('📋 Recent economy actions').addIntegerOption(o=>o.setName('limit').setDescription('Entries (max 20)').setRequired(false).setMinValue(1).setMaxValue(20)))
     .addSubcommand(s=>s.setName('digest').setDescription('📊 Economy digest — grants/deducts/orders summary')),
-  // Shop
   new SlashCommandBuilder().setName('order').setDescription('📦 Submit ClaveShard shop order')
     .addIntegerOption(o=>o.setName('tier').setDescription('Tier shards').setRequired(true).setMinValue(1).setMaxValue(30))
     .addStringOption(o=>o.setName('platform').setDescription('Platform').setRequired(true).addChoices({name:'Xbox',value:'Xbox'},{name:'PlayStation',value:'PlayStation'},{name:'PC',value:'PC'}))
@@ -1107,24 +1029,19 @@ const ALL_COMMANDS = [
     .addStringOption(o=>o.setName('note').setDescription('Note to player').setRequired(false)),
   new SlashCommandBuilder().setName('shard').setDescription('💠 View complete ClaveShard tier list'),
   new SlashCommandBuilder().setName('shop').setDescription('🛍️ Browse ClaveShard catalog'),
-  // AI
   new SlashCommandBuilder().setName('aegis').setDescription('🧠 Ask AEGIS AI').addStringOption(o=>o.setName('question').setDescription('Your question').setRequired(true)),
   new SlashCommandBuilder().setName('ask').setDescription('🧠 Ask AEGIS anything').addStringOption(o=>o.setName('question').setDescription('Your question').setRequired(true)),
   new SlashCommandBuilder().setName('forget').setDescription('🧹 Clear your AEGIS conversation history'),
   new SlashCommandBuilder().setName('ai-cost').setDescription('💸 [ADMIN] AI usage dashboard').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
   new SlashCommandBuilder().setName('aegis-persona').setDescription('🎭 [ADMIN] Set AEGIS persona for this channel').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     .addStringOption(o=>o.setName('style').setDescription('Persona style').setRequired(true).addChoices(
-      {name:'🌌 Sovereign (default)',value:'sovereign'},
-      {name:'⚔️ Combat Tactical',value:'combat'},
-      {name:'🛍️ Shop Assistant',value:'shop'},
-      {name:'📜 Lore Keeper',value:'lore'},
-      {name:'🤝 Friendly Helper',value:'friendly'},
-      {name:'❌ Reset to Default',value:'reset'},
+      {name:'🌌 Sovereign (default)',value:'sovereign'},{name:'⚔️ Combat Tactical',value:'combat'},
+      {name:'🛍️ Shop Assistant',value:'shop'},{name:'📜 Lore Keeper',value:'lore'},
+      {name:'🤝 Friendly Helper',value:'friendly'},{name:'❌ Reset to Default',value:'reset'},
     ))
     .addStringOption(o=>o.setName('note').setDescription('Extra persona context').setRequired(false)),
   new SlashCommandBuilder().setName('summarize').setDescription('📝 [ADMIN] AEGIS summarizes recent chat').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     .addIntegerOption(o=>o.setName('count').setDescription('Messages to analyze (max 50)').setRequired(false).setMinValue(5).setMaxValue(50)),
-  // NEW AI commands
   new SlashCommandBuilder().setName('compare').setDescription('⚖️ Compare two ARK dinos side by side')
     .addStringOption(o=>o.setName('dino1').setDescription('First dino').setRequired(true))
     .addStringOption(o=>o.setName('dino2').setDescription('Second dino').setRequired(true)),
@@ -1143,7 +1060,6 @@ const ALL_COMMANDS = [
       {name:'Scorched Earth',value:'scorched'},{name:'The Center',value:'center'},
       {name:'Volcano',value:'volcano'},{name:'Amissa',value:'amissa'},
     )),
-  // Servers
   new SlashCommandBuilder().setName('servers').setDescription('🗺️ Live ARK cluster status').addStringOption(o=>o.setName('map').setDescription('Filter by map').setRequired(false)),
   new SlashCommandBuilder().setName('map').setDescription('🗺️ Detailed info for a specific map')
     .addStringOption(o=>o.setName('name').setDescription('Map').setRequired(true).addChoices(
@@ -1155,7 +1071,6 @@ const ALL_COMMANDS = [
     )),
   new SlashCommandBuilder().setName('monitor').setDescription('📡 [ADMIN] Post live server status monitor').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     .addChannelOption(o=>o.setName('channel').setDescription('Channel to post in').setRequired(true)),
-  // Info
   new SlashCommandBuilder().setName('info').setDescription('ℹ️ Server info and getting-started guide'),
   new SlashCommandBuilder().setName('rules').setDescription('📜 Dominion Codex rules'),
   new SlashCommandBuilder().setName('rates').setDescription('📈 All 5× boost rates'),
@@ -1170,10 +1085,19 @@ const ALL_COMMANDS = [
   new SlashCommandBuilder().setName('patreon').setDescription('⭐ Patreon perks and Amissa access'),
   new SlashCommandBuilder().setName('tip').setDescription('💡 Random ARK survival tip'),
   new SlashCommandBuilder().setName('dino').setDescription('🦕 ARK dino lookup').addStringOption(o=>o.setName('name').setDescription('Dino name').setRequired(true)),
-  new SlashCommandBuilder().setName('trivia').setDescription('🎯 Start an ARK trivia question'),
+  new SlashCommandBuilder().setName('trivia').setDescription('🎯 Start an ARK trivia question — win 15,000 ConCoins!'),
+  new SlashCommandBuilder().setName('concoin-booty').setDescription('🪙 Check your ConCoin trivia booty balance')
+    .addUserOption(o=>o.setName('user').setDescription('Check another user (admin only)').setRequired(false)),
+  new SlashCommandBuilder().setName('concoin-leaderboard').setDescription('🏆 Top ConCoin trivia earners'),
+  new SlashCommandBuilder().setName('grant-concoins').setDescription('💰 [ADMIN] Grant a player\'s ConCoin booty to UnbelievaBoat').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+    .addUserOption(o=>o.setName('user').setDescription('Target player').setRequired(true))
+    .addBooleanOption(o=>o.setName('confirm').setDescription('Confirm the grant (required)').setRequired(true)),
+  new SlashCommandBuilder().setName('grant-concoins-manual').setDescription('💰 [ADMIN] Manually grant a ConCoin amount direct to UnbelievaBoat').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+    .addUserOption(o=>o.setName('user').setDescription('Target player').setRequired(true))
+    .addIntegerOption(o=>o.setName('amount').setDescription('ConCoin amount').setRequired(true).setMinValue(1))
+    .addStringOption(o=>o.setName('reason').setDescription('Reason').setRequired(false)),
   new SlashCommandBuilder().setName('help').setDescription('📖 Full command reference'),
   new SlashCommandBuilder().setName('ping').setDescription('🏓 Bot latency and status'),
-  // Community
   new SlashCommandBuilder().setName('profile').setDescription('🎖️ View Dominion profile').addUserOption(o=>o.setName('user').setDescription('Member').setRequired(false)),
   new SlashCommandBuilder().setName('rank').setDescription('📊 Your ClaveShard rank'),
   new SlashCommandBuilder().setName('rep').setDescription('⭐ Give reputation to a member')
@@ -1191,12 +1115,10 @@ const ALL_COMMANDS = [
   new SlashCommandBuilder().setName('report').setDescription('🚨 Report a player or issue')
     .addStringOption(o=>o.setName('issue').setDescription('Describe the issue').setRequired(true))
     .addStringOption(o=>o.setName('player').setDescription('Player involved (if any)').setRequired(false)),
-  // Tribe
   new SlashCommandBuilder().setName('tribe').setDescription('🏕️ Tribe registry')
     .addSubcommand(s=>s.setName('register').setDescription('📝 Register your tribe').addStringOption(o=>o.setName('name').setDescription('Tribe name').setRequired(true)).addStringOption(o=>o.setName('server').setDescription('Primary server').setRequired(true)).addStringOption(o=>o.setName('members').setDescription('Member names (comma-separated)').setRequired(false)))
     .addSubcommand(s=>s.setName('lookup').setDescription('🔍 Look up a tribe').addStringOption(o=>o.setName('query').setDescription('Tribe name or owner').setRequired(true)))
     .addSubcommand(s=>s.setName('my').setDescription('📋 View your registered tribe')),
-  // Admin/Events
   new SlashCommandBuilder().setName('announce').setDescription('📢 [ADMIN] Send formatted announcement').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     .addStringOption(o=>o.setName('title').setDescription('Title').setRequired(true))
     .addStringOption(o=>o.setName('message').setDescription('Body').setRequired(true))
@@ -1217,7 +1139,6 @@ const ALL_COMMANDS = [
     .addStringOption(o=>o.setName('question').setDescription('Vote question').setRequired(true))
     .addStringOption(o=>o.setName('options').setDescription('Options separated by | (2-4 options)').setRequired(true))
     .addIntegerOption(o=>o.setName('duration').setDescription('Duration in minutes').setRequired(false).setMinValue(1).setMaxValue(1440)),
-  // Moderation
   new SlashCommandBuilder().setName('warn').setDescription('⚠️ [MOD] Issue formal warning').setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
     .addUserOption(o=>o.setName('user').setDescription('Member').setRequired(true))
     .addStringOption(o=>o.setName('reason').setDescription('Reason').setRequired(true)),
@@ -1249,12 +1170,10 @@ const ALL_COMMANDS = [
     .addStringOption(o=>o.setName('action').setDescription('Action').setRequired(true).addChoices({name:'Lock',value:'lock'},{name:'Unlock',value:'unlock'}))
     .addStringOption(o=>o.setName('reason').setDescription('Reason').setRequired(false)),
   new SlashCommandBuilder().setName('watchtower').setDescription('🛡️ [ADMIN] Post base protection request panel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
-  // Knowledge
   new SlashCommandBuilder().setName('know').setDescription('📚 [ADMIN] Manage AEGIS knowledge base').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     .addSubcommand(s=>s.setName('add').setDescription('➕ Add entry').addStringOption(o=>o.setName('category').setDescription('Category').setRequired(true)).addStringOption(o=>o.setName('title').setDescription('Title').setRequired(true)).addStringOption(o=>o.setName('content').setDescription('Content').setRequired(true)))
     .addSubcommand(s=>s.setName('list').setDescription('📋 List entries').addStringOption(o=>o.setName('category').setDescription('Filter by category').setRequired(false)))
     .addSubcommand(s=>s.setName('delete').setDescription('🗑️ Delete entry').addStringOption(o=>o.setName('key').setDescription('Entry key').setRequired(true))),
-  // Utils
   new SlashCommandBuilder().setName('roll').setDescription('🎲 Roll dice').addStringOption(o=>o.setName('dice').setDescription('Notation (2d6, d20)').setRequired(false)),
   new SlashCommandBuilder().setName('coinflip').setDescription('🪙 Flip a coin'),
   new SlashCommandBuilder().setName('calc').setDescription('🔢 Calculate expression').addStringOption(o=>o.setName('expression').setDescription('Math expression').setRequired(true)),
@@ -1265,7 +1184,7 @@ const ALL_COMMANDS = [
     .addStringOption(o=>o.setName('question').setDescription('Question').setRequired(true))
     .addStringOption(o=>o.setName('options').setDescription('Options separated by |').setRequired(true)),
 ];
-
+ 
 // ══════════════════════════════════════════════════════════════════════
 // COMMAND REGISTRATION
 // ══════════════════════════════════════════════════════════════════════
@@ -1284,20 +1203,16 @@ async function registerCommands() {
     }
   } catch (e) { console.error('❌ Registration failed:', e.message); }
 }
-
-// ══════════════════════════════════════════════════════════════════════
-// VOTE STATE
-// ══════════════════════════════════════════════════════════════════════
+ 
 const activeVotes = new Map();
-
+ 
 // ══════════════════════════════════════════════════════════════════════
 // INTERACTION HANDLER
 // ══════════════════════════════════════════════════════════════════════
 bot.on(Events.InteractionCreate, async interaction => {
   try {
     if (await handleWatchtowerInteraction(interaction, bot)) return;
-
-    // ── GIVEAWAY BUTTON ──────────────────────────────────────────────
+ 
     if (interaction.isButton() && interaction.customId==='giveaway_enter') {
       const gw = activeGiveaways.get(interaction.message.id);
       if (!gw) return interaction.reply({ content:'⚠️ Giveaway no longer active.', ephemeral:true });
@@ -1310,8 +1225,7 @@ bot.on(Events.InteractionCreate, async interaction => {
       gw.entries.add(interaction.user.id);
       return interaction.reply({ content:`🎉 You entered the **${gw.prize}** giveaway!${gw.shardCost>0?` (−${gw.shardCost} 💎)`:''} Good luck!`, ephemeral:true });
     }
-
-    // ── VOTE BUTTONS ─────────────────────────────────────────────────
+ 
     if (interaction.isButton() && interaction.customId?.startsWith('vote_')) {
       const [,msgId,optIdx] = interaction.customId.split('_');
       const vote = activeVotes.get(msgId);
@@ -1326,8 +1240,7 @@ bot.on(Events.InteractionCreate, async interaction => {
       catch {}
       return interaction.reply({ content:`✅ Voted for **${vote.options[parseInt(optIdx)]}**!`, ephemeral:true });
     }
-
-    // ── TICKET BUTTONS ───────────────────────────────────────────────
+ 
     if (interaction.isButton() && interaction.customId==='ticket_open') {
       await interaction.deferReply({ ephemeral:true });
       const safeName=interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g,'-').slice(0,20);
@@ -1354,20 +1267,19 @@ bot.on(Events.InteractionCreate, async interaction => {
       setTimeout(()=>interaction.channel.delete().catch(()=>{}), 5000);
       return;
     }
-
+ 
     if (!interaction.isChatInputCommand()) return;
     const { commandName:cmd } = interaction;
     await interaction.deferReply();
-
-    // ── WATCHTOWER ───────────────────────────────────────────────────
+ 
     if (cmd==='watchtower') {
       if (!isAdmin(interaction.member)) return interaction.editReply('❌ Admin only.');
       await sendWatchtowerPanel(interaction.channel);
       return interaction.editReply({ content:'✅ Watchtower panel posted.', ephemeral:true });
     }
-
+ 
     // ════════════════════════════════════════════════════════════════
-    // ECONOMY COMMANDS
+    // ECONOMY
     // ════════════════════════════════════════════════════════════════
     if (cmd==='wallet'||cmd==='curr') {
       const sub=interaction.options.getSubcommand();
@@ -1388,32 +1300,31 @@ bot.on(Events.InteractionCreate, async interaction => {
         if (sub==='deduct')      { if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admins only.'); if (!target) return interaction.editReply('⚠️ Specify target.'); const w=await deductShards(target.id,target.username,amount,reason||'Admin deduct',me.id,me.username); return interaction.editReply({ embeds:[walletEmbed(`⬇️ Deducted ${amount} from ${target.username}`,w,C.rd)] }); }
       } catch (e) { return interaction.editReply(`⚠️ ${e.message}`); }
     }
-
+ 
     if (cmd==='weekly') {
       try { const r=await claimWeekly(interaction.user.id,interaction.user.username); return interaction.editReply({ embeds:[base('🌟 Weekly ClaveShard Claimed!',C.gold).setDescription(`**${interaction.user.username}** claimed their weekly reward!`).addFields({name:'💎 Claimed',value:`**+${r.amount}**`,inline:true},{name:'🔥 Streak',value:`Week ${r.streak}`,inline:true},{name:'💰 Balance',value:`${(r.data.wallet_balance||0).toLocaleString()}`,inline:true})] }); }
       catch (e) { return interaction.editReply(`⚠️ ${e.message}`); }
     }
-
+ 
     if (cmd==='leaderboard') {
       try { const lb=await getLeaderboard(10); return interaction.editReply({ embeds:[P.LeaderboardPanel(lb)] }); }
       catch { return interaction.editReply({ embeds:[P.ErrorPanel('Leaderboard','Leaderboard temporarily unavailable.')] }); }
     }
-
+ 
     if (cmd==='streaks') {
       try { const rows=await getStreakLeaderboard(10); return interaction.editReply({ embeds:[P.StreakPanel(rows)] }); }
       catch { return interaction.editReply('⚠️ Streak data unavailable.'); }
     }
-
+ 
     if (cmd==='give') {
       if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
       try { const target=interaction.options.getUser('user'), amount=interaction.options.getInteger('amount'), reason=interaction.options.getString('reason')||'Admin grant'; const w=await grantShards(target.id,target.username,amount,reason,interaction.user.id,interaction.user.username); return interaction.editReply({ embeds:[walletEmbed(`🎁 Granted to ${target.username}`,w,C.gr).setDescription(`+**${amount}** 💎 · ${reason}`)] }); }
       catch (e) { return interaction.editReply(`⚠️ ${e.message}`); }
     }
-
+ 
     if (cmd==='clvsd') {
       if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
-      const sub=interaction.options.getSubcommand();
-      const me=interaction.user;
+      const sub=interaction.options.getSubcommand(), me=interaction.user;
       try {
         if (sub==='grant')   { const t=interaction.options.getUser('user'),a=interaction.options.getInteger('amount'),r=interaction.options.getString('reason')||''; const w=await grantShards(t.id,t.username,a,r,me.id,me.username); return interaction.editReply({ embeds:[walletEmbed(`🎁 +${a} → ${t.username}`,w,C.gr)] }); }
         if (sub==='deduct')  { const t=interaction.options.getUser('user'),a=interaction.options.getInteger('amount'),r=interaction.options.getString('reason')||''; const w=await deductShards(t.id,t.username,a,r,me.id,me.username); return interaction.editReply({ embeds:[walletEmbed(`⬇️ -${a} from ${t.username}`,w,C.rd)] }); }
@@ -1435,13 +1346,9 @@ bot.on(Events.InteractionCreate, async interaction => {
         if (sub==='usage') {
           if (!sb) return interaction.editReply('⚠️ Supabase not configured.');
           const { data } = await sb.from('aegis_ai_usage').select('model,engine,input_tokens,output_tokens').order('created_at',{ascending:false}).limit(500);
-          const total=data?.length||0;
-          const haiku=data?.filter(r=>r.engine==='anthropic')||[];
-          const groqRows=data?.filter(r=>r.engine==='groq')||[];
-          const inp=data?.reduce((s,r)=>s+(r.input_tokens||0),0)||0;
-          const out=data?.reduce((s,r)=>s+(r.output_tokens||0),0)||0;
-          // Haiku: ~$0.001/1k input, $0.005/1k output — rough estimate
-          const cost_usd = (inp/1000*0.001)+(out/1000*0.005);
+          const total=data?.length||0, haiku=data?.filter(r=>r.engine==='anthropic')||[], groqRows=data?.filter(r=>r.engine==='groq')||[];
+          const inp=data?.reduce((s,r)=>s+(r.input_tokens||0),0)||0, out=data?.reduce((s,r)=>s+(r.output_tokens||0),0)||0;
+          const cost_usd=(inp/1000*0.001)+(out/1000*0.005);
           return interaction.editReply({ embeds:[P.AiUsagePanel(total,haiku.length,groqRows.length,inp,out,cost_usd)] });
         }
         if (sub==='bulk-grant') {
@@ -1460,47 +1367,24 @@ bot.on(Events.InteractionCreate, async interaction => {
         }
       } catch (e) { return interaction.editReply(`⚠️ ${e.message}`); }
     }
-
+ 
     // ════════════════════════════════════════════════════════════════
-    // SHOP COMMANDS
+    // SHOP
     // ════════════════════════════════════════════════════════════════
     if (cmd==='order') {
-      const shards=interaction.options.getInteger('tier');
-      const platform=interaction.options.getString('platform');
-      const server=interaction.options.getString('server');
-      const notes=interaction.options.getString('notes')||'None';
-      const autoDeduct=interaction.options.getBoolean('auto-deduct')??false;
+      const shards=interaction.options.getInteger('tier'), platform=interaction.options.getString('platform'), server=interaction.options.getString('server'), notes=interaction.options.getString('notes')||'None', autoDeduct=interaction.options.getBoolean('auto-deduct')??false;
       const tier=SHOP_TIERS.find(t=>t.shards===shards&&t.shards>0);
       if (!tier) return interaction.editReply(`⚠️ No tier for **${shards}** shards. Valid: 1,2,3,5,6,8,10,12,15,20,30`);
-
-      const ref=`ORD-${Date.now().toString(36).toUpperCase()}`;
-      let deducted=false;
-
-      if (autoDeduct) {
-        try { await deductShards(interaction.user.id,interaction.user.username,shards,`Shop order ${ref}`, 'SYSTEM','AEGIS Shop'); deducted=true; }
-        catch (e) { return interaction.editReply(`⚠️ Auto-deduct failed: ${e.message}\nEnsure you have **${shards} 💎** in wallet.`); }
-      }
-
-      const emb=base(`📦 Order Submitted — ${tier.emoji} ${tier.name}`,C.gold)
-        .addFields(
-          {name:'📋 Ref',     value:`\`${ref}\``,         inline:true},
-          {name:'💎 Cost',    value:`${shards} shard${shards!==1?'s':''}`, inline:true},
-          {name:deducted?'✅ Payment':'💳 Payment', value:deducted?'Auto-deducted':'CashApp **$TheConclaveDominion**', inline:true},
-          {name:'🎮 Platform',value:platform,              inline:true},
-          {name:'🗺️ Server',  value:server,                inline:true},
-          {name:'📝 Notes',   value:notes,                 inline:false},
-          {name:'📦 Includes',value:tier.items.map(i=>`• ${i}`).join('\n').slice(0,1000), inline:false},
-        );
-
+      const ref=`ORD-${Date.now().toString(36).toUpperCase()}`; let deducted=false;
+      if (autoDeduct) { try { await deductShards(interaction.user.id,interaction.user.username,shards,`Shop order ${ref}`,'SYSTEM','AEGIS Shop'); deducted=true; } catch (e) { return interaction.editReply(`⚠️ Auto-deduct failed: ${e.message}\nEnsure you have **${shards} 💎** in wallet.`); } }
+      const emb=base(`📦 Order Submitted — ${tier.emoji} ${tier.name}`,C.gold).addFields({name:'📋 Ref',value:`\`${ref}\``,inline:true},{name:'💎 Cost',value:`${shards} shard${shards!==1?'s':''}`,inline:true},{name:deducted?'✅ Payment':'💳 Payment',value:deducted?'Auto-deducted':'CashApp **$TheConclaveDominion**',inline:true},{name:'🎮 Platform',value:platform,inline:true},{name:'🗺️ Server',value:server,inline:true},{name:'📝 Notes',value:notes,inline:false},{name:'📦 Includes',value:tier.items.map(i=>`• ${i}`).join('\n').slice(0,1000),inline:false});
       if (sb&&sbOk()) try { await sb.from('aegis_orders').insert({ ref, guild_id:interaction.guildId, discord_id:interaction.user.id, discord_tag:interaction.user.username, tier:tier.name, shards, platform, server, notes, auto_deducted:deducted, status:'pending', created_at:new Date().toISOString() }); } catch {}
-
       const orderChannel=process.env.ORDERS_CHANNEL_ID;
       if (orderChannel) { try { const ch=bot.channels.cache.get(orderChannel); if (ch) await ch.send({ embeds:[emb.setFooter({...FT,text:`Order from ${interaction.user.username} (${interaction.user.id})`})] }); } catch {} }
       try { await interaction.user.send({ embeds:[base(`🧾 Order Receipt — ${ref}`,C.gold).setDescription(`**${tier.name}** · ${platform} · ${server}\n\n${deducted?`✅ ${shards} shards auto-deducted.`:`💳 Pay **$TheConclaveDominion** and include ref: \`${ref}\``}`)] }); } catch {}
-
       return interaction.editReply({ embeds:[emb] });
     }
-
+ 
     if (cmd==='fulfill') {
       if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
       const ref=interaction.options.getString('ref'), note=interaction.options.getString('note')||'Your order is ready!';
@@ -1509,21 +1393,21 @@ bot.on(Events.InteractionCreate, async interaction => {
       if (discordId) { try { const u=await bot.users.fetch(discordId); await u.send({ embeds:[base('✅ Order Fulfilled!',C.gr).setDescription(`Your order **\`${ref}\`** has been fulfilled!\n📝 *${note}*`).setFooter(FT)] }); } catch {} }
       return interaction.editReply({ embeds:[base('✅ Order Fulfilled',C.gr).addFields({name:'📋 Ref',value:`\`${ref}\``,inline:true},{name:'📝 Note',value:note,inline:false})] });
     }
-
+ 
     if (cmd==='shard') {
       const emb=base('💠 ClaveShard Tier List',C.gold).setDescription('Shop: **theconclavedominion.com/shop** | `/order` to submit\nCashApp **$TheConclaveDominion**');
       for (const tier of SHOP_TIERS.filter(t=>t.shards>0)) emb.addFields({name:`${tier.emoji} ${tier.name}`,value:tier.items.slice(0,5).map(i=>`• ${i}`).join('\n'),inline:true});
       emb.addFields({name:'🛡 Dino Insurance',value:SHOP_TIERS.find(t=>t.shards===0).items.map(i=>`• ${i}`).join('\n'),inline:false});
       return interaction.editReply({ embeds:[emb] });
     }
-
+ 
     if (cmd==='shop') {
       const select=new StringSelectMenuBuilder().setCustomId('shop_tier_view').setPlaceholder('💎 View a tier...').addOptions(SHOP_TIERS.filter(t=>t.shards>0).map(t=>({label:`${t.emoji} ${t.name}`,value:`${t.shards}`,description:t.items[0]})));
       return interaction.editReply({ embeds:[base('🛍️ ClaveShard Shop',C.gold).setDescription('Select a tier below.\n\nUse `/order` to submit.\n\n💳 CashApp **$TheConclaveDominion**\n\n🔗 **theconclavedominion.com/shop**')], components:[new ActionRowBuilder().addComponents(select)] });
     }
-
+ 
     // ════════════════════════════════════════════════════════════════
-    // AI COMMANDS
+    // AI
     // ════════════════════════════════════════════════════════════════
     if (cmd==='aegis'||cmd==='ask') {
       const q=interaction.options.getString('question');
@@ -1531,9 +1415,9 @@ bot.on(Events.InteractionCreate, async interaction => {
       const resp=await askAegis(q,interaction.user.id,'',interaction.channelId);
       return interaction.editReply({ embeds:[P.AegisPanel(resp, anthropic?'ANTHROPIC·HAIKU·4.5':'GROQ·LLAMA·3')] });
     }
-
+ 
     if (cmd==='forget') { clearHist(interaction.user.id); return interaction.editReply('🧹 Conversation history cleared.'); }
-
+ 
     if (cmd==='ai-cost') {
       if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
       if (!sb) return interaction.editReply('⚠️ Supabase not configured.');
@@ -1545,7 +1429,7 @@ bot.on(Events.InteractionCreate, async interaction => {
         return interaction.editReply({ embeds:[P.AiUsagePanel(total,haiku.length,groqRows.length,inp,out,cost_usd)] });
       } catch (e) { return interaction.editReply(`⚠️ ${e.message}`); }
     }
-
+ 
     if (cmd==='aegis-persona') {
       if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
       const style=interaction.options.getString('style'), note=interaction.options.getString('note')||'';
@@ -1554,7 +1438,7 @@ bot.on(Events.InteractionCreate, async interaction => {
       personaOverrides.set(interaction.channelId,{style:styleMap[style]||style,note});
       return interaction.editReply({ embeds:[base('🎭 AEGIS Persona Set',C.pl).setDescription(`**Style:** ${style}\n**Channel:** <#${interaction.channelId}>${note?`\n\n📝 Note: ${note}`:''}`)] });
     }
-
+ 
     if (cmd==='summarize') {
       if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
       const count=interaction.options.getInteger('count')||25;
@@ -1563,34 +1447,30 @@ bot.on(Events.InteractionCreate, async interaction => {
         const text=[...messages.values()].reverse().filter(m=>!m.author.bot).map(m=>`${m.author.username}: ${m.content.slice(0,200)}`).join('\n');
         if (!text.trim()) return interaction.editReply('📭 No non-bot messages to summarize.');
         const summary=await aiSummarize(`Summarize these Discord messages from TheConclave Dominion gaming community concisely (max 5 bullet points):\n\n${text}`);
-        return interaction.editReply({ embeds:[base('📝 AEGIS Chat Summary',C.pl).setDescription(summary||'Unable to summarize.').setFooter({...FT,text:`Last ${count} messages · AEGIS v12.0`})] });
+        return interaction.editReply({ embeds:[base('📝 AEGIS Chat Summary',C.pl).setDescription(summary||'Unable to summarize.').setFooter({...FT,text:`Last ${count} messages · AEGIS v12.1`})] });
       } catch (e) { return interaction.editReply(`⚠️ ${e.message}`); }
     }
-
+ 
     if (cmd==='compare') {
       const dino1=interaction.options.getString('dino1'), dino2=interaction.options.getString('dino2');
-      const q=`Compare ${dino1} vs ${dino2} in ARK: Survival Ascended. Cover: taming difficulty, combat effectiveness, utility/uses, resource gathering, speed, recommended saddle level. Format as a clear comparison. TheConclave uses 5× rates and max wild 350. Keep under 1600 chars.`;
-      const resp=await askAegis(q,null,'',interaction.channelId);
+      const resp=await askAegis(`Compare ${dino1} vs ${dino2} in ARK: Survival Ascended. Cover: taming difficulty, combat effectiveness, utility/uses, resource gathering, speed, recommended saddle level. TheConclave uses 5× rates and max wild 350. Keep under 1600 chars.`,null,'',interaction.channelId);
       return interaction.editReply({ embeds:[base(`⚖️ ${dino1} vs ${dino2}`,C.cy).setDescription(resp).setAuthor({name:'🦕 AEGIS Dino Comparer',iconURL:'https://theconclavedominion.com/conclave-badge.png'})] });
     }
-
+ 
     if (cmd==='boss-guide') {
       const boss=interaction.options.getString('boss');
-      const q=`Provide a detailed boss fight guide for ${boss} in ARK: Survival Ascended. Include: recommended dinos, ideal levels (note TheConclave max wild is 350), artifact/tribute requirements, fight strategy, common mistakes, rewards. TheConclave uses 5× rates. Under 1600 chars.`;
-      const resp=await askAegis(q,null,'',interaction.channelId);
+      const resp=await askAegis(`Detailed boss fight guide for ${boss} in ARK Survival Ascended. Include: recommended dinos, ideal levels (TheConclave max wild 350), artifact/tribute requirements, fight strategy, common mistakes, rewards. Under 1600 chars.`,null,'',interaction.channelId);
       return interaction.editReply({ embeds:[base(`👹 Boss Guide: ${boss}`,C.rd).setDescription(resp).setAuthor({name:'⚔️ AEGIS Boss Intelligence',iconURL:'https://theconclavedominion.com/conclave-badge.png'})] });
     }
-
+ 
     if (cmd==='base-tips') {
-      const mapId=interaction.options.getString('map');
-      const mapName=MAP_INFO[mapId]?.name||mapId;
-      const q=`Give base building tips for ${mapName} in ARK: Survival Ascended on TheConclave Dominion (5× PvE server, except Aberration which is PvP). Include: best base locations with coordinates, terrain advantages, resource proximity, threats to build around, and any map-specific tricks. Under 1600 chars.`;
-      const resp=await askAegis(q,null,'',interaction.channelId);
+      const mapId=interaction.options.getString('map'), mapName=MAP_INFO[mapId]?.name||mapId;
+      const resp=await askAegis(`Base building tips for ${mapName} in ARK Survival Ascended on TheConclave Dominion (5× PvE, except Aberration PvP). Best locations with coordinates, terrain advantages, resource proximity, threats. Under 1600 chars.`,null,'',interaction.channelId);
       return interaction.editReply({ embeds:[base(`🏗️ Base Tips: ${mapName}`,C.gr).setDescription(resp).setAuthor({name:'🗺️ AEGIS Base Intelligence',iconURL:'https://theconclavedominion.com/conclave-badge.png'})] });
     }
-
+ 
     // ════════════════════════════════════════════════════════════════
-    // SERVER COMMANDS
+    // SERVERS
     // ════════════════════════════════════════════════════════════════
     if (cmd==='servers') {
       const filter=interaction.options.getString('map');
@@ -1598,13 +1478,13 @@ bot.on(Events.InteractionCreate, async interaction => {
       if (filter) servers=servers.filter(s=>s.name.toLowerCase().includes(filter.toLowerCase())||s.id.includes(filter.toLowerCase()));
       return interaction.editReply({ embeds:[P.ServerMonitorPanel(servers)] });
     }
-
+ 
     if (cmd==='map') {
       const id=interaction.options.getString('name'), m=MAP_INFO[id];
       if (!m) return interaction.editReply('⚠️ Map not found.');
       return interaction.editReply({ embeds:[P.MapPanel(m)] });
     }
-
+ 
     if (cmd==='monitor') {
       if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
       const ch=interaction.options.getChannel('channel');
@@ -1613,42 +1493,37 @@ bot.on(Events.InteractionCreate, async interaction => {
       monitorState.set(interaction.guildId,{statusChannelId:ch.id,messageId:msg.id});
       return interaction.editReply(`✅ Live monitor posted in ${ch}. Auto-refreshes every 5 min.`);
     }
-
+ 
     // ════════════════════════════════════════════════════════════════
-    // INFO COMMANDS
+    // INFO
     // ════════════════════════════════════════════════════════════════
-    if (cmd==='info')     { return interaction.editReply({ embeds:[P.InfoPanel()] }); }
-    if (cmd==='rules')    { return interaction.editReply({ embeds:[P.RulesPanel()] }); }
-    if (cmd==='council')  { return interaction.editReply({ embeds:[P.CouncilPanel()] }); }
-
+    if (cmd==='info')    { return interaction.editReply({ embeds:[P.InfoPanel()] }); }
+    if (cmd==='rules')   { return interaction.editReply({ embeds:[P.RulesPanel()] }); }
+    if (cmd==='council') { return interaction.editReply({ embeds:[P.CouncilPanel()] }); }
+ 
     if (cmd==='rates') {
-      return interaction.editReply({ embeds:[base('📈 5× Boost Rates',C.gr)
-        .addFields(
-          {name:'⚡ Core',  value:'XP: 5× · Harvest: 5× · Taming: 5× · Breeding: 5×', inline:false},
-          {name:'🏋️ QoL',  value:'Weight: 1,000,000 · No Fall Damage · Increased Stacks', inline:false},
-          {name:'🥚 Breeding',value:'Egg Hatch: 50× · Mature: 50× · Cuddle: 0.025', inline:false},
-          {name:'🦕 Creatures',value:'Max Wild: 350 · Tamed Cap: 600', inline:false},
-        )] });
+      return interaction.editReply({ embeds:[base('📈 5× Boost Rates',C.gr).addFields(
+        {name:'⚡ Core',value:'XP: 5× · Harvest: 5× · Taming: 5× · Breeding: 5×',inline:false},
+        {name:'🏋️ QoL',value:'Weight: 1,000,000 · No Fall Damage · Increased Stacks',inline:false},
+        {name:'🥚 Breeding',value:'Egg Hatch: 50× · Mature: 50× · Cuddle: 0.025',inline:false},
+        {name:'🦕 Creatures',value:'Max Wild: 350 · Tamed Cap: 600',inline:false},
+      )] });
     }
-
+ 
     if (cmd==='mods') {
-      return interaction.editReply({ embeds:[base('🔧 Active Cluster Mods',C.cy)
-        .addFields(
-          {name:'Death Inventory Keeper',value:'Never lose your items on death.',inline:true},
-          {name:'ARKomatic',            value:'Quality-of-life improvements.',inline:true},
-          {name:'Awesome Spyglass',     value:'Advanced creature stats at a glance.',inline:true},
-          {name:'Teleporter',           value:'Fast travel between owned teleporters.',inline:true},
-        )] });
+      return interaction.editReply({ embeds:[base('🔧 Active Cluster Mods',C.cy).addFields(
+        {name:'Death Inventory Keeper',value:'Never lose your items on death.',inline:true},
+        {name:'ARKomatic',value:'Quality-of-life improvements.',inline:true},
+        {name:'Awesome Spyglass',value:'Advanced creature stats at a glance.',inline:true},
+        {name:'Teleporter',value:'Fast travel between owned teleporters.',inline:true},
+      )] });
     }
-
+ 
     if (cmd==='wipe') {
-      if (wipeData.date) {
-        const ts=Math.floor(new Date(wipeData.date).getTime()/1000);
-        return interaction.editReply({ embeds:[base('📅 Wipe Tracker',C.rd).setDescription(`**Next wipe:** <t:${ts}:F>\n**Countdown:** <t:${ts}:R>\n**Reason:** ${wipeData.reason||'TBA'}\n**Set by:** ${wipeData.setBy||'Council'}`)] });
-      }
+      if (wipeData.date) { const ts=Math.floor(new Date(wipeData.date).getTime()/1000); return interaction.editReply({ embeds:[base('📅 Wipe Tracker',C.rd).setDescription(`**Next wipe:** <t:${ts}:F>\n**Countdown:** <t:${ts}:R>\n**Reason:** ${wipeData.reason||'TBA'}\n**Set by:** ${wipeData.setBy||'Council'}`)] }); }
       return interaction.editReply({ embeds:[base('📅 Wipe Schedule',C.gold).setDescription('No wipe currently scheduled.\n\nWipes are announced **at least 2 weeks in advance**.')] });
     }
-
+ 
     if (cmd==='set-wipe') {
       if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
       const dateStr=interaction.options.getString('date'), reason=interaction.options.getString('reason')||'Scheduled wipe';
@@ -1656,102 +1531,174 @@ bot.on(Events.InteractionCreate, async interaction => {
       wipeData.date=dateStr; wipeData.reason=reason; wipeData.setBy=interaction.user.username; wipeData.setAt=new Date().toISOString();
       return interaction.editReply({ embeds:[base('📅 Wipe Date Set',C.rd).setDescription(`**Date:** <t:${Math.floor(d.getTime()/1000)}:F>\n**Reason:** ${reason}\n**Countdown:** <t:${Math.floor(d.getTime()/1000)}:R>`)] });
     }
-
+ 
     if (cmd==='transfer-guide') {
-      return interaction.editReply({ embeds:[base('🔄 Cross-ARK Transfer Guide',C.cy)
-        .addFields(
-          {name:'📤 Uploading',value:'Use any Obelisk, Terminal, or Loot Crate. Upload via ARK Data. Wait ~1 min before downloading.',inline:false},
-          {name:'📥 Downloading',value:'Visit any Obelisk/Terminal on destination. Open ARK Data tab and retrieve.',inline:false},
-          {name:'⚠️ Notes',value:'Items expire after 24 hours. Some boss items cannot transfer. Element restricted on some maps.',inline:false},
-        )] });
+      return interaction.editReply({ embeds:[base('🔄 Cross-ARK Transfer Guide',C.cy).addFields(
+        {name:'📤 Uploading',value:'Use any Obelisk, Terminal, or Loot Crate. Upload via ARK Data. Wait ~1 min before downloading.',inline:false},
+        {name:'📥 Downloading',value:'Visit any Obelisk/Terminal on destination. Open ARK Data tab and retrieve.',inline:false},
+        {name:'⚠️ Notes',value:'Items expire after 24 hours. Some boss items cannot transfer. Element restricted on some maps.',inline:false},
+      )] });
     }
-
+ 
     if (cmd==='crossplay') {
-      return interaction.editReply({ embeds:[base('🎮 Crossplay Connection Guide',C.cy)
-        .addFields(
-          {name:'🎮 Xbox',value:'ARK SA → Multiplayer → Join via IP. Type the IP:Port from `/servers`.',inline:false},
-          {name:'🎮 PlayStation',value:'Same as Xbox — use the Join via IP option in the multiplayer menu.',inline:false},
-          {name:'💻 PC',value:'In ARK SA, go to Join Game → filter by "TheConclave" or paste the IP.',inline:false},
-        )] });
+      return interaction.editReply({ embeds:[base('🎮 Crossplay Connection Guide',C.cy).addFields(
+        {name:'🎮 Xbox',value:'ARK SA → Multiplayer → Join via IP. Type the IP:Port from `/servers`.',inline:false},
+        {name:'🎮 PlayStation',value:'Same as Xbox — use the Join via IP option in the multiplayer menu.',inline:false},
+        {name:'💻 PC',value:'In ARK SA, go to Join Game → filter by "TheConclave" or paste the IP.',inline:false},
+      )] });
     }
-
+ 
     if (cmd==='patreon') {
-      return interaction.editReply({ embeds:[base('⭐ Patreon Perks',C.gold).setDescription('Support at **patreon.com/theconclavedominion**')
-        .addFields(
-          {name:'🥉 Supporter', value:'Discord role · Supporter channels', inline:true},
-          {name:'🥈 Champion',  value:'All above', inline:true},
-          {name:'🥇 Elite ($20/mo)',value:'All above + Bonus ClaveShards monthly + **Amissa access** · Priority support', inline:true},
-        )] });
+      return interaction.editReply({ embeds:[base('⭐ Patreon Perks',C.gold).setDescription('Support at **patreon.com/theconclavedominion**').addFields(
+        {name:'🥉 Supporter',value:'Discord role · Supporter channels',inline:true},
+        {name:'🥈 Champion',value:'All above',inline:true},
+        {name:'🥇 Elite ($20/mo)',value:'All above + Bonus ClaveShards monthly + **Amissa access** · Priority support',inline:true},
+      )] });
     }
-
+ 
     if (cmd==='tip') {
-      const tips=['Always disable friendly fire before taming!','Keep a Cryopod ready — cryo your tames before danger.','Use the Spyglass mod to check dino stats BEFORE taming.','Build your first base near water and resources.','Boss arenas wipe your inventory — prepare a dedicated boss kit.','Upload your best tames to ARK Data before a wipe warning.','The Megatherium gets a 75% damage boost after killing bugs — great for Broodmother.','Flak armor gives the best overall protection for mid-game.','First torpor = tame ownership — verbal claims are not valid.','Always name your best dinos — it helps with Dino Insurance claims.','Rock Elementals take reduced damage from most weapons — use explosives.','Stacking Stimberries counteracts Narcotics during taming.','Keep your tributes uploaded — bosses can be attempted anytime.'];
+      const tips=['Always disable friendly fire before taming!','Keep a Cryopod ready — cryo your tames before danger.','Use the Spyglass mod to check dino stats BEFORE taming.','Build your first base near water and resources.','Boss arenas wipe your inventory — prepare a dedicated boss kit.','Upload your best tames to ARK Data before a wipe warning.','The Megatherium gets a 75% damage boost after killing bugs — great for Broodmother.','Flak armor gives the best overall protection for mid-game.','First torpor = tame ownership — verbal claims are not valid.','Always name your best dinos — it helps with Dino Insurance claims.','Rock Elementals take reduced damage from most weapons — use explosives.','Keep your tributes uploaded — bosses can be attempted anytime.'];
       return interaction.editReply({ embeds:[P.TipPanel(tips[Math.floor(Math.random()*tips.length)])] });
     }
-
+ 
     if (cmd==='dino') {
       const name=interaction.options.getString('name');
       const resp=await askAegis(`ARK encyclopedia entry for "${name}": taming method, best food, saddle level, recommended use, stats to prioritize, TheConclave tips on 5× rates. Under 1600 chars.`,null);
       return interaction.editReply({ embeds:[P.DinoPanel(name,resp)] });
     }
-
+ 
+    // ════════════════════════════════════════════════════════════════
+    // TRIVIA — reward: 15,000 ConCoins
+    // ════════════════════════════════════════════════════════════════
     if (cmd==='trivia') {
-      // Check if there's already an active trivia in this channel
       if (activeTrivias.has(interaction.channelId)) {
         const existing=activeTrivias.get(interaction.channelId);
-        if (Date.now()<existing.expiresAt) {
-          return interaction.editReply(`⚠️ There's already an active trivia question in this channel!\n**Hint:** ${existing.hint}`);
-        }
+        if (Date.now()<existing.expiresAt) return interaction.editReply(`⚠️ There's already an active trivia question in this channel!\n**Hint:** ${existing.hint}`);
         activeTrivias.delete(interaction.channelId);
       }
       const q=TRIVIA_QUESTIONS[Math.floor(Math.random()*TRIVIA_QUESTIONS.length)];
       const expiresAt=Date.now()+60_000;
       activeTrivias.set(interaction.channelId,{...q, expiresAt});
-      const emb=base('🎯 ARK Trivia!',C.pk)
-        .setDescription([
-          `**Question:** ${q.q}`,
-          '',
-          '> Type your answer in this channel! First correct answer wins **** 💎',
-          `> Question expires <t:${Math.floor(expiresAt/1000)}:R>`,
-          '',
-          `*Use /trivia again after this expires for a new question*`,
-        ].join('\n'));
-      return interaction.editReply({ embeds:[emb] });
+      return interaction.editReply({ embeds:[base('🎯 ARK Trivia!',C.pk).setDescription([
+        `**Question:** ${q.q}`,
+        '',
+        `> 🪙 First correct answer wins **${CONCOIN_TRIVIA_REWARD.toLocaleString()} ConCoins!**`,
+        `> Type your answer in this channel. Expires <t:${Math.floor(expiresAt/1000)}:R>`,
+        '',
+        `-# Use /concoin-booty to check your total · Admins use /grant-concoins to pay out`,
+      ].join('\n'))] });
     }
-
+ 
+    // ════════════════════════════════════════════════════════════════
+    // CONCOIN BOOTY
+    // ════════════════════════════════════════════════════════════════
+    if (cmd==='concoin-booty') {
+      const target=interaction.options.getUser('user');
+      if (target&&target.id!==interaction.user.id&&!isAdmin(interaction.member)) return interaction.editReply('⛔ Admins only for checking other players.');
+      const who=target||interaction.user;
+      const booty=await getConcoinBooty(who.id);
+      if (!booty) return interaction.editReply({ embeds:[base('🪙 ConCoin Booty — Empty',C.cy).setDescription(`**${who.username}** hasn't won any trivia yet!\n\nUse \`/trivia\` to start earning. Each correct answer earns **${CONCOIN_TRIVIA_REWARD.toLocaleString()} ConCoins**!`)] });
+      return interaction.editReply({ embeds:[base(`🪙 ${who.username}'s ConCoin Booty`,C.gold).addFields(
+        {name:'💰 Pending Payout', value:`**${(booty.pending_grant||0).toLocaleString()} ConCoins**`, inline:true},
+        {name:'📊 Total Earned',  value:`**${(booty.total_earned||0).toLocaleString()} ConCoins**`,  inline:true},
+        {name:'✅ Total Granted', value:`**${(booty.total_granted||0).toLocaleString()} ConCoins**`, inline:true},
+        {name:'🎯 Trivia Wins',   value:`**${booty.trivia_wins||0}** correct answers`,               inline:true},
+        {name:'⏰ Last Win',      value:booty.last_won?`<t:${Math.floor(new Date(booty.last_won).getTime()/1000)}:R>`:'Never', inline:true},
+        {name:'💸 Last Granted',  value:booty.last_granted_at?`<t:${Math.floor(new Date(booty.last_granted_at).getTime()/1000)}:R> by ${booty.last_granted_by||'?'}`:'Never', inline:false},
+      ).setFooter({...FT,text:'Use /trivia to earn more · Admins use /grant-concoins to pay out'})] });
+    }
+ 
+    if (cmd==='concoin-leaderboard') {
+      const rows=await getConcoinLeaderboard(10);
+      if (!rows.length) return interaction.editReply('📭 No trivia winners yet! Use `/trivia` to be the first!');
+      const medals=['👑','🥇','🥈','🥉','💠','💠','💠','💠','💠','💠'];
+      const lines=rows.map((r,i)=>`${medals[i]||`**${i+1}.**`} **${r.discord_tag||r.discord_id}**\n> 🪙 **${(r.total_earned||0).toLocaleString()} CC** earned · 🎯 ${r.trivia_wins||0} wins · 💰 ${(r.pending_grant||0).toLocaleString()} pending`).join('\n\n');
+      return interaction.editReply({ embeds:[base('🪙 ConCoin Trivia Leaderboard',C.gold).setDescription(`\`⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿\`\n> ◈ *Top ConCoin earners through trivia*\n\`⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒\`\n\n${lines}\n\n\`━━━━━━━━━━━━━━━━━━━━━━━━━━━━\`\n-# Each correct /trivia earns ${CONCOIN_TRIVIA_REWARD.toLocaleString()} ConCoins`).setFooter({...FT,text:'ConCoin Booty System v12.1'})] });
+    }
+ 
+    if (cmd==='grant-concoins') {
+      if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
+      const target=interaction.options.getUser('user'), confirm=interaction.options.getBoolean('confirm');
+      if (!confirm) return interaction.editReply('⚠️ You must set `confirm: True` to execute the grant.');
+      const booty=await getConcoinBooty(target.id);
+      if (!booty||booty.pending_grant<=0) return interaction.editReply(`⚠️ **${target.username}** has no pending ConCoin booty to grant.`);
+      const amount=booty.pending_grant;
+      let ubResult=null, ubError=null;
+      try { ubResult=await grantToUnbelievaBoat(interaction.guildId, target.id, amount); } catch (e) { ubError=e.message; }
+      await clearPendingBooty(target.id, amount, interaction.user.username);
+      if (ubResult) {
+        try { await target.send({ embeds:[base('💰 ConCoin Booty Paid Out!',C.gr).setDescription(`Your trivia winnings have been transferred to your UnbelievaBoat wallet!\n\nKeep playing \`/trivia\` to earn more!`).addFields({name:'🪙 Amount',value:`**${amount.toLocaleString()} ConCoins**`,inline:true},{name:'👮 By',value:interaction.user.username,inline:true}).setFooter({...FT,text:'AEGIS ConCoin Booty System'})] }); } catch {}
+        return interaction.editReply({ embeds:[base('✅ ConCoin Booty Granted!',C.gr).addFields(
+          {name:'👤 Player', value:`**${target.username}**`, inline:true},
+          {name:'💰 Amount', value:`**${amount.toLocaleString()} ConCoins**`, inline:true},
+          {name:'📡 UB API', value:'✅ Success', inline:false},
+          {name:'💳 New Cash', value:`${ubResult?.cash?.toLocaleString()||'?'}`, inline:true},
+        ).setFooter({...FT,text:`Granted by ${interaction.user.username}`})] });
+      } else {
+        return interaction.editReply({ embeds:[base('⚠️ Booty Cleared — UB API Failed',C.am).setDescription(`Booty cleared from database but UnbelievaBoat API call failed.\n\n**Please grant manually in UB.**`).addFields(
+          {name:'👤 Player', value:`**${target.username}** (\`${target.id}\`)`, inline:false},
+          {name:'💰 Amount', value:`**${amount.toLocaleString()} ConCoins**`, inline:true},
+          {name:'❌ UB Error', value:`\`${ubError||'Unknown error'}\``, inline:false},
+          {name:'🔧 Fix', value:'Add UNBELIEVABOAT_API_TOKEN to Render env, or grant manually in UB dashboard.', inline:false},
+        )] });
+      }
+    }
+ 
+    if (cmd==='grant-concoins-manual') {
+      if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
+      const target=interaction.options.getUser('user'), amount=interaction.options.getInteger('amount'), reason=interaction.options.getString('reason')||'Admin manual grant';
+      let ubResult=null, ubError=null;
+      try { ubResult=await grantToUnbelievaBoat(interaction.guildId, target.id, amount); } catch (e) { ubError=e.message; }
+      if (ubResult) {
+        return interaction.editReply({ embeds:[base('✅ Manual ConCoin Grant Success',C.gr).addFields(
+          {name:'👤 Player', value:`**${target.username}**`, inline:true},
+          {name:'💰 Amount', value:`**${amount.toLocaleString()} ConCoins**`, inline:true},
+          {name:'📋 Reason', value:reason, inline:false},
+          {name:'💳 New Cash', value:`${ubResult?.cash?.toLocaleString()||'?'}`, inline:true},
+        )] });
+      } else {
+        return interaction.editReply({ embeds:[base('❌ UB API Grant Failed',C.rd).addFields(
+          {name:'👤 Player', value:target.username, inline:true},
+          {name:'💰 Amount', value:amount.toLocaleString(), inline:true},
+          {name:'❌ Error', value:`\`${ubError||'Unknown'}\``, inline:false},
+        )] });
+      }
+    }
+ 
+    // ════════════════════════════════════════════════════════════════
+    // HELP & PING
+    // ════════════════════════════════════════════════════════════════
     if (cmd==='help') {
-      return interaction.editReply({ embeds:[base('📖 AEGIS v12.0 Command Reference',C.pl)
-        .addFields(
-          {name:'🧠 AI',       value:'`/aegis` `/ask` `/forget` `/ai-cost` `/aegis-persona` `/summarize` `/compare` `/boss-guide` `/base-tips`', inline:false},
-          {name:'💎 Economy',  value:'`/wallet` `/weekly` `/streaks` `/leaderboard` `/give` `/clvsd grant|deduct|check|set|reset|top|stats|usage|bulk-grant|audit|digest`', inline:false},
-          {name:'🛍️ Shop',     value:'`/order` (w/ auto-deduct) `/fulfill` `/shard` `/shop`', inline:false},
-          {name:'🗺️ Servers',  value:'`/servers` `/map` `/monitor` `/crossplay` `/transfer-guide`', inline:false},
-          {name:'ℹ️ Info',     value:'`/info` `/rules` `/council` `/rates` `/mods` `/wipe` `/set-wipe` `/tip` `/dino` `/trivia` `/patreon`', inline:false},
-          {name:'🤝 Community',value:'`/profile` `/rank` `/rep` `/trade` `/coords` `/report` `/tribe register|lookup|my`', inline:false},
-          {name:'🗳️ Events',   value:'`/giveaway` (w/ shard entry) `/endgiveaway` `/vote` `/announce` `/event` `/poll`', inline:false},
-          {name:'🔨 Mod',      value:'`/warn` `/warn-history` `/warn-clear` `/ban` `/timeout` `/modlog` `/role` `/purge` `/lock` `/slowmode` `/ticket` `/watchtower`', inline:false},
-          {name:'📚 Knowledge',value:'`/know add|list|delete`', inline:false},
-          {name:'🔧 Utils',    value:'`/roll` `/coinflip` `/calc` `/remind` `/whois` `/serverinfo` `/ping`', inline:false},
-        ).setFooter({...FT,text:'AEGIS v12.0 Sovereign · Anthropic Haiku Primary · Groq Fallback'})] });
+      return interaction.editReply({ embeds:[base('📖 AEGIS v12.1 Command Reference',C.pl).addFields(
+        {name:'🧠 AI',       value:'`/aegis` `/ask` `/forget` `/ai-cost` `/aegis-persona` `/summarize` `/compare` `/boss-guide` `/base-tips`',inline:false},
+        {name:'💎 Economy',  value:'`/wallet` `/weekly` `/streaks` `/leaderboard` `/give` `/clvsd grant|deduct|check|set|reset|top|stats|usage|bulk-grant|audit|digest`',inline:false},
+        {name:'🛍️ Shop',     value:'`/order` (w/ auto-deduct) `/fulfill` `/shard` `/shop`',inline:false},
+        {name:'🪙 ConCoins', value:'`/trivia` (win 15,000 ConCoins!) `/concoin-booty` `/concoin-leaderboard` `/grant-concoins` `/grant-concoins-manual`',inline:false},
+        {name:'🗺️ Servers',  value:'`/servers` `/map` `/monitor` `/crossplay` `/transfer-guide`',inline:false},
+        {name:'ℹ️ Info',     value:'`/info` `/rules` `/council` `/rates` `/mods` `/wipe` `/set-wipe` `/tip` `/dino` `/patreon`',inline:false},
+        {name:'🤝 Community',value:'`/profile` `/rank` `/rep` `/trade` `/coords` `/report` `/tribe register|lookup|my`',inline:false},
+        {name:'🗳️ Events',   value:'`/giveaway` `/endgiveaway` `/vote` `/announce` `/event` `/poll`',inline:false},
+        {name:'🔨 Mod',      value:'`/warn` `/warn-history` `/warn-clear` `/ban` `/timeout` `/modlog` `/role` `/purge` `/lock` `/slowmode` `/ticket` `/watchtower`',inline:false},
+        {name:'📚 Knowledge',value:'`/know add|list|delete`',inline:false},
+        {name:'🔧 Utils',    value:'`/roll` `/coinflip` `/calc` `/remind` `/whois` `/serverinfo` `/ping`',inline:false},
+      ).setFooter({...FT,text:'AEGIS v12.1 Sovereign · Anthropic Haiku 4.5 Primary · Groq Fallback'})] });
     }
-
+ 
     if (cmd==='ping') {
       return interaction.editReply({ embeds:[P.PingPanel(bot.ws.ping,process.uptime(),Math.round(process.memoryUsage().heapUsed/1024/1024),!!anthropic,!!groq,!!(sb&&sbOk()))] });
     }
-
+ 
     // ════════════════════════════════════════════════════════════════
-    // COMMUNITY COMMANDS
+    // COMMUNITY
     // ════════════════════════════════════════════════════════════════
     if (cmd==='profile') {
-      const target=interaction.options.getUser('user')||interaction.user;
-      const member=interaction.guild.members.cache.get(target.id);
+      const target=interaction.options.getUser('user')||interaction.user, member=interaction.guild.members.cache.get(target.id);
       const w=sb?await getWallet(target.id,target.username).catch(()=>null):null;
-      const emb=base(`🎖️ ${target.username}'s Profile`,C.pl).setThumbnail(target.displayAvatarURL({size:128}))
-        .addFields({name:'🎭 Joined',value:member?.joinedAt?`<t:${Math.floor(member.joinedAt.getTime()/1000)}:D>`:'Unknown',inline:true},{name:'📅 Discord Since',value:`<t:${Math.floor(target.createdAt.getTime()/1000)}:D>`,inline:true});
+      const emb=base(`🎖️ ${target.username}'s Profile`,C.pl).setThumbnail(target.displayAvatarURL({size:128})).addFields({name:'🎭 Joined',value:member?.joinedAt?`<t:${Math.floor(member.joinedAt.getTime()/1000)}:D>`:'Unknown',inline:true},{name:'📅 Discord Since',value:`<t:${Math.floor(target.createdAt.getTime()/1000)}:D>`,inline:true});
       if (w) emb.addFields({name:'💎 ClaveShards',value:`${(w.wallet_balance||0).toLocaleString()} wallet · ${(w.bank_balance||0).toLocaleString()} bank`,inline:false},{name:'🔥 Streak',value:`Week ${w.daily_streak||0}`,inline:true},{name:'📈 Earned',value:`${(w.lifetime_earned||0).toLocaleString()}`,inline:true});
       return interaction.editReply({ embeds:[emb] });
     }
-
+ 
     if (cmd==='rank') {
       try {
         const lb=await getLeaderboard(100), pos=lb.findIndex(w=>w.discord_id===interaction.user.id)+1, w=lb.find(w=>w.discord_id===interaction.user.id);
@@ -1759,48 +1706,42 @@ bot.on(Events.InteractionCreate, async interaction => {
         return interaction.editReply({ embeds:[base(`📊 ${interaction.user.username}'s Rank`,C.cy).addFields({name:'🏆 Rank',value:pos?`#${pos} of ${lb.length}`:'>100',inline:true},{name:'💎 Wallet',value:`${(w.wallet_balance||0).toLocaleString()}`,inline:true})] });
       } catch { return interaction.editReply({ embeds:[base('📊 Rank',C.cy).setDescription('_Rank unavailable._')] }); }
     }
-
+ 
     if (cmd==='rep') {
       const target=interaction.options.getUser('user'), reason=interaction.options.getString('reason')||'No reason given';
       if (target.id===interaction.user.id) return interaction.editReply('⚠️ You cannot rep yourself!');
       return interaction.editReply({ embeds:[base('⭐ Reputation Given',C.gold).setDescription(`${interaction.user} gave **+1 rep** to ${target}\n*"${reason}"*`)] });
     }
-
+ 
     if (cmd==='trade') {
       const offering=interaction.options.getString('offering'), looking=interaction.options.getString('looking-for'), server=interaction.options.getString('server')||'Any';
       return interaction.editReply({ embeds:[base('🤝 Trade Post',C.gold).setDescription(`Posted by **${interaction.user.username}**`).addFields({name:'📤 Offering',value:offering,inline:true},{name:'📥 Looking For',value:looking,inline:true},{name:'🗺️ Server',value:server,inline:true}).setFooter({...FT,text:'DM the poster to trade • Use /report for scams'})] });
     }
-
+ 
     if (cmd==='coords') {
       const location=interaction.options.getString('location'), map=interaction.options.getString('map')||'Unknown';
       return interaction.editReply({ embeds:[base('📍 Coordinates Shared',C.cy).setDescription(`**${interaction.user.username}** shared a location:`).addFields({name:'📍 Location',value:location,inline:true},{name:'🗺️ Map',value:map,inline:true})] });
     }
-
+ 
     if (cmd==='whois') {
       const target=interaction.options.getUser('user'), member=interaction.guild.members.cache.get(target.id);
-      return interaction.editReply({ embeds:[base(`🔍 ${target.username}`,C.cy).setThumbnail(target.displayAvatarURL({size:128}))
-        .addFields(
-          {name:'🆔 ID',     value:target.id, inline:true},
-          {name:'📅 Created',value:`<t:${Math.floor(target.createdAt.getTime()/1000)}:D>`, inline:true},
-          {name:'🎭 Joined', value:member?.joinedAt?`<t:${Math.floor(member.joinedAt.getTime()/1000)}:D>`:'Not in server', inline:true},
-          {name:'🎨 Roles',  value:member?.roles.cache.filter(r=>r.name!=='@everyone').map(r=>`<@&${r.id}>`).join(' ')||'None', inline:false},
-        )] });
+      return interaction.editReply({ embeds:[base(`🔍 ${target.username}`,C.cy).setThumbnail(target.displayAvatarURL({size:128})).addFields({name:'🆔 ID',value:target.id,inline:true},{name:'📅 Created',value:`<t:${Math.floor(target.createdAt.getTime()/1000)}:D>`,inline:true},{name:'🎭 Joined',value:member?.joinedAt?`<t:${Math.floor(member.joinedAt.getTime()/1000)}:D>`:'Not in server',inline:true},{name:'🎨 Roles',value:member?.roles.cache.filter(r=>r.name!=='@everyone').map(r=>`<@&${r.id}>`).join(' ')||'None',inline:false})] });
     }
-
+ 
     if (cmd==='serverinfo') {
       const g=interaction.guild;
       return interaction.editReply({ embeds:[P.StatsPanel(g,g.memberCount,Math.round(g.memberCount*0.3),g.channels.cache.size,g.roles.cache.size,g.premiumSubscriptionCount||0)] });
     }
-
+ 
     if (cmd==='report') {
       const issue=interaction.options.getString('issue'), player=interaction.options.getString('player')||'Not specified';
       const emb=base('🚨 Report Received',C.rd).setDescription(`Report filed by **${interaction.user.username}**`).addFields({name:'📋 Issue',value:issue,inline:false},{name:'👤 Player',value:player,inline:true},{name:'📅 Time',value:`<t:${Math.floor(Date.now()/1000)}:F>`,inline:true});
       if (sb&&sbOk()) try { await sb.from('aegis_reports').insert({ guild_id:interaction.guildId, reporter_id:interaction.user.id, reporter_tag:interaction.user.username, issue, player, created_at:new Date().toISOString() }); } catch {}
       return interaction.editReply({ embeds:[emb.setFooter({...FT,text:'A Council member will review your report soon.'})] });
     }
-
+ 
     // ════════════════════════════════════════════════════════════════
-    // TRIBE COMMANDS
+    // TRIBE
     // ════════════════════════════════════════════════════════════════
     if (cmd==='tribe') {
       const sub=interaction.options.getSubcommand();
@@ -1812,7 +1753,7 @@ bot.on(Events.InteractionCreate, async interaction => {
       }
       if (sub==='lookup') {
         const query=interaction.options.getString('query');
-        try { const tribes=await lookupTribe(interaction.guildId,query); if (!tribes.length) return interaction.editReply(`📭 No tribe found matching **${query}**.`); const lines=tribes.map(t=>`**${t.tribe_name}** · *${t.server}* · Owner: <@${t.owner_id}>`).join('\n'); return interaction.editReply({ embeds:[base(`🔍 Tribe Lookup: ${query}`,C.cy).setDescription(lines)] }); }
+        try { const tribes=await lookupTribe(interaction.guildId,query); if (!tribes.length) return interaction.editReply(`📭 No tribe found matching **${query}**.`); return interaction.editReply({ embeds:[base(`🔍 Tribe Lookup: ${query}`,C.cy).setDescription(tribes.map(t=>`**${t.tribe_name}** · *${t.server}* · Owner: <@${t.owner_id}>`).join('\n'))] }); }
         catch (e) { return interaction.editReply(`⚠️ ${e.message}`); }
       }
       if (sub==='my') {
@@ -1823,9 +1764,9 @@ bot.on(Events.InteractionCreate, async interaction => {
         return interaction.editReply({ embeds:[base(`🏕️ ${data.tribe_name}`,C.cy).addFields({name:'🗺️ Server',value:data.server,inline:true},{name:'👥 Members',value:members.length?members.join(', '):'Just you',inline:false})] });
       }
     }
-
+ 
     // ════════════════════════════════════════════════════════════════
-    // EVENT / ANNOUNCE COMMANDS
+    // EVENTS / ANNOUNCE
     // ════════════════════════════════════════════════════════════════
     if (cmd==='announce') {
       if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
@@ -1833,14 +1774,14 @@ bot.on(Events.InteractionCreate, async interaction => {
       await interaction.channel.send({ content:ping?'@everyone':null, embeds:[P.AnnouncementPanel(title,message,interaction.user.username)] });
       return interaction.editReply('✅ Announcement posted.');
     }
-
+ 
     if (cmd==='event') {
       if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
       const title=interaction.options.getString('title'), desc=interaction.options.getString('description'), date=interaction.options.getString('date')||'TBA', ping=interaction.options.getBoolean('ping')??false;
       await interaction.channel.send({ content:ping?'@everyone':null, embeds:[P.EventPanel(title,desc,date,interaction.user.username)] });
       return interaction.editReply('✅ Event announcement posted.');
     }
-
+ 
     if (cmd==='giveaway') {
       if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
       const prize=interaction.options.getString('prize'), duration=interaction.options.getInteger('duration'), winners=interaction.options.getInteger('winners')||1, shardCost=interaction.options.getInteger('shard-entry')||0;
@@ -1853,7 +1794,7 @@ bot.on(Events.InteractionCreate, async interaction => {
       setTimeout(()=>drawGiveaway(msg.id,interaction.guildId,bot), duration*60*1000);
       return interaction.editReply(`✅ Giveaway started! Ends <t:${Math.floor(endTime/1000)}:R>.`);
     }
-
+ 
     if (cmd==='endgiveaway') {
       if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
       const msgId=interaction.options.getString('messageid');
@@ -1861,14 +1802,13 @@ bot.on(Events.InteractionCreate, async interaction => {
       await drawGiveaway(msgId,interaction.guildId,bot);
       return interaction.editReply('✅ Giveaway ended.');
     }
-
+ 
     if (cmd==='vote') {
       if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
       const question=interaction.options.getString('question');
       const opts=interaction.options.getString('options').split('|').map(o=>o.trim()).filter(Boolean).slice(0,4);
       if (opts.length<2) return interaction.editReply('⚠️ Need at least 2 options separated by |');
-      const duration=interaction.options.getInteger('duration')||60;
-      const endTime=Date.now()+duration*60*1000;
+      const duration=interaction.options.getInteger('duration')||60, endTime=Date.now()+duration*60*1000;
       const votes=new Map(opts.map((_,i)=>[i,new Set()]));
       const components=[new ActionRowBuilder().addComponents(...opts.map((o,i)=>new ButtonBuilder().setCustomId(`vote_MSGID_${i}`).setLabel(`${i+1}. ${o.slice(0,40)}`).setStyle(ButtonStyle.Secondary)))];
       const lines=opts.map((o,i)=>`**${i+1}.** ${o}\n\`${'░'.repeat(20)}\` **0%** (0 votes)`).join('\n\n');
@@ -1885,9 +1825,9 @@ bot.on(Events.InteractionCreate, async interaction => {
         catch {} activeVotes.delete(msg.id);
       }, duration*60*1000);
     }
-
+ 
     // ════════════════════════════════════════════════════════════════
-    // MODERATION COMMANDS
+    // MODERATION
     // ════════════════════════════════════════════════════════════════
     if (cmd==='warn') {
       if (!isMod(interaction.member)) return interaction.editReply('⛔ Mod only.');
@@ -1898,14 +1838,14 @@ bot.on(Events.InteractionCreate, async interaction => {
       try { await (await target.createDM()).send({ embeds:[base(`⚠️ Warning in ${interaction.guild.name}`,C.gold).setDescription(`**Reason:** ${reason}\n\nPlease review the rules with \`/rules\`.`)] }); } catch {}
       return interaction.editReply({ embeds:[P.WarnPanel(target,reason,warns.length,interaction.user)] });
     }
-
+ 
     if (cmd==='warn-history') {
       if (!isMod(interaction.member)) return interaction.editReply('⛔ Mod only.');
       const target=interaction.options.getUser('user'), warns=await getWarns(interaction.guildId,target.id);
       if (!warns.length) return interaction.editReply(`✅ **${target.username}** has no warnings.`);
       return interaction.editReply({ embeds:[base(`📋 Warnings — ${target.username}`,C.rd).setDescription(warns.map((w,i)=>`**${i+1}.** ${w.reason}\n└ by **${w.issued_by_tag||'Unknown'}** · <t:${Math.floor(new Date(w.created_at).getTime()/1000)}:R>`).join('\n\n'))] });
     }
-
+ 
     if (cmd==='warn-clear') {
       if (!isMod(interaction.member)) return interaction.editReply('⛔ Mod only.');
       const target=interaction.options.getUser('user'), reason=interaction.options.getString('reason')||'Cleared by moderator';
@@ -1914,23 +1854,22 @@ bot.on(Events.InteractionCreate, async interaction => {
       await modLog(interaction.guild,'note',target,interaction.user,`Warnings cleared: ${reason}`);
       return interaction.editReply(`✅ All warnings cleared for **${target.username}**.`);
     }
-
+ 
     if (cmd==='modlog') {
       if (!isMod(interaction.member)) return interaction.editReply('⛔ Mod only.');
-      const count=interaction.options.getInteger('count')||10;
-      const entries=recentModActions.slice(0,count);
+      const count=interaction.options.getInteger('count')||10, entries=recentModActions.slice(0,count);
       if (!entries.length) return interaction.editReply('📭 No recent mod actions recorded in memory.');
       const lines=entries.map(e=>`\`${e.action.toUpperCase().padEnd(10)}\` **${e.targetTag}** · *${e.reason?.slice(0,50)||'—'}* · <t:${Math.floor(e.ts/1000)}:R> · by ${e.actorTag}`).join('\n');
       return interaction.editReply({ embeds:[base('📋 Recent Mod Actions',C.rd).setDescription(lines).setFooter({...FT,text:'In-memory log · Resets on bot restart'})] });
     }
-
+ 
     if (cmd==='ban') {
       if (!interaction.member.permissions.has(PermissionFlagsBits.BanMembers)) return interaction.editReply('⛔ Ban Members required.');
       const target=interaction.options.getUser('user'), reason=interaction.options.getString('reason');
       try { await interaction.guild.members.ban(target.id,{reason:`${interaction.user.username}: ${reason}`}); await modLog(interaction.guild,'ban',target,interaction.user,reason); return interaction.editReply({ embeds:[base(`🔨 Banned: ${target.username}`,C.rd).setDescription(`**Reason:** ${reason}`)] }); }
       catch (e) { return interaction.editReply(`⚠️ Could not ban: ${e.message}`); }
     }
-
+ 
     if (cmd==='timeout') {
       if (!isMod(interaction.member)) return interaction.editReply('⛔ Mod only.');
       const target=interaction.options.getUser('user'), duration=interaction.options.getString('duration'), reason=interaction.options.getString('reason')||'No reason';
@@ -1939,14 +1878,14 @@ bot.on(Events.InteractionCreate, async interaction => {
       try { const member=interaction.guild.members.cache.get(target.id); if (!member) return interaction.editReply('⚠️ Member not in server.'); await member.timeout(ms,reason); await modLog(interaction.guild,'timeout',target,interaction.user,reason,{Duration:duration}); return interaction.editReply({ embeds:[base(`⏰ Timeout: ${target.username}`,C.gold).addFields({name:'⏱️ Duration',value:duration,inline:true},{name:'📋 Reason',value:reason,inline:true})] }); }
       catch (e) { return interaction.editReply(`⚠️ Timeout failed: ${e.message}`); }
     }
-
+ 
     if (cmd==='role') {
       if (!interaction.member.permissions.has(PermissionFlagsBits.ManageRoles)) return interaction.editReply('⛔ Manage Roles required.');
       const target=interaction.options.getUser('user'), role=interaction.options.getRole('role'), action=interaction.options.getString('action');
       try { const m=interaction.guild.members.cache.get(target.id); if (!m) return interaction.editReply('⚠️ Member not found.'); if (action==='add') { await m.roles.add(role); return interaction.editReply(`✅ Added <@&${role.id}> to **${target.username}**.`); } else { await m.roles.remove(role); return interaction.editReply(`✅ Removed <@&${role.id}> from **${target.username}**.`); } }
       catch (e) { return interaction.editReply(`⚠️ Role change failed: ${e.message}`); }
     }
-
+ 
     if (cmd==='ticket') {
       if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
       const row=new ActionRowBuilder().addComponents(
@@ -1956,7 +1895,7 @@ bot.on(Events.InteractionCreate, async interaction => {
       await interaction.channel.send({ embeds:[P.TicketPanel()], components:[row] });
       return interaction.editReply('✅ Ticket panel posted.');
     }
-
+ 
     if (cmd==='purge') {
       if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
       const count=interaction.options.getInteger('count'), user=interaction.options.getUser('user');
@@ -1968,37 +1907,37 @@ bot.on(Events.InteractionCreate, async interaction => {
         return interaction.editReply(`✅ Deleted **${toDelete.length}** message${toDelete.length!==1?'s':''}${user?` from **${user.username}**`:''}.`);
       } catch (e) { return interaction.editReply(`⚠️ ${e.message}`); }
     }
-
+ 
     if (cmd==='slowmode') {
       if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
       const seconds=interaction.options.getInteger('seconds');
       try { await interaction.channel.setRateLimitPerUser(seconds); return interaction.editReply(seconds===0?'✅ Slowmode disabled.':`✅ Slowmode set to **${seconds}s**.`); }
       catch (e) { return interaction.editReply(`⚠️ ${e.message}`); }
     }
-
+ 
     if (cmd==='lock') {
       if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
       const action=interaction.options.getString('action'), reason=interaction.options.getString('reason')||'No reason';
       try { const lock=action==='lock'; await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone,{SendMessages:lock?false:null}); return interaction.editReply(`${lock?'🔒':'🔓'} Channel **${lock?'locked':'unlocked'}**. Reason: ${reason}`); }
       catch (e) { return interaction.editReply(`⚠️ ${e.message}`); }
     }
-
+ 
     // ════════════════════════════════════════════════════════════════
-    // KNOWLEDGE COMMANDS
+    // KNOWLEDGE
     // ════════════════════════════════════════════════════════════════
     if (cmd==='know') {
       if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
       if (!sb) return interaction.editReply('⚠️ Supabase not configured.');
       const sub=interaction.options.getSubcommand();
       try {
-        if (sub==='add')   { const category=interaction.options.getString('category'),title=interaction.options.getString('title'),content=interaction.options.getString('content'),key=`${category}_${Date.now().toString(36)}`; const { error } = await sb.from('aegis_knowledge').upsert({category,key,title,content,added_by:interaction.user.username,updated_at:new Date().toISOString()},{onConflict:'key'}); if (error) throw new Error(error.message); _kCache=null; return interaction.editReply(`✅ Added knowledge entry **${title}** in **${category}**.`); }
-        if (sub==='list')  { const category=interaction.options.getString('category'); let query=sb.from('aegis_knowledge').select('category,key,title,added_by').order('category').limit(30); if (category) query=query.eq('category',category); const { data, error } = await query; if (error) throw new Error(error.message); if (!data?.length) return interaction.editReply('📭 No knowledge entries.'); return interaction.editReply({ embeds:[base('📚 Knowledge Base',C.cy).setDescription(data.map(r=>`**[${r.category}]** \`${r.key}\` · ${r.title} · *by ${r.added_by||'Unknown'}*`).join('\n'))] }); }
-        if (sub==='delete'){ const key=interaction.options.getString('key'); const { error } = await sb.from('aegis_knowledge').delete().eq('key',key); if (error) throw new Error(error.message); _kCache=null; return interaction.editReply(`✅ Deleted knowledge entry \`${key}\``); }
+        if (sub==='add')    { const category=interaction.options.getString('category'),title=interaction.options.getString('title'),content=interaction.options.getString('content'),key=`${category}_${Date.now().toString(36)}`; const { error } = await sb.from('aegis_knowledge').upsert({category,key,title,content,added_by:interaction.user.username,updated_at:new Date().toISOString()},{onConflict:'key'}); if (error) throw new Error(error.message); _kCache=null; return interaction.editReply(`✅ Added knowledge entry **${title}** in **${category}**.`); }
+        if (sub==='list')   { const category=interaction.options.getString('category'); let query=sb.from('aegis_knowledge').select('category,key,title,added_by').order('category').limit(30); if (category) query=query.eq('category',category); const { data, error } = await query; if (error) throw new Error(error.message); if (!data?.length) return interaction.editReply('📭 No knowledge entries.'); return interaction.editReply({ embeds:[base('📚 Knowledge Base',C.cy).setDescription(data.map(r=>`**[${r.category}]** \`${r.key}\` · ${r.title} · *by ${r.added_by||'Unknown'}*`).join('\n'))] }); }
+        if (sub==='delete') { const key=interaction.options.getString('key'); const { error } = await sb.from('aegis_knowledge').delete().eq('key',key); if (error) throw new Error(error.message); _kCache=null; return interaction.editReply(`✅ Deleted knowledge entry \`${key}\``); }
       } catch (e) { return interaction.editReply(`⚠️ ${e.message}`); }
     }
-
+ 
     // ════════════════════════════════════════════════════════════════
-    // UTILITY COMMANDS
+    // UTILS
     // ════════════════════════════════════════════════════════════════
     if (cmd==='roll') {
       const notation=(interaction.options.getString('dice')||'d6').toLowerCase().replace(/\s/g,'');
@@ -2009,18 +1948,18 @@ bot.on(Events.InteractionCreate, async interaction => {
       const sum=rolls.reduce((a,b)=>a+b,0)+mod;
       return interaction.editReply({ embeds:[P.RollPanel(notation,rolls,sum,mod)] });
     }
-
+ 
     if (cmd==='coinflip') {
       const result=Math.random()<0.5;
       return interaction.editReply({ embeds:[base(`🪙 ${result?'Heads':'Tails'}!`,C.gold).setDescription(`The coin landed on **${result?'🌕 Heads':'🌑 Tails'}**!`)] });
     }
-
+ 
     if (cmd==='calc') {
       const expr=interaction.options.getString('expression');
       try { const san=expr.replace(/[^0-9+\-*/().% ^]/g,''); if (!san) return interaction.editReply('⚠️ Invalid expression.'); const result=Function(`'use strict'; return (${san.replace(/\^/g,'**')})`)(); if (!isFinite(result)) return interaction.editReply('⚠️ Result not finite.'); return interaction.editReply({ embeds:[base('🔢 Calculator',C.cy).addFields({name:'Expression',value:`\`${expr}\``,inline:true},{name:'Result',value:`**${result.toLocaleString()}**`,inline:true})] }); }
       catch { return interaction.editReply('⚠️ Invalid expression.'); }
     }
-
+ 
     if (cmd==='remind') {
       const message=interaction.options.getString('message'), timeStr=interaction.options.getString('time');
       const parseTime=s=>{ const n=parseFloat(s); if(s.endsWith('d')) return n*86400000; if(s.endsWith('h')) return n*3600000; if(s.endsWith('m')) return n*60000; return null; };
@@ -2033,7 +1972,7 @@ bot.on(Events.InteractionCreate, async interaction => {
         catch { const ch=interaction.channel; if (ch) await ch.send({content:`<@${interaction.user.id}>`,embeds:[P.ReminderFirePanel(message)]}).catch(()=>{}); }
       }, ms);
     }
-
+ 
     if (cmd==='poll') {
       if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
       const opts=interaction.options.getString('options').split('|').map(o=>o.trim()).filter(Boolean).slice(0,10);
@@ -2042,124 +1981,131 @@ bot.on(Events.InteractionCreate, async interaction => {
       const msg=await interaction.editReply({ embeds:[P.PollPanel(interaction.options.getString('question'),opts,interaction.user.username)], fetchReply:true });
       for (let j=0; j<opts.length; j++) { try { await msg.react(L[j]); } catch {} }
     }
-
+ 
   } catch (e) {
     console.error(`❌ /${interaction.commandName}:`, e.message);
     try { await interaction.editReply(`⚠️ Error: ${e.message.slice(0,200)}`); } catch {}
   }
 });
-
+ 
 // ══════════════════════════════════════════════════════════════════════
 // MESSAGE CREATE — Auto-reply + Auto-mod + Trivia answers
 // ══════════════════════════════════════════════════════════════════════
 bot.on(Events.MessageCreate, async msg => {
   if (msg.author.bot) return;
-
-  // Auto-mod
   await runAutoMod(msg);
-
-  // TRIVIA answer check
-  const trivia=activeTrivias.get(msg.channelId);
-  if (trivia && Date.now()<trivia.expiresAt) {
-    const answer=msg.content.toLowerCase().trim();
+ 
+  // ── TRIVIA ANSWER CHECK — awards 15,000 ConCoins ──────────────────
+  const trivia = activeTrivias.get(msg.channelId);
+  if (trivia && Date.now() < trivia.expiresAt) {
+    const answer = msg.content.toLowerCase().trim();
     if (answer.includes(trivia.a.toLowerCase())) {
       activeTrivias.delete(msg.channelId);
-      // Award 1 shard
-      try { await grantShards(msg.author.id,msg.author.username,1,'Trivia winner','SYSTEM','AEGIS Trivia'); }
-      catch {}
-      await msg.reply(`🎯 **Correct!** The answer was **${trivia.a}**! You earned **1 ClaveShard** 💎, <@${msg.author.id}>!`);
+      let booty = null;
+      try { booty = await addConcoinBooty(msg.author.id, msg.author.username, CONCOIN_TRIVIA_REWARD, 'Trivia Win'); }
+      catch (e) { console.error('[Trivia Booty]', e.message); }
+      const pending = (booty?.pending_grant || CONCOIN_TRIVIA_REWARD).toLocaleString();
+      const total   = (booty?.total_earned  || CONCOIN_TRIVIA_REWARD).toLocaleString();
+      const wins    = booty?.trivia_wins || 1;
+      await msg.reply(
+        `🎯 **CORRECT!** The answer was **${trivia.a}**!\n` +
+        `> 🪙 **+${CONCOIN_TRIVIA_REWARD.toLocaleString()} ConCoins** added to your booty!\n` +
+        `> 💰 Pending payout: **${pending} ConCoins** · Total earned: **${total}** · Wins: **${wins}**\n` +
+        `-# Use \`/concoin-booty\` to check · Admins use \`/grant-concoins\` to pay out to UB`
+      );
       return;
     }
   }
-
-  // AEGIS channel auto-reply
-  if (!AEGIS_CHANNEL_ID||msg.channelId!==AEGIS_CHANNEL_ID) return;
-  const w=checkRate(msg.author.id,8000);
-  if (w) { const m=await msg.reply(`⏳ Retry in ${w}s.`).catch(()=>null); if (m) setTimeout(()=>m.delete().catch(()=>{}),4000); return; }
+ 
+  // ── AEGIS CHANNEL AUTO-REPLY ──────────────────────────────────────
+  if (!AEGIS_CHANNEL_ID || msg.channelId !== AEGIS_CHANNEL_ID) return;
+  const w = checkRate(msg.author.id, 8000);
+  if (w) { const m = await msg.reply(`⏳ Retry in ${w}s.`).catch(()=>null); if (m) setTimeout(()=>m.delete().catch(()=>{}), 4000); return; }
   msg.channel.sendTyping().catch(()=>{});
-  const r=await askAegis(msg.content,msg.author.id,'',msg.channelId);
-  msg.reply(r.slice(0,1990)).catch(()=>msg.channel.send(r.slice(0,1990)).catch(()=>{}));
+  const r = await askAegis(msg.content, msg.author.id, '', msg.channelId);
+  msg.reply(r.slice(0, 1990)).catch(()=>msg.channel.send(r.slice(0, 1990)).catch(()=>{}));
 });
-
+ 
 // ══════════════════════════════════════════════════════════════════════
 // WELCOME + AUTO-WALLET
 // ══════════════════════════════════════════════════════════════════════
 bot.on(Events.GuildMemberAdd, async member => {
   try {
     if (sb&&sbOk()) sb.from('aegis_wallets').upsert({ discord_id:member.id, discord_tag:member.user.username, updated_at:new Date().toISOString() },{ onConflict:'discord_id', ignoreDuplicates:true }).catch(()=>{});
-    const ch=member.guild.channels.cache.find(c=>c.name==='welcome'||c.name==='welcomes');
+    const ch = member.guild.channels.cache.find(c=>c.name==='welcome'||c.name==='welcomes');
     if (!ch) return;
-    await ch.send({ embeds:[P.WelcomePanel(member.user,member.guild.memberCount)] });
+    await ch.send({ embeds:[P.WelcomePanel(member.user, member.guild.memberCount)] });
   } catch (e) { console.error('❌ Welcome:', e.message); }
 });
-
-// Ban log
+ 
 bot.on(Events.GuildBanAdd, async ban => {
   try {
-    const audit=await ban.guild.fetchAuditLogs({type:22,limit:1}).catch(()=>null);
-    const entry=audit?.entries?.first();
-    const actor=entry?.executor||{id:'Unknown',username:'Unknown'};
-    await modLog(ban.guild,'ban',ban.user,actor,entry?.reason||'No reason from audit log');
+    const audit = await ban.guild.fetchAuditLogs({type:22, limit:1}).catch(()=>null);
+    const entry = audit?.entries?.first();
+    const actor = entry?.executor || {id:'Unknown', username:'Unknown'};
+    await modLog(ban.guild, 'ban', ban.user, actor, entry?.reason||'No reason from audit log');
   } catch {}
 });
-
+ 
 // ══════════════════════════════════════════════════════════════════════
 // HEALTH SERVER
 // ══════════════════════════════════════════════════════════════════════
 const STATUS = { ready:false, readyAt:null, reconnects:0 };
-
-const healthServer = http.createServer((req,res) => {
-  if (req.url==='/health'||req.url==='/') {
-    const up=STATUS.ready&&bot.ws.status===0;
-    const mem=process.memoryUsage();
-    res.writeHead(up?200:503,{'Content-Type':'application/json'});
+ 
+const healthServer = http.createServer((req, res) => {
+  if (req.url==='/health' || req.url==='/') {
+    const up = STATUS.ready && bot.ws.status===0;
+    const mem = process.memoryUsage();
+    res.writeHead(up?200:503, {'Content-Type':'application/json'});
     res.end(JSON.stringify({
-      status:       up?'ok':'degraded',
-      bot:          STATUS.ready?'ready':'not_ready',
-      ws:           bot.ws.status,
-      wsLatency:    bot.ws.ping,
-      uptime:       STATUS.readyAt?Math.floor((Date.now()-STATUS.readyAt)/1000)+'s':'0s',
-      reconnects:   STATUS.reconnects,
-      heapMB:       Math.round(mem.heapUsed/1024/1024),
-      ai_primary:   anthropic?'anthropic-haiku':'not_configured',
-      ai_fallback:  groq?'groq-llama3':'not_configured',
-      supabase:     sb?(sbOk()?'ok':'circuit_open'):'not_configured',
-      version:      'v12.0',
-      ts:           new Date().toISOString(),
+      status:     up?'ok':'degraded',
+      bot:        STATUS.ready?'ready':'not_ready',
+      ws:         bot.ws.status,
+      wsLatency:  bot.ws.ping,
+      uptime:     STATUS.readyAt?Math.floor((Date.now()-STATUS.readyAt)/1000)+'s':'0s',
+      reconnects: STATUS.reconnects,
+      heapMB:     Math.round(mem.heapUsed/1024/1024),
+      ai_primary: anthropic?'anthropic-haiku-4-5':'not_configured',
+      ai_fallback:groq?'groq-llama3':'not_configured',
+      supabase:   sb?(sbOk()?'ok':'circuit_open'):'not_configured',
+      ub_token:   UNBELIEVABOAT_API_TOKEN?'configured':'not_configured',
+      version:    'v12.1',
+      ts:         new Date().toISOString(),
     }));
   } else { res.writeHead(404); res.end('Not found'); }
 });
-healthServer.listen(BOT_PORT,()=>console.log(`💓 Health: :${BOT_PORT}`));
-
+healthServer.listen(BOT_PORT, ()=>console.log(`💓 Health: :${BOT_PORT}`));
+ 
 // ══════════════════════════════════════════════════════════════════════
 // PROCESS GUARDS
 // ══════════════════════════════════════════════════════════════════════
 const IGNORE=['Unknown interaction','Unknown Message','Missing Access','Cannot send messages','Unknown Channel'];
-process.on('unhandledRejection',r=>{ const m=r?.message||String(r); if (!IGNORE.some(e=>m.includes(e))) console.error('❌ Rejection:',m); });
-process.on('uncaughtException',(e,o)=>console.error(`❌ Exception [${o}]:`,e.message));
-process.on('SIGTERM',()=>{ STATUS.ready=false; healthServer.close(); bot.destroy(); setTimeout(()=>process.exit(0),3000); });
-process.on('SIGINT',()=>{ STATUS.ready=false; healthServer.close(); bot.destroy(); setTimeout(()=>process.exit(0),1000); });
-
+process.on('unhandledRejection', r=>{ const m=r?.message||String(r); if (!IGNORE.some(e=>m.includes(e))) console.error('❌ Rejection:',m); });
+process.on('uncaughtException',  (e,o)=>console.error(`❌ Exception [${o}]:`,e.message));
+process.on('SIGTERM', ()=>{ STATUS.ready=false; healthServer.close(); bot.destroy(); setTimeout(()=>process.exit(0),3000); });
+process.on('SIGINT',  ()=>{ STATUS.ready=false; healthServer.close(); bot.destroy(); setTimeout(()=>process.exit(0),1000); });
+ 
 // ══════════════════════════════════════════════════════════════════════
 // READY
 // ══════════════════════════════════════════════════════════════════════
 bot.once(Events.ClientReady, async () => {
   STATUS.ready=true; STATUS.readyAt=Date.now();
-  console.log(`🤖 AEGIS v12.0 SOVEREIGN — ${bot.user.tag}`);
+  console.log(`🤖 AEGIS v12.1 SOVEREIGN — ${bot.user.tag}`);
   console.log(`   AI Primary:  ${anthropic?'✅ Anthropic Haiku 4.5':'❌ NOT SET — add ANTHROPIC_API_KEY'}`);
   console.log(`   AI Fallback: ${groq?'✅ Groq Free':'⚠️ No Groq key'}`);
   console.log(`   Supabase:    ${sb?'✅':'❌'}`);
+  console.log(`   UB Token:    ${UNBELIEVABOAT_API_TOKEN?'✅ Loaded':'⚠️ Not set — /grant-concoins will fail'}`);
   console.log(`   Health:      :${BOT_PORT}`);
-  bot.user.setActivity('💎 /weekly | AEGIS v12.0 Sovereign', { type:3 });
+  bot.user.setActivity('🪙 /trivia | 15,000 ConCoins per win!', { type:3 });
   await registerCommands();
-
+ 
   if (!DISCORD_GUILD_ID) return;
   try {
     const guild=await bot.guilds.fetch(DISCORD_GUILD_ID).catch(()=>null); if (!guild) return;
     const statuses=await fetchServerStatuses().catch(()=>[]);
     const monCh=process.env.MONITOR_STATUS_CHANNEL_ID, monMsg=process.env.MONITOR_MESSAGE_ID;
     if (monCh&&monMsg) {
-      monitorState.set(DISCORD_GUILD_ID,{statusChannelId:monCh,messageId:monMsg});
+      monitorState.set(DISCORD_GUILD_ID,{statusChannelId:monCh, messageId:monMsg});
       const ch=await guild.channels.fetch(monCh).catch(()=>null);
       if (ch) {
         const embed=buildMonitorEmbed(statuses);
@@ -2169,7 +2115,7 @@ bot.once(Events.ClientReady, async () => {
     }
   } catch (e) { console.error('❌ Boot tasks:', e.message); }
 });
-
+ 
 // ══════════════════════════════════════════════════════════════════════
 // LOGIN WITH BACKOFF
 // ══════════════════════════════════════════════════════════════════════
@@ -2185,4 +2131,3 @@ async function login() {
   }
 }
 login();
-module.exports = bot;
