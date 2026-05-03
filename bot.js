@@ -722,20 +722,329 @@ const MAP_INFO = {
 
 // ARK TRIVIA
 const TRIVIA_QUESTIONS = [
-  { q:'What element do you need to fuel a Tek Replicator?', a:'element', hint:'It drops from bosses.' },
-  { q:'Which map is PvP on TheConclave Dominion?', a:'aberration', hint:'Underground biomes, Rock Drakes.' },
-  { q:'What is the max wild dino level on TheConclave?', a:'350', hint:'Five times the vanilla cap.' },
-  { q:'How many maps does TheConclave run?', a:'10', hint:'One of them is Patreon-only.' },
-  { q:'What is the weight capacity on TheConclave servers?', a:'1000000', hint:'One million.' },
-  { q:'Which mod prevents you from losing inventory on death?', a:'death inventory keeper', hint:'A very handy quality-of-life mod.' },
-  { q:'What is the name of the Patreon-exclusive map?', a:'amissa', hint:'Starts with A.' },
-  { q:'How many ClaveShards does a Tier 15 order cost?', a:'15', hint:'Matches the tier number.' },
-  { q:'What do you use to convert Soap to Element in ARK?', a:'tek replicator', hint:'Advanced crafting station.' },
-  { q:'What is the server multiplier for XP, harvesting, and taming?', a:'5', hint:'5x everything.' },
-  { q:'Which boss gives the Broodmother Lysrix trophy?', a:'broodmother', hint:'She is very web-happy.' },
-  { q:'What currency does TheConclave shop use?', a:'claveshards', hint:'Also called ClaveShards.' },
-  { q:'How many players max per TheConclave server?', a:'20', hint:'Two tens.' },
-  { q:'What payment platform can you use to donate CashApp-style?', a:'cashapp', hint:'$TheConclaveDominion.' },
+ 
+  // ══════════════════════════════════════════════════════════════════
+  // THECONCLAVE DEEP CUTS
+  // Only regulars and server veterans would know these
+  // Source: bot.js CORE_PROMPT, MONITOR_SERVERS, SHOP_TIERS, economy code
+  // ══════════════════════════════════════════════════════════════════
+ 
+  { q:'What is the Nitrado service ID for TheConclave\'s The Island server?', a:'18266152', hint:'TheConclave server registry.' },
+  { q:'What is the Nitrado service ID for TheConclave\'s Aberration server?', a:'18655529', hint:'The PvP map.' },
+  { q:'What is the Nitrado service ID for the Amissa server?', a:'18680162', hint:'Patreon-exclusive map ID.' },
+  { q:'What port does TheConclave\'s Volcano server run on?', a:'5050', hint:'IP is 217.114.196.59.' },
+  { q:'What port does TheConclave\'s Lost Colony server run on?', a:'5150', hint:'IP is 217.114.196.104.' },
+  { q:'What port does TheConclave\'s Astraeos server run on?', a:'5320', hint:'IP is 217.114.196.9.' },
+  { q:'What port does TheConclave\'s Scorched Earth server run on?', a:'5240', hint:'IP is 217.114.196.103.' },
+  { q:'What port does TheConclave\'s Valguero server run on?', a:'5090', hint:'IP is 85.190.136.141.' },
+  { q:'What port does TheConclave\'s Extinction server run on?', a:'6440', hint:'IP is 31.214.196.102.' },
+  { q:'What port does TheConclave\'s The Center server run on?', a:'5120', hint:'IP is 31.214.163.71.' },
+  { q:'What is the full IP and port for TheConclave\'s Amissa server?', a:'217.114.196.80:5180', hint:'Patreon-exclusive.' },
+  { q:'What is TheConclave\'s Discord Guild ID?', a:'1438103556610723922', hint:'Found in the bot config.' },
+  { q:'How many ClaveShards does 30,000 Element cost in the shop?', a:'15', hint:'Tier 15 item.' },
+  { q:'What Tier includes a Level 1000 Basilisk, Rock Elemental, or Karkinos?', a:'5', hint:'5 ClaveShard tier.' },
+  { q:'What Tier includes a Cryofridge and 120 cryopods?', a:'1', hint:'Base tier.' },
+  { q:'What Tier includes a 1x1 Behemoth Gate Expansion?', a:'20', hint:'Structure expansion tier.' },
+  { q:'What Tier gets you 1.6 million resources via Dedicated Storage refill?', a:'30', hint:'Most expensive standard tier.' },
+  { q:'What is the maximum number of Behemoth Gate Expansions per account?', a:'10', hint:'From the Tier 20 shop item.' },
+  { q:'How many ClaveShards does a Tek Suit Blueprint Set cost?', a:'10', hint:'Tier 10 item.' },
+  { q:'What Tier includes a Floating Platform?', a:'10', hint:'Tier 10 bundle.' },
+  { q:'What Tier gives you 50 Raw Shiny Essence?', a:'5', hint:'Five-shard tier.' },
+  { q:'How many ConCoins do you earn per correct trivia answer?', a:'15000', hint:'Fifteen thousand.' },
+  { q:'How many hours must pass between weekly ClaveShard claims?', a:'168', hint:'That is exactly 7 days in hours.' },
+  { q:'What is the AEGIS bot version shown at runtime?', a:'12', hint:'v12.0 Sovereign Edition.' },
+  { q:'What AI model does AEGIS use as its primary brain?', a:'claude haiku 4.5', hint:'Anthropic Haiku, not Sonnet.' },
+  { q:'What AI provider does AEGIS fall back to if Anthropic is unavailable?', a:'groq', hint:'Free Llama-based fallback.' },
+  { q:'What Groq model does AEGIS use for complex queries?', a:'llama-3.3-70b-versatile', hint:'The smarter free tier model.' },
+  { q:'What Groq model does AEGIS use for fast simple queries?', a:'llama-3.1-8b-instant', hint:'Fast and lightweight.' },
+  { q:'What is the Supabase project URL for TheConclave?', a:'idbexlahxuelfrcbhfqs.supabase.co', hint:'Found in the .env config.' },
+  { q:'How many messages does AEGIS keep in its per-user conversation memory?', a:'24', hint:'It trims history to 24 entries.' },
+  { q:'How often does the server monitor refresh live player counts?', a:'every 5 minutes', hint:'300 second interval.' },
+  { q:'What is the minimum interval between Nitrado channel renames?', a:'12 minutes', hint:'Prevents Discord rate-limiting.' },
+  { q:'How many Supabase circuit breaker failures before it opens?', a:'5', hint:'CB threshold in bot.js.' },
+  { q:'How long does the Supabase circuit breaker stay open before resetting?', a:'60 seconds', hint:'resetMs value.' },
+  { q:'What rate limit cooldown does AEGIS enforce per user on AI queries?', a:'5 seconds', hint:'Per user, not per channel.' },
+  { q:'What rate limit does the AEGIS auto-reply channel enforce per user?', a:'8 seconds', hint:'Slightly longer than slash commands.' },
+ 
+  // ══════════════════════════════════════════════════════════════════
+  // ARK BREEDING & MUTATION MECHANICS — HARD
+  // Source: ark.wiki.gg/wiki/Mutations, verified numbers
+  // ══════════════════════════════════════════════════════════════════
+ 
+  { q:'What is the exact percentage chance of getting at least one mutation when both parents are under 20 mutations?', a:'7.31', hint:'Calculated from three independent 2.5% checks.' },
+  { q:'Each mutation adds how many wild levels to the mutated stat?', a:'2', hint:'Every single time, exactly 2.' },
+  { q:'How many mutation "rolls" happen per breeding event?', a:'3', hint:'Three independent checks per clutch.' },
+  { q:'What happens to the mutation chance if one parent has over 20 combined mutations?', a:'it gets cut roughly in half', hint:'~45-55% reduction depending on stat.' },
+  { q:'If BOTH parents have over 20 combined mutations, what is the mutation chance?', a:'zero', hint:'Completely impossible once both exceed 20.' },
+  { q:'What is the default mutation level cap per stat in ARK Survival Ascended?', a:'255', hint:'Server configurable but 255 by default.' },
+  { q:'What percentage chance does the stronger stat have of being inherited by offspring?', a:'55', hint:'55% chance the higher stat wins.' },
+  { q:'In ASA, are mutations able to transfer independently from their associated stats?', a:'yes', hint:'Unlike ASE where they were tied together.' },
+  { q:'What is the maximum combined mutation counter before a parent can no longer SOURCE mutations?', a:'20', hint:'Matrilineal + Patrilineal total.' },
+  { q:'What is the imprint stat bonus breakdown on 100% imprint in ASA?', a:'20 percent base stats plus 30 percent damage and 30 percent damage reduction', hint:'When ridden by the imprinter.' },
+  { q:'What does a mate-boosted female Procoptodon\'s pouch do to baby food consumption?', a:'reduces it by 50 percent', hint:'Also doubles imprint gain per interaction.' },
+  { q:'Can Megalosaurus babies starve to death during daytime if you are not careful?', a:'yes', hint:'They sleep during the day and burn food faster than you can fill them.' },
+  { q:'What mechanic makes wild Megalosaurus automatically wake up regardless of torpor level?', a:'the day and night cycle', hint:'At approximately 20:30 in-game time.' },
+  { q:'What status effect builds on a Megalosaurus forced to stay awake during the day?', a:'sleep debt', hint:'Maxes at 120 and then torpor starts rising fast.' },
+  { q:'Which version of Megalosaurus found on Aberration does NOT have a sleep/wake cycle?', a:'aberrant megalosaurus', hint:'Permanently awake, no day debuff.' },
+  { q:'How does breeding work for Beelzebufo and Diplocaulus differently from land creatures?', a:'they can only mate while in water', hint:'Aquatic breeding requirement.' },
+  { q:'What unique breeding condition does a female Magmasaur need?', a:'she must be submerged in lava', hint:'Only possible on Genesis and Scorched areas.' },
+  { q:'What new ASA mechanic from the Aberration update allows stat-specific breeding boosts?', a:'traits', hint:'Extracted with a Gene Scanner.' },
+  { q:'How many traits can a single Gene Scanner hold at once?', a:'10', hint:'Storage limit of the scanner device.' },
+  { q:'What creature in ASA produces feathers used to speed up finding good breeding stats?', a:'gigantoraptor', hint:'Its feathers reflect stat percentages.' },
+ 
+  // ══════════════════════════════════════════════════════════════════
+  // CREATURE MECHANICS — DEEP KNOWLEDGE
+  // Source: ark.wiki.gg individual creature pages
+  // ══════════════════════════════════════════════════════════════════
+ 
+  { q:'The Shadowmane does not need a crafted saddle — what replaces it?', a:'natural armor based on tame level', hint:'Higher base level = higher armor cap of 80.' },
+  { q:'What is the Thornmail Poison stack limit on a Shadowmane?', a:'5 stacks', hint:'Each stack deals DOT and reduces attacker damage.' },
+  { q:'What ability can a mate-boosted FEMALE Shadowmane apply to nearby allies?', a:'the cloaked status effect', hint:'Makes surrounding tames temporarily invisible too.' },
+  { q:'What is the exact percentage damage boost the Megatherium receives after killing an insect?', a:'75 percent', hint:'Bug slayer buff, key for Broodmother fights.' },
+  { q:'How many seconds does the Shadowmane\'s Thornmail Poison last per stack?', a:'7 seconds', hint:'From the ARK official wiki.' },
+  { q:'What unique taming problem makes the Megalosaurus far harder to tame on a night server?', a:'it wakes up at night no matter its torpor level', hint:'Forces starve taming as a strategy.' },
+  { q:'What is the maximum Sleep Debt value a Megalosaurus can accumulate?', a:'120', hint:'Once maxed, torpor builds very fast.' },
+  { q:'How many wild Megalosaurus can spawn on a single map at one time?', a:'4', hint:'Excluding Aberration, which has unlimited spawns.' },
+  { q:'What feature makes the Shadowmane taming unique versus nearly all other predators?', a:'it is tamed passively using a fish basket', hint:'No knockout required.' },
+  { q:'Why does the Mosasaurus have an advantage over the Plesiosaur for weight transport?', a:'it has a platform saddle and higher weight capacity', hint:'Plesiosaur has no platform saddle.' },
+  { q:'What is the Achatina\'s passive production and why is it useful?', a:'it produces cementing paste and oil over time', hint:'Giant snail that makes paste while on wander.' },
+  { q:'Which stat specifically boosts the quality of crafted items in ARK?', a:'crafting skill', hint:'Higher crafting skill = better blueprint output.' },
+  { q:'What creature can pick up and throw boulders at enemy structures?', a:'chalicotherium', hint:'Boulder-throwing mammal from cold biomes.' },
+  { q:'What makes the Basilosaurus uniquely valuable for ocean travel in Aberration?', a:'it is immune to jellyfish shocks and other debuffs', hint:'Safe to navigate shock-heavy waters.' },
+  { q:'Which creature produces Black Pearls when killed in the ocean?', a:'eurypterid', hint:'Horseshoe crab-like creature in ocean caves.' },
+  { q:'What debuff makes a Giganotosaurus extremely dangerous to ride in high-stress situations?', a:'rage state', hint:'It can throw you off and attack allies when enraged.' },
+  { q:'What taming food is exclusive to the Procoptodon and cannot be substituted during taming?', a:'rare mushroom', hint:'Plant Species X Seed also works.' },
+  { q:'Which dino has a pack leader mechanic that boosts the entire pack\'s stats?', a:'allosaurus', hint:'The alpha of the pack applies a bleed and a pack buff.' },
+  { q:'What happens to a Cryopod and its stored creature if the pod expires after 30 days?', a:'the creature inside dies permanently', hint:'Cannot be recovered after expiry.' },
+  { q:'What is the Gacha\'s unusual feeding mechanic that determines what crystals it produces?', a:'it can consume almost any item and produce random resource crystals', hint:'Slot machine creature.' },
+  { q:'What unique effect does a Daeodon provide when on wander behavior?', a:'it heals nearby allied dinos using its own food', hint:'Living mobile heal station.' },
+  { q:'Which creature is the only theropod in ARK to have visible feathers on its body?', a:'megalosaurus', hint:'Feathered nocturnal cave predator.' },
+  { q:'What bite mechanic does the Megalosaurus have that immobilizes even Argentavis-sized creatures?', a:'a jaw lock grab attack', hint:'It bites and holds, then swings the prey around.' },
+  { q:'The Karkinos cannot be healed by what common healing method?', a:'veggie cakes', hint:'It is a non-herbivore arthropod — raw meat only.' },
+  { q:'What stat on a Thylacoleo makes it extremely strong at ambushing from trees?', a:'it can latch onto and cling to trees passively', hint:'Leaping and pouncing predator.' },
+  { q:'Which creature on TheConclave\'s Scorched Earth is the most effective at gathering Wood and Thatch simultaneously?', a:'mammoth', hint:'Wide trunk sweep hits multiple resource nodes.' },
+  { q:'What is the Stryder\'s unique harvesting mechanic compared to normal tames?', a:'it has modular attachment slots that can be swapped for different harvesting roles', hint:'TEK robot with swappable mining heads.' },
+  { q:'What does the Maewing do that makes it the best baby-raising tame in ASA?', a:'it passively nurses and feeds nearby babies', hint:'Its milk glands feed any compatible baby tame nearby.' },
+ 
+  // ══════════════════════════════════════════════════════════════════
+  // BOSS & PROGRESSION — HARD SPECIFICS
+  // Source: ark.wiki.gg boss tribute pages
+  // ══════════════════════════════════════════════════════════════════
+ 
+  { q:'What three trophies are required to summon the Overseer on The Island?', a:'broodmother trophy megapithecus trophy and dragon trophy', hint:'All three Island boss trophies.' },
+  { q:'Which Island boss is hardest on Alpha and requires the strongest dinos?', a:'dragon', hint:'Fire breath rapidly melts even Tek armor.' },
+  { q:'What tribute item is uniquely required to summon the Broodmother on The Island?', a:'titanoboa venom', hint:'Plus other arthropod and cave tributes.' },
+  { q:'What unique mechanic makes the Dragon boss resistant to most dinos?', a:'fire breath that hits all dinos not just the target', hint:'Megatheriums are recommended due to bug buff.' },
+  { q:'What does ascending on The Island on Alpha difficulty specifically increase?', a:'your maximum survivor level by 15', hint:'Each ascension tier adds 5 levels (Gamma/Beta/Alpha).' },
+  { q:'How many element does an Alpha Dragon drop on The Island?', a:'more than gamma and beta versions', hint:'Exact numbers vary but Alpha yields the most.' },
+  { q:'What is Rockwell\'s map of origin?', a:'aberration', hint:'The corrupted survivor in the depths.' },
+  { q:'What mechanic does Rockwell use that makes melee dinos less effective?', a:'tentacle sweeps and electric fields in the arena', hint:'Ranged or high mobility dinos work better.' },
+  { q:'Which Extinction boss requires Forest, Desert, and Ice Titan defeats before it spawns?', a:'king titan', hint:'The apex boss of Extinction.' },
+  { q:'What drops from the King Titan that is not available from any other boss source?', a:'king titan trophy and large amounts of element', hint:'Highest element yield boss.' },
+  { q:'Which artifact on The Island is found inside the Upper South Cave?', a:'artifact of the hunter', hint:'One of the 10 Island artifacts.' },
+  { q:'What is the time limit enforced inside boss arenas before you fail?', a:'30 minutes', hint:'True for all standard Island bosses.' },
+  { q:'What food type drastically increases Megalosaurus taming effectiveness despite taking longer?', a:'prime meat', hint:'More efficient than kibble for bonus levels per time.' },
+  { q:'What is unique about taming the Shadowmane compared to all predatory theropods?', a:'it is a passive tame — no knockout needed', hint:'Feed it fish from a basket while it sleeps.' },
+  { q:'What specific taming food does a wild Shadowmane require?', a:'fish in a fish basket with at least 0.5 multiplier', hint:'The fish quality matters for taming efficiency.' },
+ 
+  // ══════════════════════════════════════════════════════════════════
+  // MAP SPECIFICS & BIOMES — HARD
+  // Source: ark.wiki.gg map pages
+  // ══════════════════════════════════════════════════════════════════
+ 
+  { q:'What biome exclusive to Aberration emits dangerous bioluminescence and has no sunlight?', a:'bioluminescent biome', hint:'Third depth tier in Aberration.' },
+  { q:'What mechanic forces players on Aberration to wear a hazmat suit or die over time?', a:'radiation damage in the surface and blue zone', hint:'Lethal without full protection.' },
+  { q:'What is the Great Trench on Valguero known for being accessible to players?', a:'a massive underwater biome with unique creatures', hint:'Deinonychus also nests in the cliffs above.' },
+  { q:'What creatures only nest and spawn in the cliff faces of Valguero?', a:'deinonychus', hint:'Requires stolen eggs to tame — they are vicious.' },
+  { q:'What makes The Center map unique in its structure compared to The Island?', a:'it has a large underwater ocean dome and floating islands', hint:'Circular map design with extreme biomes.' },
+  { q:'What Extinction map event drops orbital supplies that require wave defense?', a:'orbital supply drop or OSD', hint:'Defend it from corrupted dinos in waves.' },
+  { q:'What is the surface of Aberration covered in that makes daytime deadly?', a:'extreme radiation without hazmat protection', hint:'The sky collapsed and radiation poured in.' },
+  { q:'Which map has a biome that is permanently night allowing Megalosaurus full buffs always?', a:'aberration', hint:'No surface sunlight cycle in the biomes.' },
+  { q:'What resource-rich body of water on The Center allows underwater cave exploration?', a:'the underwater dome', hint:'Massive enclosed ocean biome.' },
+  { q:'What happens to the Aberrant Megalosaurus unlike its normal counterpart?', a:'it does not sleep during the day and has no nocturnal cycle', hint:'Aberrant variant loses the day/night penalty.' },
+  { q:'Lost Colony is unique among TheConclave maps for what thematic reason?', a:'it has a space colony and science fiction theme', hint:'One of the newer ASA maps.' },
+  { q:'Astraeos is described as what type of map in TheConclave lore?', a:'a custom ascended map blending multiple terrains', hint:'Newer hybrid terrain map.' },
+  { q:'What map on TheConclave uses a completely different IP from all others on the cluster?', a:'valguero', hint:'Runs on 85.190.136.141 while others use 217.x.x.x.' },
+  { q:'Which two TheConclave maps share the same IP address of 217.114.196.80?', a:'aberration and amissa', hint:'Both run on that IP, different ports.' },
+  { q:'What makes Extinction unique among all ARK maps in its lore?', a:'it is the future version of Earth after a catastrophic extinction event', hint:'The ARK series timeline endpoint.' },
+ 
+  // ══════════════════════════════════════════════════════════════════
+  // CRAFTING & ITEM MECHANICS — HARD
+  // Source: ark.wiki.gg crafting pages
+  // ══════════════════════════════════════════════════════════════════
+ 
+  { q:'What is the exact gasoline recipe in the Industrial Forge?', a:'5 oil and 3 hide makes 5 gasoline', hint:'Only done in the Industrial Forge.' },
+  { q:'What is the recipe for Sparkpowder?', a:'1 flint and 1 stone', hint:'Made in a Mortar and Pestle.' },
+  { q:'What specific mechanic allows Soap to be converted into Element on TheConclave?', a:'use a tek replicator', hint:'Convert element shards into element.' },
+  { q:'What must you do before using Organic Polymer in crafting?', a:'nothing — it works exactly like regular polymer', hint:'Same recipes, shorter spoil timer.' },
+  { q:'What is the key difference between Organic Polymer and regular Polymer?', a:'organic polymer spoils over time while regular polymer does not', hint:'Time sensitive resource.' },
+  { q:'What item is exclusively crafted in a Motorboat and cannot be made elsewhere?', a:'nothing exclusively — but oil is refined in industrial forge', hint:'Trick question — motorboat crafting is limited.' },
+  { q:'What does leveling the Crafting Skill stat actually affect?', a:'the quality and stats of items crafted from blueprints', hint:'Higher skill = better gear from same blueprint.' },
+  { q:'What is the minimum fish basket quality multiplier needed to tame a Shadowmane?', a:'0.5', hint:'Fish must be at least 0.5 multiplier.' },
+  { q:'What resource is unique to the Genesis Part 1 map as a currency for its shop?', a:'hexagons', hint:'Mission rewards convert to hexagons.' },
+  { q:'What is the difference between Element Dust, Element Shard, and Element?', a:'dust is smallest shard is medium element is full — each converts up', hint:'Three tiers of the same resource.' },
+  { q:'What structure uses Element to craft advanced item versions directly?', a:'tek replicator', hint:'Also converts element shards to element.' },
+  { q:'What saddle is required to harvest using a Quetzal as a mobile metal farm?', a:'quetzal platform saddle', hint:'Build an Anky on the platform.' },
+  { q:'What is the purpose of the Industrial Grinder beyond recycling items?', a:'it converts structures and weapons back into base materials', hint:'Only way to recycle built items.' },
+  { q:'Which kibble tier requires Rock Drake or Griffin eggs?', a:'exceptional kibble', hint:'Second highest tier.' },
+  { q:'What is the specific kibble required for optimal Giga taming?', a:'exceptional kibble', hint:'Giganotosaurus kibble tier.' },
+ 
+  // ══════════════════════════════════════════════════════════════════
+  // ARK GAME MECHANICS — EXPERT LEVEL
+  // Source: ark.wiki.gg mechanics pages
+  // ══════════════════════════════════════════════════════════════════
+ 
+  { q:'What is "starve taming" and when is it required?', a:'draining a dino\'s food to zero before feeding taming food to maximize effectiveness and speed', hint:'Required for creatures like Megalosaurus.' },
+  { q:'What is the mutation counter structure called on the mother\'s side?', a:'matrilineal', hint:'Father\'s side is patrilineal.' },
+  { q:'What stat level number in a single stat causes major issues in ASA when exceeded?', a:'254', hint:'Going to 255 prevents further leveling in that stat.' },
+  { q:'What does "taming effectiveness" directly control besides taming speed?', a:'the bonus levels added to the tame at completion', hint:'Higher TE = more wild levels added at tame.' },
+  { q:'What mechanic specifically prevents a tame from being claimed by another tribe?', a:'first torpor equals tame ownership', hint:'TheConclave enforces this as a rule.' },
+  { q:'How does the Giganotosaurus rage state get triggered?', a:'it takes significant damage and gets a random chance to rage', hint:'Once raged it can attack its own tribe.' },
+  { q:'What is the purpose of using a Yutyrannus during a boss fight?', a:'its courage roar gives a damage and defense buff to nearby tames', hint:'And its fear roar weakens enemies.' },
+  { q:'What happens to a dino if it is leveled to 450 on a server with that cap?', a:'it gets deleted on server restart', hint:'Exceeding the server cap is permanent loss.' },
+  { q:'How does the imprinting system give bonus stats differently than leveling?', a:'imprint adds a percentage multiplier to base stats not flat level points', hint:'30% buff is multiplicative.' },
+  { q:'What is the game mechanic called when a dino damages its own tribe members?', a:'friendly fire', hint:'Giga rage is the most dangerous version of this.' },
+  { q:'What is the difference between uploading a dino versus cryopodding it?', a:'uploaded dinos go to the obelisk cloud and expire after 24 hours while cryo is indefinite with a fridge', hint:'Two different storage systems.' },
+  { q:'Why can a Bola NOT immobilize a Procoptodon for taming?', a:'procoptodons are too large — you need a chain bola', hint:'Size class exception to the standard bola.' },
+  { q:'What is the "Courage Roar" and what dino provides it?', a:'yutyrannus — it boosts attack and reduces damage taken for nearby allies', hint:'Essential for boss fights.' },
+  { q:'How does the Maewing nurse baby dinos without the player having to do anything?', a:'it automatically transfers milk from its glands to babies within range', hint:'Passive nursing system.' },
+  { q:'What does the "Fear Roar" on a Yutyrannus do to enemies?', a:'it forces nearby wild and hostile creatures to flee', hint:'Opposite of the courage buff.' },
+  { q:'What is the maximum level a tamed creature can be leveled after taming on standard settings?', a:'74 additional levels', hint:'Each level up adds to the base tame level.' },
+  { q:'What prevents you from leveling a stat in a creature once it hits 255 mutation levels in ASA?', a:'the game blocks further leveling in that stat', hint:'Breeding too high causes a hard lock.' },
+  { q:'What is "line breeding" in ARK?', a:'selectively breeding to stack specific stat mutations into one creature over many generations', hint:'Standard competitive ARK breeding meta.' },
+  { q:'What happens to wild dinos that are not tamed within the server\'s decay timer?', a:'nothing directly — wild dinos don\'t decay but their areas respawn around them', hint:'Tamed structures decay, not wild dinos.' },
+ 
+  // ══════════════════════════════════════════════════════════════════
+  // ABERRATION SPECIFICS — DEEP CUTS
+  // Source: ark.wiki.gg/wiki/Aberration
+  // ══════════════════════════════════════════════════════════════════
+ 
+  { q:'What prevents players from using flyers on Aberration?', a:'a magnetic field interference mechanic that blocks flight', hint:'No flyers allowed — designed that way intentionally.' },
+  { q:'What drops Reaper Pheromone Glands used to tame Reapers?', a:'the reaper queen when impregnating a survivor', hint:'Harvested from the Queen\'s body.' },
+  { q:'How do you obtain a Reaper King tame in Aberration?', a:'let a reaper queen impregnate you then give birth to a baby reaper', hint:'Not a standard knockout tame.' },
+  { q:'What status effect must you stack before a Reaper Queen will impregnate you?', a:'reaper pheromone gland buff', hint:'Obtained from previously killed queens.' },
+  { q:'What bioluminescent shoulder pet is required to safely pass through Nameless territories?', a:'bulbdog or shinehorn or featherlight', hint:'Any of the three glow pets work.' },
+  { q:'What mechanic makes Nameless creatures immediately flee on Aberration?', a:'exposure to light from charge pets or charge lanterns', hint:'Darkness is their domain.' },
+  { q:'What is the deepest and most dangerous biome in Aberration called?', a:'the element falls or blue zone', hint:'Filled with Nameless, Reapers, and radiation.' },
+  { q:'What item allows players to traverse the zipline network in Aberration?', a:'zipline motor attachment or grappling hook', hint:'Horizontal travel replaces flyers.' },
+  { q:'What Aberration creature grapples onto ziplines to ride them?', a:'ravager', hint:'Fast pack creature that can zipline.' },
+  { q:'What specifically happens to regular Megalosaurus in Aberration\'s bioluminescent zone?', a:'they take radiation damage — only aberrant megalosaurus can survive there', hint:'Regular variants are not radiation immune.' },
+ 
+  // ══════════════════════════════════════════════════════════════════
+  // STRUCTURES & BUILDING — HARD
+  // Source: ark.wiki.gg structure pages
+  // ══════════════════════════════════════════════════════════════════
+ 
+  { q:'What is the only way to legitimately unlock Tek engrams beyond leveling up?', a:'defeat bosses', hint:'Each boss tier unlocks specific Tek engrams.' },
+  { q:'What happens to structures with expired decay timers on a server?', a:'they are automatically demolished', hint:'Decay system removes abandoned bases.' },
+  { q:'What structure type is required as the base for all floating structure builds on a Quetzal?', a:'platform saddle', hint:'The structure is built on the saddle itself.' },
+  { q:'What is the turret limit per area designed to prevent?', a:'excessive server lag and performance degradation', hint:'Too many turrets tanks server performance.' },
+  { q:'What prevents you from building inside artifact caves on TheConclave?', a:'server rules and admin enforcement', hint:'Blocking artifact spawns is banned.' },
+  { q:'What structure produces the most power per fuel unit?', a:'tek generator', hint:'Uses Element, most efficient power source.' },
+  { q:'What is required to prevent structures from decaying when you are offline?', a:'check decay timers and refresh before leaving', hint:'Or pin code them and leave a tribe member online.' },
+  { q:'How many foundations wide is the maximum base size per tribe on TheConclave PvE?', a:'6x6 behemoth gate area', hint:'TheConclave specific rule from the Codex.' },
+  { q:'What structure do you need to connect two separate Tek Teleporter pads?', a:'nothing extra — they auto-link when powered', hint:'They pair with each other by proximity.' },
+  { q:'What is the purpose of a Tree Sap Tap?', a:'it collects sap from redwood trees passively over time', hint:'Placed on a redwood tree trunk.' },
+ 
+  // ══════════════════════════════════════════════════════════════════
+  // SCORCHED EARTH & EXTINCTION — HARD
+  // Source: ark.wiki.gg
+  // ══════════════════════════════════════════════════════════════════
+ 
+  { q:'What weather event on Scorched Earth does massive terrain damage and blinds players?', a:'sand storm', hint:'Visibility drops to near zero.' },
+  { q:'What Scorched Earth event creates a spinning column of fire that destroys structures?', a:'fire tornado', hint:'Avoid it or lose your base.' },
+  { q:'What unique resource is only found by killing Rock Elementals on Scorched Earth?', a:'stone and oil plus chance of element', hint:'Giant rock golems.' },
+  { q:'What is the only way to safely obtain Wyvern eggs on Scorched Earth?', a:'fly into the wyvern trench at night and steal eggs while keeping distance from Queens', hint:'Queens breathe fire and the trench is packed.' },
+  { q:'What does the Extinction map\'s Wasteland biome contain that other biomes do not?', a:'corrupted creatures and element clusters', hint:'Purple-infected former Earth creatures.' },
+  { q:'What Extinction-exclusive creature converts trash items into element crystals?', a:'gacha', hint:'Slot machine creature, produces crystals randomly.' },
+  { q:'What are the four unique biome types on Genesis Part 1?', a:'bog volcanic arctic ocean and lunar', hint:'Five distinct simulation environments.' },
+  { q:'What does the King Titan fight require you to collect beforehand from other Titans?', a:'you must defeat the Forest Desert and Ice Titan first', hint:'Three titan kills to unlock the King.' },
+ 
+  // ══════════════════════════════════════════════════════════════════
+  // COMMUNITY RULES & SERVER CULTURE — HARD THEC0NCLAVE
+  // Source: bot.js RulesPanel, CORE_PROMPT
+  // ══════════════════════════════════════════════════════════════════
+ 
+  { q:'What is the maximum tame limit per tribe on TheConclave?', a:'100', hint:'From the Dominion Codex.' },
+  { q:'How many bases is each tribe allowed per map on TheConclave?', a:'1', hint:'One base per map per tribe.' },
+  { q:'What is the maximum tribe size on TheConclave?', a:'8 players', hint:'From the Dominion Codex.' },
+  { q:'What is the consequence for advertising another server in TheConclave Discord?', a:'permanent ban', hint:'Zero tolerance rule.' },
+  { q:'What is the rule regarding raiding or stealing on PvE maps on TheConclave?', a:'instant ban', hint:'Zero tolerance — only Aberration is PvP.' },
+  { q:'How many warnings does it take to receive a ban on TheConclave?', a:'3', hint:'Admin abuse is instant ban regardless.' },
+  { q:'What must your Discord name match according to TheConclave rules?', a:'your in game name', hint:'Identity rule for accountability.' },
+  { q:'What is the proper way to contact admin for help on TheConclave?', a:'open a ticket', hint:'No direct DMs to staff.' },
+  { q:'What does "first torpor equals tame ownership" mean on TheConclave?', a:'whoever applies the first tranq shot owns that tame — verbal claims are invalid', hint:'No calling dibs before you fire.' },
+  { q:'What must you do with temporary structures like taming traps after using them?', a:'clean them up and demolish them', hint:'Leaving them is against the Codex.' },
+  { q:'What must you do if you plan to be away from the server for an extended time?', a:'open a ticket so admins know about your absence', hint:'Prevents decay-based base deletion.' },
+  { q:'What building restriction prevents placing structures in artifact caves?', a:'no building near caves obelisks explorer notes or high resource spawns', hint:'Blocking spawns is bannable.' },
+ 
+  // ══════════════════════════════════════════════════════════════════
+  // ECONOMY & SHOP SYSTEM — HARD
+  // Source: bot.js SHOP_TIERS, economy functions
+  // ══════════════════════════════════════════════════════════════════
+ 
+  { q:'What is the conversion rate for real money to ClaveShards on TheConclave?', a:'1 dollar equals 1 claveshard', hint:'Straight conversion — no premium markup.' },
+  { q:'What does auto-deduct do when enabled on a /order command?', a:'it automatically deducts the shard cost from your wallet balance at time of order', hint:'No separate payment needed if you have shards.' },
+  { q:'What happens if you have insufficient wallet balance when using auto-deduct on /order?', a:'the order is rejected and not submitted', hint:'Balance check runs before order is placed.' },
+  { q:'What does the /wallet deposit command do?', a:'moves shards from your wallet into your bank', hint:'The bank is a safer secondary balance.' },
+  { q:'What is the difference between wallet balance and bank balance in the economy?', a:'wallet is active liquid balance bank is secure storage', hint:'Both count toward your total.' },
+  { q:'What is the lifetime_earned stat tracked in the wallet system?', a:'total shards ever received across all grants and claims', hint:'Historical total, never decreases.' },
+  { q:'What does the /clvsd audit command show?', a:'the last N economy transactions across all users', hint:'Admin-only transaction log.' },
+  { q:'What happens to ConCoin booty once an admin runs /grant-concoins for you?', a:'the pending amount is sent to your UnbelievaBoat wallet and cleared to zero', hint:'New system — trivia earnings paid out to UB.' },
+  { q:'What table in Supabase stores the per-user ConCoin trivia booty amounts?', a:'aegis_concoin_booty', hint:'New table added in the trivia patch.' },
+  { q:'What does the daily_streak field track in the wallet system?', a:'consecutive weekly claim count', hint:'It resets if you miss your 7 day window.' },
+  { q:'What does the /streaks leaderboard command show?', a:'top players ranked by their weekly claim streak count', hint:'Longest unbroken weekly claim chain.' },
+  { q:'What does the /digest command under /clvsd show admins?', a:'a 7 day economy summary of grants deducts orders and top earner', hint:'Weekly economy health check.' },
+ 
+  // ══════════════════════════════════════════════════════════════════
+  // MOD-SPECIFIC — HARD
+  // Source: bot.js mod list, ARKomatic, Awesome Teleporter
+  // ══════════════════════════════════════════════════════════════════
+ 
+  { q:'What does the ARKomatic mod primarily improve?', a:'quality of life features and convenience mechanics', hint:'General polish mod.' },
+  { q:'What does the Awesome Spyglass mod tell you that the vanilla spyglass does not?', a:'detailed stats taming progress and creature level distribution without taming', hint:'See stats before committing to a tame.' },
+  { q:'What does the Awesome Teleporter mod allow compared to vanilla teleporters?', a:'place teleporters anywhere without additional structure requirements', hint:'More flexible than vanilla Tek teleporters.' },
+  { q:'Why is the Death Inventory Keeper mod critical on a 5x server like TheConclave?', a:'losing a full inventory of high tier gear on a 5x server would be devastating', hint:'End-game items are very hard to replace.' },
+  { q:'Which TheConclave mod allows you to check dino mutation count and stat breakdown at range?', a:'awesome spyglass', hint:'Aims at a creature and shows everything.' },
+ 
+  // ══════════════════════════════════════════════════════════════════
+  // ARK ASA SPECIFIC CHANGES — HARD
+  // Source: ARK ASA official notes, ark.wiki.gg ASA pages
+  // ══════════════════════════════════════════════════════════════════
+ 
+  { q:'What graphics technology specific to UE5 gives ASA dramatically improved lighting?', a:'lumen', hint:'Real-time global illumination system.' },
+  { q:'What UE5 rendering technology allows ASA to have unprecedented terrain and mesh detail?', a:'nanite', hint:'Virtualized micropolygon geometry system.' },
+  { q:'What new cross-platform feature did ASA add that ASE never had?', a:'xbox and playstation crossplay together', hint:'Console crossplay was impossible in ASE.' },
+  { q:'What was overhauled in ASA that allowed proper egg temperature management?', a:'the egg incubator structure', hint:'No more campfire ring temperature tricks.' },
+  { q:'What new mechanic added in ASA\'s Aberration DLC allows stat-targeted breeding?', a:'traits and the gene scanner', hint:'Extracted with a gene scanner device.' },
+  { q:'What is the maximum combined Matrilineal and Patrilineal mutation counter before a dino cannot SOURCE new mutations?', a:'20', hint:'Both counters together must stay below 20.' },
+  { q:'In ASA versus ASE, how does the mutation level system differ?', a:'in asa mutations track independently as their own stat level separate from wild levels', hint:'Cleaner system than ASE.' },
+ 
+  // ══════════════════════════════════════════════════════════════════
+  // HARDCORE OBSCURA — FOR THE SWEATS
+  // Only the most dedicated ARK players would know these
+  // ══════════════════════════════════════════════════════════════════
+ 
+  { q:'What happens if you breed two creatures both with over 20 combined mutations?', a:'zero percent mutation chance — completely impossible to get new mutations', hint:'Both parents must have at least one side under 20.' },
+  { q:'Each breeding roll has a 2.5% mutation chance — how many rolls happen per breed?', a:'3 independent rolls', hint:'Three checks, each 2.5%, giving ~7.31% total.' },
+  { q:'What is the Shadowmane armor cap and how is it determined?', a:'capped at 80 and determined by the base level at time of taming', hint:'Higher base level = closer to cap of 80.' },
+  { q:'Why do Kairuku provide the most efficient Organic Polymer harvest?', a:'using a chainsaw on kairuku yields the highest organic polymer per kill', hint:'Tool matters as much as the target.' },
+  { q:'What is the Aberrant Megalosaurus immune to that makes it better in Aberration caves?', a:'the day night penalty — it has full stats 24 hours', hint:'No sleep debt, no nocturnal debuff cycle.' },
+  { q:'What specific debuff timer resets on a Megalosaurus if you force it to sleep with the radial menu command?', a:'the sleep debt resets and its food consumption drops 50 percent while resting', hint:'Manual sleep option on tamed Megalosaurus.' },
+  { q:'At what in-game time does a Megalosaurus automatically wake up regardless of torpor?', a:'approximately 20:30 game time', hint:'Forces starve-taming strategy to be necessary.' },
+  { q:'What happens to a Procoptodon baby placed in a mate-boosted female pouch?', a:'it consumes 50 percent less food and gains double imprint progress per interaction', hint:'Both buffs apply simultaneously.' },
+  { q:'Why does the Shadowmane not need a craftable saddle unlike almost every other mount?', a:'it has natural armor built into its body based on tame level', hint:'Unique passive armor system, max cap 80.' },
+  { q:'What does the AEGIS command /ask-council do that regular /aegis does not?', a:'it responds as a specific named council member with their persona', hint:'Listed in the bot.js help command.' },
+  { q:'How long does the AEGIS knowledge base cache stay valid before re-fetching from Supabase?', a:'90 seconds', hint:'_kTs cache timeout in the bot code.' },
+  { q:'What TheConclave server has a Nitrado service ID of 18393892?', a:'astraeos', hint:'One of the custom ASA maps.' },
+  { q:'What does the /watchtower command deploy and who uses it?', a:'a base watch request panel for players going offline for extended periods', hint:'Staff claims and tracks the requests.' },
+  { q:'What AEGIS command lets admins view the last N economy transactions across all users?', a:'/clvsd audit', hint:'Shows raw ledger entries.' },
+  { q:'What is the name of the Supabase table that stores all shop orders?', a:'aegis_orders', hint:'Referenced in multiple bot.js functions.' },
+  { q:'What is the name of the Supabase table that stores all wallet ledger entries?', a:'aegis_wallet_ledger', hint:'Every shard movement is logged here.' },
+  { q:'Which Shadowmane gender applies the group cloak ability to allies?', a:'female', hint:'Mate-boosted female applies cloaked status to nearby tames.' },
+  { q:'What does the Yutyrannus fear roar do to wild creatures in a boss arena?', a:'forces them to flee regardless of aggression state', hint:'Useful for disrupting enemy dino patterns.' },
+  { q:'What does "first torpor equals ownership" specifically mean in a disputed taming scenario on TheConclave?', a:'the first player to apply a tranquilizer owns the tame — verbal claims beforehand are invalid', hint:'No calling dibs in advance.' },
+ 
 ];
 
 const activeTrivias = new Map(); // channelId → { question, answer, hint, expiresAt, msgId }
@@ -1370,8 +1679,8 @@ bot.on(Events.InteractionCreate, async interaction => {
       return interaction.editReply({ embeds:[base('⭐ Patreon Perks',C.gold).setDescription('Support at **patreon.com/theconclavedominion**')
         .addFields(
           {name:'🥉 Supporter', value:'Discord role · Supporter channels', inline:true},
-          {name:'🥈 Champion',  value:'All above + Bonus ClaveShards monthly', inline:true},
-          {name:'🥇 Elite ($20/mo)',value:'All above + **Amissa access** · Priority support', inline:true},
+          {name:'🥈 Champion',  value:'All above', inline:true},
+          {name:'🥇 Elite ($20/mo)',value:'All above + Bonus ClaveShards monthly + **Amissa access** · Priority support', inline:true},
         )] });
     }
 
@@ -1402,7 +1711,7 @@ bot.on(Events.InteractionCreate, async interaction => {
         .setDescription([
           `**Question:** ${q.q}`,
           '',
-          '> Type your answer in this channel! First correct answer wins **1 ClaveShard** 💎',
+          '> Type your answer in this channel! First correct answer wins **** 💎',
           `> Question expires <t:${Math.floor(expiresAt/1000)}:R>`,
           '',
           `*Use /trivia again after this expires for a new question*`,
