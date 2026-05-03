@@ -232,19 +232,7 @@ MINECRAFT: 134.255.214.44:10090 (Bedrock)
 PATREON: patreon.com/theconclavedominion · Amissa access at Elite ($20/mo)
 COUNCIL: Tw_ (High Curator) · Slothie (Archmaestro) · Sandy (Wildheart) · Jenny (Skywarden) · Arbanion (Oracle of Veils) · Okami (Hazeweaver) · Rookiereaper (Gatekeeper) · Icyreaper (Veilcaster) · Jake (ForgeSmith) · CredibleDevil (Iron Vanguard)
 
-CLAVESHARD TIERS:
-T1(1)=Level 600 Vanilla Dino (Allowed Dino)+3 Stacks Ammo+Full Dino Coloring+100 Kibble/Cakes/Beer+100% Imprint+500 Non-Tek Structures+Cryofridge+120 Cryopods+50k ConCoins+2500 Materials/Resources+10 Same-Type Tributes+Boss Artifact+Tribute Set (1 Run)+Non-Tek Blueprint+Dino Revival Token 48hr
-T2(2)=60 Dedicated Storage+Level 600 (Allowed Dino)+Level 500 Random Shiny+Level 500 Shiny Shoulder Variant
-T3(3)=Tek Suit or Tek Blueprint+1 Shiny Essence+200% Imprint+Level 600 T1 Special Shiny
-T5(5)=Boss Defeat Command+Level 800 T2 Special Shiny+Small Resource Bundle 250k Materials/Resources+Level 1000 (Allowed Dino)+100 Raw Shiny Essence+2500 Imprint Kibble
-T6(6)=Level 1250 Breeding Pair/Boss Dinos+250% Imprint (Rex/Yuty/Carchar/Therizino)+300% Imprint Ossidion
-T8(8)=100k Materials/Resources (No Element)
-T10(10)=Ascendant Tek Suit or Blueprint Set+Floating Cliff Platform (Limited Availability)+200k ConCoins+Combo Shiny Essence (Choose 2)+Dino Color Party (10 Dinos)+Must Have Dinos Ready for Admin Arrival or Dropped at Community Center
-T12(12)=200k Materials/Resources (No Element)+Level 1375 Breeding Pair -Allowed Dinos
-T15(15)=30k Element+Level 1500 Rhyniognatha+Level 1500 Reaper King+Level 1500 Aureliax+Level 1500 Elder Claw+Level 1500 Dreadnoughtus+Level 1500 Acrocanthosaurus+Level 1500 Helicoprion+Level 1500 Dreadmare+Level 1500 Pyromane+X-Large Resource Bundle 300k Materials/Resources-No element variants
-T20(20)=1x1 Behemoth Gate Expansion+Max 10 Gates per Map per Tribe+600k ConCoins
-T30(30)=1.6M Total Resources+No Element Variants/Structures/Artifacts/Trophies
-DINO INSURANCE=One Time Use+Must Be Named+One Per Dino
+CLAVESHARD TIERS: T1(1) T2(2) T3(3) T5(5) T6(6) T8(8) T10(10) T12(12) T15(15) T20(20) T30(30) + Dino Insurance
 
 VOICE: Precise, sovereign, cosmic — speak with authority and a touch of mythos. Use Discord markdown. Keep responses under 1800 chars unless detail is specifically requested.`;
 
@@ -699,24 +687,24 @@ function walletEmbed(title, w, color=C.pl) {
     { name:'📉 Spent',  value:`${(w.lifetime_spent||0).toLocaleString()}`, inline:true },
     { name:'🔥 Streak', value:`Week ${w.daily_streak||0}`, inline:true },
   );
-} 
+}
 
 // ══════════════════════════════════════════════════════════════════════
 // SHOP DATA
 // ══════════════════════════════════════════════════════════════════════
 const SHOP_TIERS = [
-  { shards: 1,  emoji: '💠', name: '1 Clave Shard',   items: ['Level 600 Dino Allowed Dino', '3 Stacks Ammo', 'Full Dino Coloring', '100 Kibble / Cakes / Beer', '100% Imprint', '500 Non-Tek Structures', 'Cryofridge + 120 Pods', '50,000 Echo Coins', '2,500 materials/resources - No element variants', '10 Same-Type Tributes', 'Boss Artifact + Tribute (1 Run)', 'Non-Tek Blueprint', 'Dino Revival Token (48hr limit)Refer to Dino Insurance'] },
-  { shards: 2,  emoji: '💎', name: '2 Clave Shards',  items: ['Level 700 Dino Allowed Dino', '60 Dedicated Storage', 'Level 500 Random Shiny', 'Level 500 Shiny Shoulder Variant'] },
-  { shards: 3,  emoji: '✨', name: '3 Clave Shards',  items: ['Tek Blueprint', '1 Shiny Essence', '200% Imprint', 'Level 600 T1 Shiny'] },
-  { shards: 5,  emoji: '🔥', name: '5 Clave Shards',  items: ['Boss Defeat Command', 'Level 1000 Allowed Dino', '100 Raw Shiny Essence', 'Level 800 T2 Special Shiny','Small Resource Bundle:25,000 materials/resources No element variants', '2,500 imprint kibble'] },
-  { shards: 6,  emoji: '⚔️', name: '6 Clave Shards',  items: ['Boss Ready Dino Bundle:Level 1250 Breeding Pair / Boss Dinos','250% imprint — Rex, Yuty, Carchar, or Therizino', '300% imprint — Ossidion'] },
-  { shards: 8,  emoji: '🌌', name: '8 Clave Shards',  items: ['Medium Resource Bundle', '100,000 Resources /materials/resources No element variants'] },
-  { shards: 10, emoji: '🛡️', name: '10 Clave Shards', items: ['Ascendant Tek Suit Blueprint / Set', 'Floating Platform /Limited Availability', 'Combo Shiny Essences /2 Selected','Dino Color Party — 10 dinos-Must be ready for admin arrival / CC drop-off'] },
-  { shards: 12, emoji: '🌠', name: '12 Clave Shards', items: ['Large Resource Bundle', '200,000 Resources, Level 1375 Breeding Pair -Allowed Dinos'] },
-  { shards: 15, emoji: '👑', name: '15 Clave Shards', items: ['30,000 Element', 'Level 1500 / Rhyniognatha / Reaper / Aureliax / Elder Claw / Dreadnoughtus / Acrocanthosaurus / Helicoprion / Dreadmare /  Pyromane', 'X-Large Resource Bundle: 300,000 materials/resources - No element variants'] },
-  { shards: 20, emoji: '🏰', name: '20 Clave Shards', items: ['1x1 Behemoth Gate Expansion (10 max per Map per Tribe)', '600,000 ConCoins'] },
-  { shards: 30, emoji: '💰', name: '30 Clave Shards', items: ['2 Dedicated Storage Admin Refill', '1.6 Million total resources -No element, structures, artifacts, or trophies'] },
-  { shards: 0,  emoji: '🛡',  name: 'Dino Insurance',  items: ['One Time Use', 'Must Be Named', 'Backup May Not Save', 'May Require Respawn', 'One Per Dino (Reference to Dino Revival Token in Tier 1)'] },
+  { shards:1,  emoji:'💠', name:'1 Clave Shard',   items:['Level 600 Vanilla Dino (Tameable)','Max XP','3 Stacks Ammo','Full Dino Coloring','100 Kibble / Cakes / Beer','100% Imprint','500 Non-Tek Structures','Cryofridge + 120 Pods','50,000 Echo Coins','2,500 Materials','10 Same-Type Tributes','Boss Artifact + Tribute (1 Run)','Non-Tek Blueprint','Dino Revival Token (48hr)'] },
+  { shards:2,  emoji:'💎', name:'2 Clave Shards',  items:['Modded Level 600 Dino','60 Dedicated Storage','Level 600 Yeti + Polar Bear','450 Random Shiny + Shoulder Variant'] },
+  { shards:3,  emoji:'✨', name:'3 Clave Shards',  items:['Tek Blueprint','1 Shiny Essence','200% Imprint','450 T1 Special Shiny'] },
+  { shards:5,  emoji:'🔥', name:'5 Clave Shards',  items:['Boss Defeat Command','Bronto or Dread + Saddle','Astral Dino','Level 1000 Basilisk / Rock Elemental / Karkinos','50 Raw Shiny Essence','450 T2 Special Shiny','Small Resource Bundle','2,500 Imprint Kibble'] },
+  { shards:6,  emoji:'⚔️', name:'6 Clave Shards',  items:['Boss Ready Dino Bundle','300% Imprint','Max XP'] },
+  { shards:8,  emoji:'🌌', name:'8 Clave Shards',  items:['Medium Resource Bundle','100,000 Resources (No Element)'] },
+  { shards:10, emoji:'🛡️', name:'10 Clave Shards', items:['Tek Suit Blueprint / Set','Floating Platform','Combo Shinies','Dino Color Party','Breeding Pair'] },
+  { shards:12, emoji:'🌠', name:'12 Clave Shards', items:['Large Resource Bundle','200,000 Resources'] },
+  { shards:15, emoji:'👑', name:'15 Clave Shards', items:['30,000 Element','Level 900 Rhyniognatha / Reaper / Aureliax','XLarge Bundle (300k Resources)'] },
+  { shards:20, emoji:'🏰', name:'20 Clave Shards', items:['1x1 Behemoth Gate Expansion (10/max)'] },
+  { shards:30, emoji:'💰', name:'30 Clave Shards', items:['2 Dedicated Storage Admin Refill','1.6 Million Total Resources'] },
+  { shards:0,  emoji:'🛡', name:'Dino Insurance',   items:['One Time Use','Must Be Named','Backup May Not Save','May Require Respawn','One Per Dino'] },
 ];
 
 const MAP_INFO = {

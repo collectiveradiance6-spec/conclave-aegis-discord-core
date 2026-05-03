@@ -1,7 +1,7 @@
 {
   "name": "conclave-aegis-discord-core",
-  "version": "10.2.0",
-  "description": "TheConclave Dominion — AEGIS Bot v10.2 (Music Decoupled → CONbot5)",
+  "version": "12.0.0",
+  "description": "TheConclave Dominion — AEGIS Bot v12.0 SOVEREIGN EDITION (Anthropic Primary)",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js",
@@ -10,11 +10,12 @@
   },
   "engines": { "node": ">=18.0.0" },
   "dependencies": {
-    "groq-sdk": "^0.7.0",
+    "@anthropic-ai/sdk": "^0.39.0",
     "@supabase/supabase-js": "^2.47.0",
     "axios": "^1.7.0",
     "discord.js": "^14.16.0",
-    "dotenv": "^16.4.0"
+    "dotenv": "^16.4.0",
+    "groq-sdk": "^0.7.0"
   },
   "optionalDependencies": {
     "bufferutil": "^4.0.8",

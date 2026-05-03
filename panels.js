@@ -1,13 +1,11 @@
 // ═══════════════════════════════════════════════════════════════════════
-// AEGIS PANELS — v3.0 COSMIC SOVEREIGN EDITION
+// AEGIS PANELS — v4.0 SOVEREIGN EDITION
 // Full cinematic visual design system for Discord embeds
-// Animated GIF banners · Unicode HUD art · Depth layering · Scan FX
 // ═══════════════════════════════════════════════════════════════════════
 'use strict';
 
 const { EmbedBuilder } = require('discord.js');
 
-// ── BRAND ASSETS (hosted on theconclavedominion.com) ─────────────────
 const ASSETS = {
   BADGE:       'https://theconclavedominion.com/conclave-badge.png',
   CIRCLE_GIF:  'https://theconclavedominion.com/conclave-circle.gif',
@@ -19,109 +17,55 @@ const ASSETS = {
   ARK_GET:     'https://theconclavedominion.com/GET_ARK_D.gif',
 };
 
-// ── COLOUR PALETTE ────────────────────────────────────────────────────
 const HEX = {
-  void:    0x02010D,   // near-black deep space
-  plasma:  0x7B2FFF,   // sovereign purple
-  cyan:    0x00D4FF,   // AEGIS blue
-  gold:    0xFFB800,   // ClaveShard gold
-  emerald: 0x35ED7E,   // online green
-  scarlet: 0xFF4500,   // alert red
-  magenta: 0xFF4CD2,   // shop pink
-  ice:     0xA8D8FF,   // pale blue
-  amber:   0xFF8C00,   // warm amber
+  void:    0x02010D,
+  plasma:  0x7B2FFF,
+  cyan:    0x00D4FF,
+  gold:    0xFFB800,
+  emerald: 0x35ED7E,
+  scarlet: 0xFF4500,
+  magenta: 0xFF4CD2,
+  ice:     0xA8D8FF,
+  amber:   0xFF8C00,
 };
 
-// ── UNICODE PRIMITIVES ────────────────────────────────────────────────
 const U = {
-  // borders
-  TL: '╔', TR: '╗', BL: '╚', BR: '╝', H: '═', V: '║',
-  ML: '╠', MR: '╣',
-  tl: '┌', tr: '┐', bl: '└', br: '┘', h: '─', v: '│',
-  ml: '├', mr: '┤',
-
-  // blocks & shading
-  FULL:  '█', DARK: '▓', MED:  '▒', LIGHT: '░',
-  H8: '▉', H7: '▊', H6: '▋', H5: '▌', H4: '▍', H3: '▎', H2: '▏',
-
-  // decorative
-  DIAMOND:   '◈',
-  DIAMOND2:  '◆',
-  DOT:       '●',
-  RING:      '○',
-  ARROW_R:   '▶',
-  ARROW_L:   '◀',
-  STAR:      '✦',
-  CROSS:     '✕',
-  CHECK:     '✔',
-  WAVE:      '〰',
-  CIRCUIT:   '⌁',
-  SCAN:      '⠿',
-
-  // scanline rows (creates depth illusion)
-  SCAN_FULL:   '⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿',
-  SCAN_LIGHT:  '⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒',
-  LINE_HEAVY:  '━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-  LINE_DOUBLE: '══════════════════════════════',
-  LINE_DOTS:   '· · · · · · · · · · · · · · ·',
-  LINE_WAVE:   '〰〰〰〰〰〰〰〰〰〰〰〰〰〰〰',
+  TL:'╔',TR:'╗',BL:'╚',BR:'╝',H:'═',V:'║',
+  ML:'╠',MR:'╣',
+  tl:'┌',tr:'┐',bl:'└',br:'┘',h:'─',v:'│',
+  FULL:'█',DARK:'▓',MED:'▒',LIGHT:'░',
+  DIAMOND:'◈',DIAMOND2:'◆',DOT:'●',RING:'○',
+  ARROW_R:'▶',ARROW_L:'◀',STAR:'✦',CROSS:'✕',
+  CHECK:'✔',WAVE:'〰',CIRCUIT:'⌁',SCAN:'⠿',
+  SCAN_FULL:  '⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿',
+  SCAN_LIGHT: '⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒',
+  LINE_HEAVY: '━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+  LINE_DOUBLE:'══════════════════════════════',
+  LINE_DOTS:  '· · · · · · · · · · · · · · ·',
 };
 
-// ── PROGRESS BAR GENERATOR ────────────────────────────────────────────
-// Returns a pixel-perfect block bar with percentage + label
 function bar(current, max, length = 16, label = '') {
   const pct    = max > 0 ? Math.min(current / max, 1) : 0;
   const filled = Math.round(pct * length);
   const empty  = length - filled;
   const blocks = U.FULL.repeat(filled) + U.LIGHT.repeat(empty);
-  const pctStr = Math.round(pct * 100).toString().padStart(3, ' ') + '%';
-  return label
-    ? `\`${blocks}\` **${pctStr}**  *${label}*`
-    : `\`${blocks}\` **${pctStr}**`;
+  const pctStr = Math.round(pct * 100).toString().padStart(3,' ') + '%';
+  return label ? `\`${blocks}\` **${pctStr}**  *${label}*` : `\`${blocks}\` **${pctStr}**`;
 }
 
-// ── STAT LINE ─────────────────────────────────────────────────────────
-// Single-line stat with icon, label, value
 function stat(icon, label, value) {
   return `${icon} \`${label.padEnd(14)}\` **${value}**`;
 }
 
-// ── HEADER BOX ────────────────────────────────────────────────────────
-// Creates a double-border ASCII header box
-function headerBox(title, subtitle = '') {
-  const width = Math.max(title.length, subtitle.length) + 6;
-  const top   = U.TL + U.H.repeat(width) + U.TR;
-  const mid   = U.V + '  ' + title.padEnd(width - 2) + '  ' + U.V;
-  const sub   = subtitle ? U.V + '  ' + subtitle.padEnd(width - 2) + '  ' + U.V + '\n' : '';
-  const bot   = U.BL + U.H.repeat(width) + U.BR;
-  return `\`\`\`\n${top}\n${mid}\n${sub}${bot}\n\`\`\``;
-}
-
-// ── PANEL ROW ─────────────────────────────────────────────────────────
-// Creates a box row with label + value
-function panelRow(label, value, width = 32) {
-  const inner = ` ${label}: ${value}`;
-  return U.V + inner.padEnd(width) + U.V;
-}
-
-// ── SIGNAL METER ──────────────────────────────────────────────────────
-// Online/offline dot indicator bars
 function signal(online, total, label = '') {
-  const dots = Array.from({ length: total }, (_, i) =>
-    i < online ? U.FULL : U.LIGHT
-  ).join('');
+  const dots = Array.from({ length: total }, (_, i) => i < online ? U.FULL : U.LIGHT).join('');
   return `\`${dots}\` ${label || `${online}/${total}`}`;
 }
 
-// ── CREDIT STACK DISPLAY ──────────────────────────────────────────────
-// Visual shard pile for wallet amounts
 function shardDisplay(amount) {
-  const tiers = [
-    [30, '👑'],[ 15, '🌠'],[ 10, '🛡️'],[ 8, '🌌'],
-    [ 6, '⚔️'],[ 5, '🔥'],[ 3, '✨'],[ 2, '💎'],[ 1, '💠'],
-  ];
+  const tiers = [[30,'👑'],[15,'🌠'],[10,'🛡️'],[8,'🌌'],[6,'⚔️'],[5,'🔥'],[3,'✨'],[2,'💎'],[1,'💠']];
   let remaining = amount;
-  const parts   = [];
+  const parts = [];
   for (const [val, emoji] of tiers) {
     const count = Math.floor(remaining / val);
     if (count > 0) { parts.push(`${emoji}×${count}`); remaining -= count * val; }
@@ -129,30 +73,12 @@ function shardDisplay(amount) {
   return parts.length ? parts.join(' ') : '—';
 }
 
-// ══════════════════════════════════════════════════════════════════════
-// PANEL BUILDERS
-// Each returns a fully configured EmbedBuilder
-// ══════════════════════════════════════════════════════════════════════
-
-// ── FOOTER FACTORY ────────────────────────────────────────────────────
 function footer(tag = 'TheConclave Dominion') {
   return { text: `${U.STAR} ${tag} ${U.STAR}`, iconURL: ASSETS.BADGE };
 }
 
-// ── BASE THEMED EMBED ─────────────────────────────────────────────────
-function themed(color, authorName, authorIcon = ASSETS.BADGE) {
-  return new EmbedBuilder()
-    .setColor(color)
-    .setAuthor({ name: authorName, iconURL: authorIcon })
-    .setFooter(footer())
-    .setTimestamp();
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// 🧠 AEGIS AI RESPONSE PANEL
-// Deep-space holographic blue. Animated circle GIF thumbnail.
-// ─────────────────────────────────────────────────────────────────────
-function AegisPanel(responseText, model = 'NEURAL·CORE') {
+// ─── AEGIS AI PANEL ───────────────────────────────────────────────────
+function AegisPanel(responseText, model = 'ANTHROPIC·HAIKU') {
   const scanHeader = [
     `\`${U.SCAN_FULL}\``,
     `> ${U.DIAMOND} **A E G I S**  ·  *Sovereign Intelligence Online*`,
@@ -161,7 +87,7 @@ function AegisPanel(responseText, model = 'NEURAL·CORE') {
     responseText.slice(0, 3200),
     '',
     `\`${U.LINE_DOTS}\``,
-    `-# ⌁ ${model} · GROQ FREE TIER · LLAMA 3`,
+    `-# ⌁ ${model} · CONCLAVE SOVEREIGN AI`,
   ].join('\n');
 
   return new EmbedBuilder()
@@ -173,35 +99,32 @@ function AegisPanel(responseText, model = 'NEURAL·CORE') {
     .setTimestamp();
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// 💎 WALLET PANEL
-// Crystal gold. Animated loot-drop GIF. Full stat HUD.
-// ─────────────────────────────────────────────────────────────────────
+// ─── WALLET PANEL ─────────────────────────────────────────────────────
 function WalletPanel(title, w, color = HEX.gold) {
-  const wallet  = w.wallet_balance  || 0;
-  const bank    = w.bank_balance    || 0;
-  const earned  = w.lifetime_earned || 0;
-  const spent   = w.lifetime_spent  || 0;
-  const streak  = w.daily_streak    || 0;
-  const total   = wallet + bank;
-  const maxVis  = Math.max(total, 100);
+  const wallet = w.wallet_balance  || 0;
+  const bank   = w.bank_balance    || 0;
+  const earned = w.lifetime_earned || 0;
+  const spent  = w.lifetime_spent  || 0;
+  const streak = w.daily_streak    || 0;
+  const total  = wallet + bank;
+  const maxVis = Math.max(total, 100);
 
   const desc = [
     `\`${U.LINE_HEAVY}\``,
     `> ${U.DIAMOND} **${w.discord_tag || w.discord_id}**`,
     `\`${U.LINE_HEAVY}\``,
     '',
-    stat('💎', 'WALLET',  wallet.toLocaleString() + ' shards'),
-    stat('🏦', 'VAULT',   bank.toLocaleString()   + ' shards'),
-    stat('📊', 'TOTAL',   total.toLocaleString()  + ' shards'),
+    stat('💎','WALLET',  wallet.toLocaleString() + ' shards'),
+    stat('🏦','VAULT',   bank.toLocaleString()   + ' shards'),
+    stat('📊','TOTAL',   total.toLocaleString()  + ' shards'),
     '',
     bar(wallet, maxVis, 20, 'wallet'),
     bar(bank,   maxVis, 20, 'vault'),
     '',
     `\`${U.LINE_DOTS}\``,
-    stat('📈', 'ALL-TIME EARNED', earned.toLocaleString()),
-    stat('📉', 'ALL-TIME SPENT',  spent.toLocaleString()),
-    stat('🔥', 'STREAK',          `Week ${streak}`),
+    stat('📈','ALL-TIME EARNED', earned.toLocaleString()),
+    stat('📉','ALL-TIME SPENT',  spent.toLocaleString()),
+    stat('🔥','STREAK',          `Week ${streak}`),
     '',
     `> ${U.STAR} *${shardDisplay(wallet)}*`,
   ].join('\n');
@@ -216,20 +139,16 @@ function WalletPanel(title, w, color = HEX.gold) {
     .setTimestamp();
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// 🏆 LEADERBOARD PANEL
-// Purple sovereign. Animated loot GIF. Ranked entries.
-// ─────────────────────────────────────────────────────────────────────
+// ─── LEADERBOARD PANEL ────────────────────────────────────────────────
 function LeaderboardPanel(rows, title = '🏆 ClaveShard Leaderboard') {
-  const medals  = ['👑', '🥇', '🥈', '🥉', '💠', '💠', '💠', '💠', '💠', '💠'];
-  const maxBal  = rows[0] ? ((rows[0].wallet_balance || 0) + (rows[0].bank_balance || 0)) : 1;
+  const medals = ['👑','🥇','🥈','🥉','💠','💠','💠','💠','💠','💠'];
+  const maxBal = rows[0] ? ((rows[0].wallet_balance||0)+(rows[0].bank_balance||0)) : 1;
 
   const lines = rows.map((r, i) => {
-    const total = (r.wallet_balance || 0) + (r.bank_balance || 0);
-    const pct   = Math.round((total / maxBal) * 100);
-    const bLen  = Math.round((total / maxBal) * 14);
-    const bBar  = `\`${U.FULL.repeat(bLen)}${U.LIGHT.repeat(14 - bLen)}\``;
-    return `${medals[i] || `**${i + 1}.**`} **${r.discord_tag || r.discord_id}**\n${bBar} **${total.toLocaleString()}** 💎`;
+    const total = (r.wallet_balance||0) + (r.bank_balance||0);
+    const bLen  = Math.round((total/maxBal)*14);
+    const bBar  = `\`${U.FULL.repeat(bLen)}${U.LIGHT.repeat(14-bLen)}\``;
+    return `${medals[i]||`**${i+1}.**`} **${r.discord_tag||r.discord_id}**\n${bBar} **${total.toLocaleString()}** 💎`;
   }).join('\n\n');
 
   const desc = [
@@ -252,10 +171,7 @@ function LeaderboardPanel(rows, title = '🏆 ClaveShard Leaderboard') {
     .setTimestamp();
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// 🛍️ SHOP / SHARD TIER PANEL
-// Magenta merchant. Animated blue loot drop.
-// ─────────────────────────────────────────────────────────────────────
+// ─── SHOP PANEL ───────────────────────────────────────────────────────
 function ShopPanel(tier) {
   const desc = [
     `\`${U.LINE_HEAVY}\``,
@@ -279,31 +195,27 @@ function ShopPanel(tier) {
     .setTimestamp();
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// 📦 ORDER SUBMITTED PANEL
-// Gold loot drop. Includes QR-code style ref.
-// ─────────────────────────────────────────────────────────────────────
+// ─── ORDER PANEL ──────────────────────────────────────────────────────
 function OrderPanel(ref, tier, platform, serverName, notes, items) {
   const desc = [
     `\`${U.SCAN_FULL}\``,
-    `> ${U.DIAMOND} **ORDER RECEIVED** — *Council will fulfill within 24–72h*`,
+    `> ${U.DIAMOND} **ORDER RECEIVED** — *Council fulfills within 24–72h*`,
     `\`${U.SCAN_FULL}\``,
     '',
-    stat('📋', 'REF',      `\`${ref}\``),
-    stat('💎', 'TIER',     tier.name),
-    stat('🪙', 'COST',     `${tier.shards} Shard${tier.shards !== 1 ? 's' : ''}`),
-    stat('🎮', 'PLATFORM', platform),
-    stat('🗺️', 'SERVER',   serverName),
-    stat('📝', 'NOTES',    notes.slice(0, 80) || '—'),
+    stat('📋','REF',      `\`${ref}\``),
+    stat('💎','TIER',     tier.name),
+    stat('🪙','COST',     `${tier.shards} Shard${tier.shards!==1?'s':''}`),
+    stat('🎮','PLATFORM', platform),
+    stat('🗺️','SERVER',   serverName),
+    stat('📝','NOTES',    notes.slice(0,80)||'—'),
     '',
     `\`${U.LINE_DOTS}\``,
     `**📦 Includes:**`,
-    items.slice(0, 8).map(i => `${U.ARROW_R} ${i}`).join('\n'),
+    items.slice(0,8).map(i=>`${U.ARROW_R} ${i}`).join('\n'),
     '',
     `\`${U.LINE_HEAVY}\``,
     `> 💳 **CashApp** \`$TheConclaveDominion\``,
     `> 💳 **Chime** \`$TheConclaveDominion\``,
-    `> *Include your Discord username in the payment note*`,
   ].join('\n');
 
   return new EmbedBuilder()
@@ -315,40 +227,34 @@ function OrderPanel(ref, tier, platform, serverName, notes, items) {
     .setTimestamp();
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// 🗺️ SERVER MONITOR PANEL
-// Animated lightning GIF. Green online / red offline grid.
-// ─────────────────────────────────────────────────────────────────────
+// ─── SERVER MONITOR PANEL ─────────────────────────────────────────────
 function ServerMonitorPanel(servers) {
   const online  = servers.filter(s => s.status === 'online');
   const offline = servers.filter(s => s.status !== 'online');
-  const players = online.reduce((sum, s) => sum + (s.players || 0), 0);
+  const players = online.reduce((sum,s) => sum+(s.players||0), 0);
 
   const onlineLines  = online.map(s =>
-    `🟢 ${s.emoji} **${s.name}**${s.pvp ? ' ⚔️' : s.patreon ? ' ⭐' : ''} ${signal(s.players || 0, s.maxPlayers || 20, `\`${(s.players || 0)}/${s.maxPlayers || 20}\``)}`
+    `🟢 ${s.emoji} **${s.name}**${s.pvp?' ⚔️':s.patreon?' ⭐':''} ${signal(s.players||0,s.maxPlayers||20,`\`${s.players||0}/${s.maxPlayers||20}\``)}`
   ).join('\n');
-
-  const offlineLines = offline.map(s =>
-    `🔴 ${s.emoji} ~~${s.name}~~ · *offline*`
-  ).join('\n');
+  const offlineLines = offline.map(s => `🔴 ${s.emoji} ~~${s.name}~~ · *offline*`).join('\n');
 
   const desc = [
     `\`${U.SCAN_FULL}\``,
-    `> ⚡ **LIVE CLUSTER STATUS** · ${online.length}/${servers.length} maps online · **${players}** active survivors`,
+    `> ⚡ **LIVE CLUSTER STATUS** · ${online.length}/${servers.length} maps · **${players}** survivors`,
     `\`${U.SCAN_LIGHT}\``,
     '',
-    onlineLines  || '',
-    offlineLines ? '\n' + offlineLines : '',
+    onlineLines||'',
+    offlineLines?'\n'+offlineLines:'',
     '',
     `\`${U.LINE_HEAVY}\``,
     bar(online.length, servers.length, 20, 'cluster health'),
-    bar(players, servers.length * 20, 20, 'total capacity'),
+    bar(players, servers.length*20, 20, 'total capacity'),
     `\`${U.LINE_DOTS}\``,
     `-# ⌁ Auto-refreshes every 5 min · /crossplay to connect`,
   ].join('\n');
 
   return new EmbedBuilder()
-    .setColor(players > 0 ? HEX.emerald : HEX.scarlet)
+    .setColor(players>0 ? HEX.emerald : HEX.scarlet)
     .setAuthor({ name: '⚔️ TheConclave — Live Cluster Monitor', iconURL: ASSETS.CIRCLE_GIF })
     .setThumbnail(ASSETS.LIGHTNING)
     .setDescription(desc)
@@ -356,15 +262,12 @@ function ServerMonitorPanel(servers) {
     .setTimestamp();
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// 🎖️ PROFILE PANEL
-// Cosmic purple. Animated loot. Full stat dashboard.
-// ─────────────────────────────────────────────────────────────────────
+// ─── PROFILE PANEL ────────────────────────────────────────────────────
 function ProfilePanel(user, member, wallet) {
-  const joined  = member?.joinedAt  ? `<t:${Math.floor(member.joinedAt.getTime() / 1000)}:D>` : 'Unknown';
-  const created = `<t:${Math.floor(user.createdAt.getTime() / 1000)}:D>`;
-  const wallet_b = wallet?.wallet_balance || 0;
-  const bank_b   = wallet?.bank_balance   || 0;
+  const joined  = member?.joinedAt ? `<t:${Math.floor(member.joinedAt.getTime()/1000)}:D>` : 'Unknown';
+  const created = `<t:${Math.floor(user.createdAt.getTime()/1000)}:D>`;
+  const wallet_b = wallet?.wallet_balance||0;
+  const bank_b   = wallet?.bank_balance||0;
   const total    = wallet_b + bank_b;
 
   const desc = [
@@ -372,43 +275,40 @@ function ProfilePanel(user, member, wallet) {
     `> ${U.DIAMOND} **${user.username.toUpperCase()}**  ·  *Dominion Citizen*`,
     `\`${U.SCAN_LIGHT}\``,
     '',
-    stat('🎭', 'JOINED SERVER', joined),
-    stat('📅', 'DISCORD SINCE', created),
+    stat('🎭','JOINED SERVER', joined),
+    stat('📅','DISCORD SINCE', created),
     '',
     `\`${U.LINE_DOTS}\``,
-    stat('💎', 'WALLET',        wallet_b.toLocaleString() + ' shards'),
-    stat('🏦', 'VAULT',         bank_b.toLocaleString()   + ' shards'),
-    stat('📊', 'TOTAL',         total.toLocaleString()    + ' shards'),
-    stat('🔥', 'STREAK',        `Week ${wallet?.daily_streak || 0}`),
-    stat('📈', 'LIFETIME EARNED', (wallet?.lifetime_earned || 0).toLocaleString()),
+    stat('💎','WALLET',  wallet_b.toLocaleString()+' shards'),
+    stat('🏦','VAULT',   bank_b.toLocaleString()+'  shards'),
+    stat('📊','TOTAL',   total.toLocaleString()+'  shards'),
+    stat('🔥','STREAK',  `Week ${wallet?.daily_streak||0}`),
+    stat('📈','LIFETIME', (wallet?.lifetime_earned||0).toLocaleString()),
     '',
-    total > 0 ? bar(wallet_b, total, 20, 'wallet ratio') : '',
-    total > 0 ? `> ${U.STAR} *${shardDisplay(wallet_b)}*` : '',
+    total>0 ? bar(wallet_b,total,20,'wallet ratio') : '',
+    total>0 ? `> ${U.STAR} *${shardDisplay(wallet_b)}*` : '',
   ].join('\n');
 
   return new EmbedBuilder()
     .setColor(HEX.plasma)
-    .setAuthor({ name: `🎖️ ${user.username}'s Dominion Profile`, iconURL: user.displayAvatarURL({ size: 64 }) })
-    .setThumbnail(user.displayAvatarURL({ size: 128 }))
+    .setAuthor({ name: `🎖️ ${user.username}'s Dominion Profile`, iconURL: user.displayAvatarURL({size:64}) })
+    .setThumbnail(user.displayAvatarURL({size:128}))
     .setDescription(desc)
     .setFooter(footer())
     .setTimestamp();
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// ⚠️ WARN / MOD PANEL
-// Scarlet alert. Amber accent.
-// ─────────────────────────────────────────────────────────────────────
+// ─── WARN PANEL ───────────────────────────────────────────────────────
 function WarnPanel(target, reason, warnCount, issuedBy) {
-  const urgency  = warnCount >= 3 ? '🔴 **BAN THRESHOLD REACHED**' : warnCount === 2 ? '🟠 *Final warning approaching*' : '🟡 *First formal warning*';
+  const urgency = warnCount>=3 ? '🔴 **BAN THRESHOLD REACHED**' : warnCount===2 ? '🟠 *Final warning approaching*' : '🟡 *First formal warning*';
   const desc = [
     `\`${U.LINE_DOUBLE}\``,
     `> ⚠️  **FORMAL WARNING ISSUED**`,
     `\`${U.LINE_DOUBLE}\``,
     '',
-    stat('👤', 'TARGET',    `<@${target.id}>`),
-    stat('👮', 'ISSUED BY', `<@${issuedBy.id}>`),
-    stat('🔢', 'TOTAL',     `${warnCount} warning${warnCount !== 1 ? 's' : ''}`),
+    stat('👤','TARGET',    `<@${target.id}>`),
+    stat('👮','ISSUED BY', `<@${issuedBy.id}>`),
+    stat('🔢','TOTAL',     `${warnCount} warning${warnCount!==1?'s':''}`),
     '',
     `\`${U.LINE_DOTS}\``,
     `📋 **Reason:**\n> ${reason}`,
@@ -426,10 +326,7 @@ function WarnPanel(target, reason, warnCount, issuedBy) {
     .setTimestamp();
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// 🎉 GIVEAWAY PANEL
-// Gold shimmer. Loot yellow GIF.
-// ─────────────────────────────────────────────────────────────────────
+// ─── GIVEAWAY PANEL ───────────────────────────────────────────────────
 function GiveawayPanel(prize, winners, endTime, hostedBy) {
   const desc = [
     `\`${U.SCAN_FULL}\``,
@@ -438,13 +335,12 @@ function GiveawayPanel(prize, winners, endTime, hostedBy) {
     '',
     `## ${prize}`,
     '',
-    stat('🏆', 'WINNERS',  `${winners}`),
-    stat('⏰', 'ENDS',     `<t:${Math.floor(endTime / 1000)}:R>`),
-    stat('📢', 'HOST',     hostedBy),
+    stat('🏆','WINNERS', `${winners}`),
+    stat('⏰','ENDS',    `<t:${Math.floor(endTime/1000)}:R>`),
+    stat('📢','HOST',    hostedBy),
     '',
     `\`${U.LINE_DOTS}\``,
     `> ${U.ARROW_R} Click the button below to enter!`,
-    `> ${U.ARROW_R} One entry per user`,
   ].join('\n');
 
   return new EmbedBuilder()
@@ -456,44 +352,7 @@ function GiveawayPanel(prize, winners, endTime, hostedBy) {
     .setTimestamp();
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// 🎉 GIVEAWAY ENDED PANEL
-// ─────────────────────────────────────────────────────────────────────
-function GiveawayEndPanel(prize, winnerMentions, noWinners = false) {
-  const desc = noWinners
-    ? [
-        `\`${U.LINE_DOUBLE}\``,
-        `> ~~Giveaway Ended~~ · *No valid entries*`,
-        `\`${U.LINE_DOUBLE}\``,
-        `\n**Prize:** ${prize}`,
-      ].join('\n')
-    : [
-        `\`${U.SCAN_FULL}\``,
-        `> 🎊 **GIVEAWAY CONCLUDED** 🎊`,
-        `\`${U.SCAN_FULL}\``,
-        '',
-        `## ${prize}`,
-        '',
-        `\`${U.LINE_DOTS}\``,
-        `🏆 **Winner${winnerMentions.includes(' ') ? 's' : ''}:**`,
-        `> ${winnerMentions}`,
-        '',
-        `\`${U.LINE_HEAVY}\``,
-        `-# Congratulations from TheConclave Council`,
-      ].join('\n');
-
-  return new EmbedBuilder()
-    .setColor(noWinners ? HEX.scarlet : HEX.gold)
-    .setAuthor({ name: '🎉 Giveaway Results', iconURL: ASSETS.LOOT_YELLOW })
-    .setDescription(desc)
-    .setFooter(footer())
-    .setTimestamp();
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// 📢 ANNOUNCEMENT PANEL
-// Deep plasma purple. Animated circle GIF.
-// ─────────────────────────────────────────────────────────────────────
+// ─── ANNOUNCEMENT PANEL ───────────────────────────────────────────────
 function AnnouncementPanel(title, body, authorName) {
   const desc = [
     `\`${U.SCAN_FULL}\``,
@@ -515,10 +374,7 @@ function AnnouncementPanel(title, body, authorName) {
     .setTimestamp();
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// 📅 EVENT PANEL
-// Magenta. Animated circle. Rich info layout.
-// ─────────────────────────────────────────────────────────────────────
+// ─── EVENT PANEL ──────────────────────────────────────────────────────
 function EventPanel(title, description, date, hostedBy) {
   const desc = [
     `\`${U.SCAN_FULL}\``,
@@ -530,8 +386,8 @@ function EventPanel(title, description, date, hostedBy) {
     description,
     '',
     `\`${U.LINE_DOTS}\``,
-    stat('🕐', 'DATE & TIME', date),
-    stat('📢', 'HOSTED BY',   hostedBy),
+    stat('🕐','DATE & TIME', date),
+    stat('📢','HOSTED BY',   hostedBy),
     '',
     `\`${U.LINE_HEAVY}\``,
     `> *React 🎉 to show interest!*`,
@@ -546,47 +402,41 @@ function EventPanel(title, description, date, hostedBy) {
     .setTimestamp();
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// 🏓 PING / STATUS PANEL
-// Animated lightning. Full system readout.
-// ─────────────────────────────────────────────────────────────────────
-function PingPanel(wsLatency, uptime, memMB, hasGroq, hasSupa, hasMusic) {
-  const uptimeH = Math.floor(uptime / 3600);
-  const uptimeM = Math.floor((uptime % 3600) / 60);
+// ─── PING PANEL ───────────────────────────────────────────────────────
+function PingPanel(wsLatency, uptime, memMB, hasAnthropic, hasGroq, hasSupa) {
+  const uptimeH = Math.floor(uptime/3600);
+  const uptimeM = Math.floor((uptime%3600)/60);
 
   const desc = [
     `\`${U.SCAN_FULL}\``,
     `> ${U.CIRCUIT} **SYSTEM STATUS READOUT**`,
     `\`${U.SCAN_LIGHT}\``,
     '',
-    stat('📡', 'WS LATENCY',  `${wsLatency}ms`),
-    stat('⏰', 'UPTIME',      `${uptimeH}h ${uptimeM}m`),
-    stat('💾', 'MEMORY',      `${memMB}MB heap`),
+    stat('📡','WS LATENCY', `${wsLatency}ms`),
+    stat('⏰','UPTIME',     `${uptimeH}h ${uptimeM}m`),
+    stat('💾','MEMORY',     `${memMB}MB heap`),
     '',
     `\`${U.LINE_DOTS}\``,
-    stat('🧠', 'AI ENGINE',   hasGroq  ? '✅ Groq Free · Llama 3' : '❌ Not configured'),
-    stat('🗄️', 'DATABASE',    hasSupa  ? '✅ Supabase Online'     : '❌ Not connected'),
-    stat('🎵', 'MUSIC',       hasMusic ? '✅ Runtime Loaded'      : '❌ Disabled'),
+    stat('🧠','AI PRIMARY',   hasAnthropic ? '✅ Anthropic Haiku 4.5' : '❌ Not configured'),
+    stat('⚡','AI FALLBACK',  hasGroq      ? '✅ Groq Llama 3'       : '⚠️ Not configured'),
+    stat('🗄️','DATABASE',    hasSupa      ? '✅ Supabase Online'     : '❌ Not connected'),
     '',
     `\`${U.LINE_HEAVY}\``,
-    bar(Math.max(0, 100 - wsLatency / 3), 100, 20, 'connection quality'),
+    bar(Math.max(0,100-wsLatency/3),100,20,'connection quality'),
     `\`${U.LINE_DOTS}\``,
-    `-# ⌁ AEGIS v10.1 Sovereign · Zero-cost AI`,
+    `-# ⌁ AEGIS v12.0 Sovereign · Anthropic Primary`,
   ].join('\n');
 
   return new EmbedBuilder()
-    .setColor(wsLatency < 100 ? HEX.emerald : wsLatency < 250 ? HEX.amber : HEX.scarlet)
+    .setColor(wsLatency<100 ? HEX.emerald : wsLatency<250 ? HEX.amber : HEX.scarlet)
     .setAuthor({ name: '🏓 AEGIS System Status', iconURL: ASSETS.CIRCLE_GIF })
     .setThumbnail(ASSETS.LIGHTNING)
     .setDescription(desc)
-    .setFooter(footer('AEGIS v10.1 Sovereign'))
+    .setFooter(footer('AEGIS v12.0 Sovereign'))
     .setTimestamp();
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// 🎫 TICKET PANEL
-// Cyan tech. Clean layout.
-// ─────────────────────────────────────────────────────────────────────
+// ─── TICKET PANEL ─────────────────────────────────────────────────────
 function TicketPanel() {
   const desc = [
     `\`${U.SCAN_FULL}\``,
@@ -613,10 +463,7 @@ function TicketPanel() {
     .setTimestamp();
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// ℹ️ INFO PANEL
-// Full server info. Animated GIF.
-// ─────────────────────────────────────────────────────────────────────
+// ─── INFO PANEL ───────────────────────────────────────────────────────
 function InfoPanel() {
   const desc = [
     `\`${U.SCAN_FULL}\``,
@@ -637,7 +484,7 @@ function InfoPanel() {
     `\`${U.LINE_DOTS}\``,
     '**💎 Economy**',
     `${U.ARROW_R} Use \`/order\` to shop the ClaveShard catalog`,
-    `${U.ARROW_R} **$1 donation = 1 ClaveShard** via CashApp/Chime`,
+    `${U.ARROW_R} **$1 donation = 1 ClaveShard**`,
     `${U.ARROW_R} CashApp & Chime: \`$TheConclaveDominion\``,
     '',
     `\`${U.LINE_HEAVY}\``,
@@ -654,91 +501,18 @@ function InfoPanel() {
     .setTimestamp();
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// ✅ SUCCESS / GENERIC PANEL
-// ─────────────────────────────────────────────────────────────────────
-function SuccessPanel(title, body, color = HEX.emerald) {
-  return new EmbedBuilder()
-    .setColor(color)
-    .setAuthor({ name: `✅ ${title}`, iconURL: ASSETS.BADGE })
-    .setDescription([
-      `\`${U.LINE_HEAVY}\``,
-      body,
-      `\`${U.LINE_DOTS}\``,
-    ].join('\n'))
-    .setFooter(footer())
-    .setTimestamp();
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// ❌ ERROR PANEL
-// ─────────────────────────────────────────────────────────────────────
-function ErrorPanel(title, body) {
-  return new EmbedBuilder()
-    .setColor(HEX.scarlet)
-    .setAuthor({ name: `⚠️ ${title}`, iconURL: ASSETS.BADGE })
-    .setDescription([
-      `\`${U.LINE_DOUBLE}\``,
-      `> ❌ ${body}`,
-      `\`${U.LINE_DOUBLE}\``,
-    ].join('\n'))
-    .setFooter(footer('AEGIS Error Handler'))
-    .setTimestamp();
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// 📊 AI COST / USAGE PANEL
-// ─────────────────────────────────────────────────────────────────────
-function AiUsagePanel(total, fast, smart, inp, out) {
-  const desc = [
-    `\`${U.SCAN_FULL}\``,
-    `> ${U.CIRCUIT} **AEGIS AI USAGE REPORT**  ·  *Groq Free Tier*`,
-    `\`${U.SCAN_LIGHT}\``,
-    '',
-    stat('🔢', 'TOTAL CALLS',    total.toLocaleString()),
-    stat('⚡', 'FAST  (8B)',     `${fast.toLocaleString()} calls`),
-    stat('🧠', 'SMART (70B)',    `${smart.toLocaleString()} calls`),
-    '',
-    `\`${U.LINE_DOTS}\``,
-    stat('📥', 'INPUT TOKENS',   inp.toLocaleString()),
-    stat('📤', 'OUTPUT TOKENS',  out.toLocaleString()),
-    stat('💸', 'TOTAL COST',     '**$0.00** — Free Forever'),
-    '',
-    bar(fast, total, 20, 'fast calls'),
-    bar(smart, total, 20, 'smart calls'),
-    '',
-    `\`${U.LINE_HEAVY}\``,
-    stat('🔋', 'DAILY LIMIT',   '14,400 req/day'),
-    stat('⏱️', 'HOURLY LIMIT',  '6,000 req/hour'),
-    stat('🤖', 'MODELS',        'Llama 3.1 8B + 3.3 70B'),
-  ].join('\n');
-
-  return new EmbedBuilder()
-    .setColor(HEX.cyan)
-    .setAuthor({ name: '💸 AEGIS AI Dashboard', iconURL: ASSETS.LIGHTNING })
-    .setThumbnail(ASSETS.LIGHTNING)
-    .setDescription(desc)
-    .setFooter(footer('Powered by Groq · Zero Cost'))
-    .setTimestamp();
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// 📜 RULES PANEL
-// ─────────────────────────────────────────────────────────────────────
+// ─── RULES PANEL ──────────────────────────────────────────────────────
 function RulesPanel() {
   const rules = [
-    ['1️⃣', 'RESPECT',     'No harassment, hate speech, or discrimination'],
-    ['2️⃣', 'NO CHEATING', 'No exploits, duplication, mesh building, speed hacks'],
-    ['3️⃣', 'NO GRIEFING', 'No foundation wiping or trap cages on PvE maps'],
-    ['4️⃣', 'BASE LIMITS', 'Follow structure limits — admins may demolish violations'],
-    ['5️⃣', 'LANGUAGE',    'Keep chat SFW in public. English in global chat'],
-    ['⚔️', 'PVP',         'PvP only on Aberration. All other maps are PvE'],
-    ['⚠️', 'WARNINGS',    '3 warnings = ban. Admin abuse = instant ban'],
+    ['1️⃣','RESPECT',     'No harassment, hate speech, or discrimination'],
+    ['2️⃣','NO CHEATING', 'No exploits, duplication, mesh building, speed hacks'],
+    ['3️⃣','NO GRIEFING', 'No foundation wiping or trap cages on PvE maps'],
+    ['4️⃣','BASE LIMITS', 'Follow structure limits — admins may demolish violations'],
+    ['5️⃣','LANGUAGE',    'Keep chat SFW in public. English in global chat'],
+    ['⚔️','PVP',         'PvP only on Aberration. All other maps are PvE'],
+    ['⚠️','WARNINGS',    '3 warnings = ban. Admin abuse = instant ban'],
   ];
-
-  const lines = rules.map(([num, label, val]) =>
-    `${num} **${label}**\n> *${val}*`
-  ).join('\n\n');
+  const lines = rules.map(([num,label,val]) => `${num} **${label}**\n> *${val}*`).join('\n\n');
 
   const desc = [
     `\`${U.SCAN_FULL}\``,
@@ -759,17 +533,14 @@ function RulesPanel() {
     .setTimestamp();
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// 🦕 DINO LOOKUP PANEL
-// ARK green. Animated GET_ARK_D.gif
-// ─────────────────────────────────────────────────────────────────────
+// ─── DINO PANEL ───────────────────────────────────────────────────────
 function DinoPanel(name, responseText) {
   const desc = [
     `\`${U.SCAN_FULL}\``,
     `> 🦕 **ARK ENCYCLOPEDIA** · ${name.toUpperCase()}`,
     `\`${U.SCAN_LIGHT}\``,
     '',
-    responseText.slice(0, 3000),
+    responseText.slice(0,3000),
     '',
     `\`${U.LINE_DOTS}\``,
     `-# ⌁ TheConclave · 5× rates · Max wild 350`,
@@ -784,9 +555,7 @@ function DinoPanel(name, responseText) {
     .setTimestamp();
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// 💡 TIP PANEL
-// ─────────────────────────────────────────────────────────────────────
+// ─── TIP PANEL ────────────────────────────────────────────────────────
 function TipPanel(tipText) {
   return new EmbedBuilder()
     .setColor(HEX.emerald)
@@ -801,21 +570,19 @@ function TipPanel(tipText) {
     .setTimestamp();
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// 🗺️ MAP INFO PANEL
-// ─────────────────────────────────────────────────────────────────────
+// ─── MAP PANEL ────────────────────────────────────────────────────────
 function MapPanel(m) {
   const desc = [
     `\`${U.SCAN_FULL}\``,
-    `> ${m.emoji} **${m.name.toUpperCase()}**${m.pvp ? '  ·  ⚔️ *PvP Enabled*' : m.patreon ? '  ·  ⭐ *Patreon Exclusive*' : ''}`,
+    `> ${m.emoji} **${m.name.toUpperCase()}**${m.pvp?'  ·  ⚔️ *PvP Enabled*':m.patreon?'  ·  ⭐ *Patreon Exclusive*':''}`,
     `\`${U.SCAN_LIGHT}\``,
     '',
     `> ${m.desc}`,
     '',
     `\`${U.LINE_DOTS}\``,
-    stat('📡', 'CONNECTION', `\`${m.ip}\``),
-    stat('⚔️', 'PVP',        m.pvp     ? 'Enabled' : 'Disabled — PvE'),
-    stat('⭐', 'ACCESS',     m.patreon ? 'Elite Patreon Only' : 'Open to All'),
+    stat('📡','CONNECTION', `\`${m.ip}\``),
+    stat('⚔️','PVP',        m.pvp     ? 'Enabled' : 'Disabled — PvE'),
+    stat('⭐','ACCESS',     m.patreon ? 'Elite Patreon Only' : 'Open to All'),
     '',
     `\`${U.LINE_HEAVY}\``,
     `-# /crossplay for connection guide · Xbox · PS · PC`,
@@ -830,10 +597,7 @@ function MapPanel(m) {
     .setTimestamp();
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// 🎵 WELCOME PANEL
-// Purple cosmic. Animated circle GIF.
-// ─────────────────────────────────────────────────────────────────────
+// ─── WELCOME PANEL ────────────────────────────────────────────────────
 function WelcomePanel(user, memberCount) {
   const desc = [
     `\`${U.SCAN_FULL}\``,
@@ -857,15 +621,13 @@ function WelcomePanel(user, memberCount) {
   return new EmbedBuilder()
     .setColor(HEX.plasma)
     .setAuthor({ name: `⚔️ Welcome, ${user.username}!`, iconURL: ASSETS.CIRCLE_GIF })
-    .setThumbnail(user.displayAvatarURL({ size: 128 }))
+    .setThumbnail(user.displayAvatarURL({size:128}))
     .setDescription(desc)
     .setFooter(footer('TheConclave Dominion'))
     .setTimestamp();
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// 🎰 DICE / GAME PANEL
-// ─────────────────────────────────────────────────────────────────────
+// ─── ROLL PANEL ───────────────────────────────────────────────────────
 function RollPanel(notation, rolls, sum, mod) {
   const desc = [
     `\`${U.LINE_HEAVY}\``,
@@ -873,9 +635,7 @@ function RollPanel(notation, rolls, sum, mod) {
     `\`${U.LINE_DOTS}\``,
     '',
     `**Result: ${sum}**`,
-    `\`[ ${rolls.join('  ·  ')} ]\`${mod ? `  ${mod > 0 ? '+' : ''}${mod}` : ''}`,
-    '',
-    bar(sum, rolls.length * parseInt(notation.replace(/.*d/, '')) + (mod || 0), 20, 'roll'),
+    `\`[ ${rolls.join('  ·  ')} ]\`${mod?`  ${mod>0?'+':''}${mod}`:''}`,
   ].join('\n');
 
   return new EmbedBuilder()
@@ -886,12 +646,10 @@ function RollPanel(notation, rolls, sum, mod) {
     .setTimestamp();
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// 📊 POLL PANEL
-// ─────────────────────────────────────────────────────────────────────
+// ─── POLL PANEL ───────────────────────────────────────────────────────
 function PollPanel(question, options, authorName) {
-  const L    = ['🇦','🇧','🇨','🇩','🇪','🇫','🇬','🇭','🇮','🇯'];
-  const lines = options.map((o, i) => `${L[i]} **${o}**`).join('\n\n');
+  const L = ['🇦','🇧','🇨','🇩','🇪','🇫','🇬','🇭','🇮','🇯'];
+  const lines = options.map((o,i) => `${L[i]} **${o}**`).join('\n\n');
 
   const desc = [
     `\`${U.SCAN_FULL}\``,
@@ -914,20 +672,18 @@ function PollPanel(question, options, authorName) {
     .setTimestamp();
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// 📦 ECONOMY SUPPLY PANEL
-// ─────────────────────────────────────────────────────────────────────
+// ─── SUPPLY PANEL ─────────────────────────────────────────────────────
 function SupplyPanel(s) {
   const total = s.walletTotal + s.bankTotal;
-  const desc  = [
+  const desc = [
     `\`${U.SCAN_FULL}\``,
     `> ${U.DIAMOND} **ECONOMY SUPPLY LEDGER**`,
     `\`${U.SCAN_LIGHT}\``,
     '',
-    stat('💎', 'IN WALLETS',  s.walletTotal.toLocaleString() + ' shards'),
-    stat('🏦', 'IN VAULTS',   s.bankTotal.toLocaleString()   + ' shards'),
-    stat('📦', 'GRAND TOTAL', total.toLocaleString()          + ' shards'),
-    stat('👥', 'HOLDERS',     s.holders.toLocaleString()),
+    stat('💎','IN WALLETS',  s.walletTotal.toLocaleString()+' shards'),
+    stat('🏦','IN VAULTS',   s.bankTotal.toLocaleString()+'  shards'),
+    stat('📦','GRAND TOTAL', total.toLocaleString()+'         shards'),
+    stat('👥','HOLDERS',     s.holders.toLocaleString()),
     '',
     bar(s.walletTotal, total, 20, 'circulating'),
     bar(s.bankTotal,   total, 20, 'vaulted'),
@@ -944,19 +700,17 @@ function SupplyPanel(s) {
     .setTimestamp();
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// 🧾 TX HISTORY PANEL
-// ─────────────────────────────────────────────────────────────────────
+// ─── HISTORY PANEL ────────────────────────────────────────────────────
 const TX_ICO = {
-  deposit: '🏦', withdraw: '💸', transfer_out: '➡️', transfer_in: '⬅️',
-  grant: '🎁', deduct: '⬇️', daily_claim: '🌟', admin_set: '🔧',
+  deposit:'🏦', withdraw:'💸', transfer_out:'➡️', transfer_in:'⬅️',
+  grant:'🎁', deduct:'⬇️', daily_claim:'🌟', admin_set:'🔧',
 };
 
 function HistoryPanel(username, rows) {
   const lines = rows.map(r => {
     const sign = ['transfer_in','grant','daily_claim'].includes(r.action) ? '+' : '-';
     const ico  = TX_ICO[r.action] || '💠';
-    return `${ico} \`${sign}${r.amount.toLocaleString().padStart(6)}\` ${r.note || r.action} · <t:${Math.floor(new Date(r.created_at).getTime()/1000)}:R>`;
+    return `${ico} \`${sign}${r.amount.toLocaleString().padStart(6)}\` ${r.note||r.action} · <t:${Math.floor(new Date(r.created_at).getTime()/1000)}:R>`;
   }).join('\n');
 
   const desc = [
@@ -972,21 +726,19 @@ function HistoryPanel(username, rows) {
   return new EmbedBuilder()
     .setColor(HEX.plasma)
     .setAuthor({ name: `🧾 ${username}'s History`, iconURL: ASSETS.LOOT_PURPLE })
-    .setDescription(desc.slice(0, 4000))
+    .setDescription(desc.slice(0,4000))
     .setFooter(footer('ClaveShard Ledger'))
     .setTimestamp();
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// ⏰ REMINDER PANEL
-// ─────────────────────────────────────────────────────────────────────
+// ─── REMINDER PANELS ──────────────────────────────────────────────────
 function ReminderSetPanel(message, fireAt) {
   return new EmbedBuilder()
     .setColor(HEX.cyan)
     .setAuthor({ name: '⏰ Reminder Set', iconURL: ASSETS.BADGE })
     .setDescription([
       `\`${U.LINE_HEAVY}\``,
-      `> ⏰ I'll ping you <t:${Math.floor(fireAt / 1000)}:R>`,
+      `> ⏰ I'll ping you <t:${Math.floor(fireAt/1000)}:R>`,
       `> 📝 *${message}*`,
       `\`${U.LINE_DOTS}\``,
     ].join('\n'))
@@ -1007,16 +759,175 @@ function ReminderFirePanel(message) {
     .setTimestamp();
 }
 
-// ── EXPORTS ──────────────────────────────────────────────────────────
+// ─── AI USAGE PANEL ───────────────────────────────────────────────────
+function AiUsagePanel(total, haiku, groq_, inp, out, cost_usd) {
+  const desc = [
+    `\`${U.SCAN_FULL}\``,
+    `> ${U.CIRCUIT} **AEGIS AI USAGE REPORT**`,
+    `\`${U.SCAN_LIGHT}\``,
+    '',
+    stat('🔢','TOTAL CALLS',   total.toLocaleString()),
+    stat('🧠','ANTHROPIC',     `${haiku.toLocaleString()} calls (primary)`),
+    stat('⚡','GROQ FALLBACK', `${groq_.toLocaleString()} calls`),
+    '',
+    `\`${U.LINE_DOTS}\``,
+    stat('📥','INPUT TOKENS',  inp.toLocaleString()),
+    stat('📤','OUTPUT TOKENS', out.toLocaleString()),
+    stat('💸','EST. COST',     `$${(cost_usd||0).toFixed(4)} USD`),
+    '',
+    bar(haiku, total, 20, 'anthropic calls'),
+    bar(groq_,  total, 20, 'groq fallback'),
+    '',
+    `\`${U.LINE_HEAVY}\``,
+    stat('🤖','PRIMARY',   'claude-haiku-4-5-20251001'),
+    stat('⚡','FALLBACK',  'llama-3.3-70b (Groq free)'),
+  ].join('\n');
+
+  return new EmbedBuilder()
+    .setColor(HEX.cyan)
+    .setAuthor({ name: '💸 AEGIS AI Dashboard', iconURL: ASSETS.LIGHTNING })
+    .setThumbnail(ASSETS.LIGHTNING)
+    .setDescription(desc)
+    .setFooter(footer('Anthropic Primary · Groq Fallback'))
+    .setTimestamp();
+}
+
+// ─── SUCCESS / ERROR PANELS ───────────────────────────────────────────
+function SuccessPanel(title, body, color = HEX.emerald) {
+  return new EmbedBuilder()
+    .setColor(color)
+    .setAuthor({ name: `✅ ${title}`, iconURL: ASSETS.BADGE })
+    .setDescription([`\`${U.LINE_HEAVY}\``, body, `\`${U.LINE_DOTS}\``].join('\n'))
+    .setFooter(footer())
+    .setTimestamp();
+}
+
+function ErrorPanel(title, body) {
+  return new EmbedBuilder()
+    .setColor(HEX.scarlet)
+    .setAuthor({ name: `⚠️ ${title}`, iconURL: ASSETS.BADGE })
+    .setDescription([`\`${U.LINE_DOUBLE}\``, `> ❌ ${body}`, `\`${U.LINE_DOUBLE}\``].join('\n'))
+    .setFooter(footer('AEGIS Error Handler'))
+    .setTimestamp();
+}
+
+// ─── NEW: STATS PANEL (server activity digest) ────────────────────────
+function StatsPanel(guild, memberCount, onlineCount, channelCount, roleCount, boosts) {
+  const desc = [
+    `\`${U.SCAN_FULL}\``,
+    `> ${U.DIAMOND} **${guild.name.toUpperCase()}** · *Server Statistics*`,
+    `\`${U.SCAN_LIGHT}\``,
+    '',
+    stat('👥','MEMBERS',  memberCount.toLocaleString()),
+    stat('🟢','ONLINE',   `~${onlineCount}`),
+    stat('💬','CHANNELS', channelCount.toLocaleString()),
+    stat('🎭','ROLES',    roleCount.toLocaleString()),
+    stat('🌟','BOOSTS',   boosts.toString()),
+    '',
+    bar(onlineCount, memberCount, 20, 'online ratio'),
+    `\`${U.LINE_HEAVY}\``,
+  ].join('\n');
+
+  return new EmbedBuilder()
+    .setColor(HEX.plasma)
+    .setAuthor({ name: `🏠 ${guild.name}`, iconURL: guild.iconURL()||ASSETS.BADGE })
+    .setDescription(desc)
+    .setFooter(footer('TheConclave Dominion'))
+    .setTimestamp();
+}
+
+// ─── NEW: ECONOMY DIGEST PANEL (new /digest command) ─────────────────
+function DigestPanel(period, grants, deducts, orders, topUser) {
+  const desc = [
+    `\`${U.SCAN_FULL}\``,
+    `> ${U.DIAMOND} **ECONOMY DIGEST** · *${period}*`,
+    `\`${U.SCAN_LIGHT}\``,
+    '',
+    stat('🎁','SHARDS GRANTED', grants.toLocaleString()),
+    stat('⬇️','SHARDS DEDUCTED', deducts.toLocaleString()),
+    stat('📦','ORDERS PLACED',  orders.toLocaleString()),
+    stat('👑','TOP EARNER',     topUser || 'N/A'),
+    '',
+    `\`${U.LINE_HEAVY}\``,
+  ].join('\n');
+
+  return new EmbedBuilder()
+    .setColor(HEX.gold)
+    .setAuthor({ name: '📊 Economy Digest', iconURL: ASSETS.LOOT_YELLOW })
+    .setDescription(desc)
+    .setFooter(footer('ClaveShard Economy'))
+    .setTimestamp();
+}
+
+// ─── NEW: COUNCIL PANEL ───────────────────────────────────────────────
+function CouncilPanel() {
+  const members = [
+    { title:'High Curator',    name:'Tw_',           role:'Owner / Founder',     emoji:'👑' },
+    { title:'Archmaestro',     name:'Slothie',        role:'Co-Owner',            emoji:'⚔️' },
+    { title:'Wildheart',       name:'Sandy',          role:'Senior Council',      emoji:'🌿' },
+    { title:'Skywarden',       name:'Jenny',          role:'Council',             emoji:'☁️' },
+    { title:'Oracle of Veils', name:'Arbanion',       role:'Council',             emoji:'🔮' },
+    { title:'Hazeweaver',      name:'Okami',          role:'Council',             emoji:'🌀' },
+    { title:'Gatekeeper',      name:'Rookiereaper',   role:'Council',             emoji:'🚪' },
+    { title:'Veilcaster',      name:'Icyreaper',      role:'Council',             emoji:'❄️' },
+    { title:'ForgeSmith',      name:'Jake',           role:'Council',             emoji:'🔨' },
+    { title:'Iron Vanguard',   name:'CredibleDevil',  role:'Council',             emoji:'🛡️' },
+  ];
+
+  const lines = members.map(m => `${m.emoji} **${m.title}** · ${m.name} · *${m.role}*`).join('\n');
+
+  const desc = [
+    `\`${U.SCAN_FULL}\``,
+    `> ${U.DIAMOND} **THE CONCLAVE COUNCIL**`,
+    `\`${U.SCAN_FULL}\``,
+    '',
+    lines,
+    '',
+    `\`${U.LINE_HEAVY}\``,
+    `-# Open a /ticket to reach staff · No DMs please`,
+  ].join('\n');
+
+  return new EmbedBuilder()
+    .setColor(HEX.gold)
+    .setAuthor({ name: '🏛️ Meet The Council', iconURL: ASSETS.BADGE })
+    .setThumbnail(ASSETS.BADGE)
+    .setDescription(desc)
+    .setFooter(footer('TheConclave Dominion'))
+    .setTimestamp();
+}
+
+// ─── NEW: LEADERBOARD STREAK PANEL ───────────────────────────────────
+function StreakPanel(rows) {
+  const lines = rows.map((r,i) => {
+    const medals = ['👑','🥇','🥈','🥉'];
+    const m = medals[i] || `**${i+1}.**`;
+    return `${m} **${r.discord_tag||r.discord_id}** · 🔥 Week ${r.daily_streak||0}`;
+  }).join('\n');
+
+  return new EmbedBuilder()
+    .setColor(HEX.amber)
+    .setAuthor({ name: '🔥 Weekly Streak Leaderboard', iconURL: ASSETS.LOOT_YELLOW })
+    .setDescription([
+      `\`${U.SCAN_FULL}\``,
+      `> 🔥 *Longest active weekly claim streaks*`,
+      `\`${U.SCAN_LIGHT}\``,
+      '',
+      lines || '_No streak data yet._',
+      '',
+      `\`${U.LINE_HEAVY}\``,
+      `-# Claim every 7 days with /weekly`,
+    ].join('\n'))
+    .setFooter(footer('ClaveShard Economy'))
+    .setTimestamp();
+}
+
 module.exports = {
-  // Panels
   AegisPanel, WalletPanel, LeaderboardPanel, ShopPanel, OrderPanel,
   ServerMonitorPanel, ProfilePanel, WarnPanel, GiveawayPanel,
-  GiveawayEndPanel, AnnouncementPanel, EventPanel, PingPanel,
-  TicketPanel, InfoPanel, SuccessPanel, ErrorPanel, AiUsagePanel,
-  RulesPanel, DinoPanel, TipPanel, MapPanel, WelcomePanel,
-  RollPanel, PollPanel, SupplyPanel, HistoryPanel,
-  ReminderSetPanel, ReminderFirePanel,
-  // Primitives (for inline use in bot.js)
+  AnnouncementPanel, EventPanel, PingPanel, TicketPanel, InfoPanel,
+  SuccessPanel, ErrorPanel, AiUsagePanel, RulesPanel, DinoPanel,
+  TipPanel, MapPanel, WelcomePanel, RollPanel, PollPanel,
+  SupplyPanel, HistoryPanel, ReminderSetPanel, ReminderFirePanel,
+  StatsPanel, DigestPanel, CouncilPanel, StreakPanel,
   bar, stat, signal, shardDisplay, U, HEX, ASSETS,
 };
