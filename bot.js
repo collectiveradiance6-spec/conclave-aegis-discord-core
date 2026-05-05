@@ -30,7 +30,6 @@
 require('dotenv').config();
  
 const { sendWatchtowerPanel, handleWatchtowerInteraction } = require('./watchtower-system');
-const { handleTriviaCommand, handleTriviaButton, handleTriviaModalSubmit } = require('./trivia_fix');
 const http = require('http');
 const axios = require('axios');
 const {
