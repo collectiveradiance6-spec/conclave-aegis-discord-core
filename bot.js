@@ -30,6 +30,7 @@
 require('dotenv').config();
  
 const { sendWatchtowerPanel, handleWatchtowerInteraction } = require('./watchtower-system');
+const { handleTriviaCommand, handleTriviaButton, handleTriviaModalSubmit } = require('./trivia_fix');
 const http = require('http');
 const axios = require('axios');
 const {
@@ -42,7 +43,12 @@ const { createClient } = require('@supabase/supabase-js');
 const Groq      = require('groq-sdk');
 const Anthropic = require('@anthropic-ai/sdk');
 const P         = require('./panels.js');
- 
+ const {
+  handleTriviaCommand,
+  handleTriviaButton,
+  handleTriviaModalSubmit
+} = require('./trivia_fix');
+
 // ══════════════════════════════════════════════════════════════════════
 // ENV
 // ══════════════════════════════════════════════════════════════════════
@@ -1212,6 +1218,9 @@ const activeVotes = new Map();
 bot.on(Events.InteractionCreate, async interaction => {
   try {
     if (await handleWatchtowerInteraction(interaction, bot)) return;
+  if (await handleTriviaCommand(interaction)) return;
+if (await handleTriviaButton(interaction)) return;
+if (await handleTriviaModalSubmit(interaction)) return;
  
     if (interaction.isButton() && interaction.customId==='giveaway_enter') {
       const gw = activeGiveaways.get(interaction.message.id);
@@ -1267,7 +1276,7 @@ bot.on(Events.InteractionCreate, async interaction => {
       setTimeout(()=>interaction.channel.delete().catch(()=>{}), 5000);
       return;
     }
- 
+
     if (!interaction.isChatInputCommand()) return;
     const { commandName:cmd } = interaction;
     await interaction.deferReply();
