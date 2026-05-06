@@ -24,6 +24,10 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+// ── In-memory question bank (populated by factory below) ──────────────────
+// Each entry: { question: string, answer: string, reward: number, hint: string }
+let _questionBank = [];
+
 // ── UnbelievaBoat ──────────────────────────────────────────────────────────
 const UB_API_BASE = 'https://unbelievaboat.com/api/v1';
 // FIX #3: was UNBELIEVABOAT_TOKEN — must match Render env / bot.js
@@ -60,7 +64,7 @@ async function handleTriviaCommand(interaction) {
     activeSessions.delete(channelId);
   }
 
-  const { question, answer, reward } = await pickQuestion(interaction.guildId);
+  const { question, answer, reward, hint: questionHint } = await pickQuestion(interaction.guildId);
 
   // Insert session row to get a sessionId for FK refs
   const { data: sessionRow, error: sessionErr } = await supabase
@@ -95,6 +99,7 @@ async function handleTriviaCommand(interaction) {
     sessionId,
     question,
     answer:        answer.toLowerCase().trim(),
+    hint:          questionHint || '',
     reward,
     expiresAt,
     winnerId:      null,
@@ -140,13 +145,13 @@ async function handleTriviaButton(interaction) {
     // accidentally answer a new question in the same channel.
     const modal = new ModalBuilder()
       .setCustomId(`trivia_answer_modal:${channelId}:${session.sessionId}`)
-      .setTitle('🎯 Submit Your Answer');
+      .setTitle('⚔️ Claim the Vault');
 
     const answerInput = new TextInputBuilder()
       .setCustomId('trivia_answer_input')
-      .setLabel('Type your answer below')
+      .setLabel('Your Answer')
       .setStyle(TextInputStyle.Short)
-      .setPlaceholder('e.g. Helena')
+      .setPlaceholder('Type your answer — first correct wins')
       .setRequired(true)
       .setMaxLength(120);
 
@@ -163,8 +168,10 @@ async function handleTriviaButton(interaction) {
       await interaction.reply({ content: '⚠️ No active trivia session here.', ephemeral: true });
       return true;
     }
-    const hint = generateHint(session.answer);
-    await interaction.reply({ content: `💡 Hint: **${hint}**`, ephemeral: true });
+    const hint = session.hint
+      ? `🔍  **${session.hint}**`
+      : `🔍  \`${generateHint(session.answer)}\``;
+    await interaction.reply({ content: hint, ephemeral: true });
     return true;
   }
 
@@ -253,7 +260,7 @@ async function handleTriviaModalSubmit(interaction) {
     }).catch(e => console.error('[TRIVIA] log insert error:', e.message));
 
     await interaction.editReply({
-      content: '❌ **Incorrect.** The question is still open — keep trying!',
+      content: '❌  **Wrong.** The question is still open — try again.',
     });
     return true;
   }
@@ -301,15 +308,15 @@ async function handleTriviaModalSubmit(interaction) {
   // Ephemeral confirm to winner — always fires
   await interaction.editReply({
     content: ubSuccess
-      ? `✅ **Correct!** You've been awarded **${session.reward.toLocaleString()} ConCoins** to your Booty Collection!`
-      : `✅ **Correct!** (ConCoin transfer pending — ask staff to run \`/grant-concoins\`.)`,
+      ? `✅  **Correct. The vault is yours.**\n\`+${session.reward.toLocaleString()} ConCoins\` added to your Booty Collection.`
+      : `✅  **Correct.** ConCoin transfer pending — ask staff to run \`/grant-concoins\`.`,
   });
 
   // Public reveal in channel
   const channel = interaction.client.channels.cache.get(channelId);
   if (channel) {
     await channel.send({
-      embeds: [revealEmbed(session.question, session.answer, interaction.user, 'won')],
+      embeds: [revealEmbed(session.question, session.answer, interaction.user, 'won', session.reward)],
     }).catch(() => {});
   }
 
@@ -393,6 +400,13 @@ async function awardUnbelievaBoatCoins(guildId, userId, amount) {
 }
 
 async function pickQuestion(guildId) {
+  // ── Primary: in-memory bank from bot.js TRIVIA_QUESTIONS (200 questions) ──
+  if (_questionBank.length > 0) {
+    const pick = _questionBank[Math.floor(Math.random() * _questionBank.length)];
+    return { question: pick.question, answer: pick.answer, reward: pick.reward ?? 15000, hint: pick.hint ?? '' };
+  }
+
+  // ── Secondary: Supabase trivia_questions table (if it exists) ─────────────
   const { data } = await supabase
     .from('trivia_questions')
     .select('question, answer, reward')
@@ -405,10 +419,10 @@ async function pickQuestion(guildId) {
       .update({ last_used: new Date().toISOString() })
       .eq('question', pick.question)
       .catch(() => {});
-    return { question: pick.question, answer: pick.answer, reward: pick.reward ?? 15000 };
+    return { question: pick.question, answer: pick.answer, reward: pick.reward ?? 15000, hint: '' };
   }
 
-  // Fallback bank
+  // ── Fallback: hardcoded mini-bank (last resort) ────────────────────────────
   const bank = [
     { question: 'What is the name of the ARK storyline character you play as?',          answer: 'Helena',                reward: 15000 },
     { question: 'What resource is required to craft a Rex Saddle?',                       answer: 'hide',                  reward: 10000 },
@@ -431,63 +445,141 @@ async function pickQuestion(guildId) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// EMBED BUILDERS
+// EMBED BUILDERS — cinematic dark design
 // ══════════════════════════════════════════════════════════════════════════
 
+// Reward tier → accent color
+function rewardColor(reward) {
+  if (reward >= 25000) return 0xE040FB; // prismatic violet  — elite
+  if (reward >= 18000) return 0xFF6B00; // ember amber       — hard
+  if (reward >= 12000) return 0x00C8FF; // arc cyan          — medium
+  return                       0x9DAFBD; // slate silver      — standard
+}
+
+// Reward tier → difficulty label
+function rewardTier(reward) {
+  if (reward >= 25000) return '👑  ELITE';
+  if (reward >= 18000) return '🔥  HARD';
+  if (reward >= 12000) return '⚡  MEDIUM';
+  return                       '📜  STANDARD';
+}
+
+/**
+ * Active trivia question embed — cinematic dark panel.
+ * Uses Discord relative timestamp so the timer is live for every viewer.
+ */
 function buildTriviaEmbed(question, reward, expiresMs) {
+  const expiryUnix = Math.floor((Date.now() + expiresMs) / 1000);
+
   return new EmbedBuilder()
-    .setColor(0xE8A020)
-    .setTitle('🎯 TheConclave ARK Trivia!')
-    .setDescription(`**${question}**`)
-    .addFields(
-      { name: '🏆 Reward', value: `**${reward.toLocaleString()} ConCoins** added to your Booty Collection`, inline: false },
-      { name: '⏱ Expires', value: `In ${expiresMs / 60000} minutes`, inline: true },
+    .setColor(rewardColor(reward))
+    .setAuthor({ name: 'AEGIS  ·  DOMINION TRIVIA' })
+    .setTitle('❓  A Question Emerges from the Void')
+    .setDescription(
+      [
+        '```',
+        question,
+        '```',
+        '> *First correct answer claims the vault.*',
+      ].join('\n')
     )
-    .setFooter({ text: 'Click Submit Answer to open the answer box! First correct answer wins — no chat needed.' })
+    .addFields(
+      { name: '💰  Reward',      value: `\`${reward.toLocaleString()}\` **ConCoins**`, inline: true  },
+      { name: '🏷️  Difficulty',  value: rewardTier(reward),                            inline: true  },
+      { name: '⏳  Closes',      value: `<t:${expiryUnix}:R>`,                         inline: true  },
+    )
+    .setFooter({ text: 'Hit ⚔️ Answer · 🔍 Hint is ephemeral · ⏭ Skip is staff-only  ·  TheConclave Dominion' })
     .setTimestamp();
 }
 
+/**
+ * Button row — three actions: answer, hint, skip (staff only)
+ */
 function buildTriviaButtons() {
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('trivia_submit').setLabel('Submit Answer').setStyle(ButtonStyle.Primary).setEmoji('💬'),
-    new ButtonBuilder().setCustomId('trivia_hint').setLabel('Get Hint').setStyle(ButtonStyle.Secondary).setEmoji('💡'),
-    new ButtonBuilder().setCustomId('trivia_skip').setLabel('Skip').setStyle(ButtonStyle.Danger).setEmoji('⏭'),
+    new ButtonBuilder()
+      .setCustomId('trivia_submit')
+      .setLabel('Answer')
+      .setStyle(ButtonStyle.Primary)
+      .setEmoji('⚔️'),
+    new ButtonBuilder()
+      .setCustomId('trivia_hint')
+      .setLabel('Hint')
+      .setStyle(ButtonStyle.Secondary)
+      .setEmoji('🔍'),
+    new ButtonBuilder()
+      .setCustomId('trivia_skip')
+      .setLabel('Skip  [Staff]')
+      .setStyle(ButtonStyle.Danger)
+      .setEmoji('⏭'),
   );
 }
 
-function revealEmbed(question, answer, winner, status) {
-  const statusMap = {
-    won:     { color: 0x00FF88, title: '✅ Trivia Answered!' },
-    expired: { color: 0xFF4444, title: '⌛ Time\'s Up!' },
-    skipped: { color: 0x888888, title: '⏭ Trivia Skipped' },
+/**
+ * Result embed — shown publicly in channel after session ends.
+ * Accepts optional reward arg so the winner embed shows the payout.
+ */
+function revealEmbed(question, answer, winner, status, reward = 0) {
+  const cfg = {
+    won: {
+      color:       0x00E676,
+      banner:      '✅  Vault Claimed',
+      description: winner
+        ? `<@${winner.id}> **struck first and seized the reward.**\n\`+${reward.toLocaleString()} ConCoins\` deposited to their Booty Collection.`
+        : '✅ Correct answer submitted.',
+    },
+    expired: {
+      color:       0x37474F,
+      banner:      '⌛  Consumed by the Void',
+      description: 'No survivor answered in time. The knowledge returns to the dark.',
+    },
+    skipped: {
+      color:       0x546E7A,
+      banner:      '⏭  Question Dissolved',
+      description: 'A council member skipped this question.',
+    },
   };
-  const { color, title } = statusMap[status] || statusMap.expired;
 
-  const embed = new EmbedBuilder()
+  const { color, banner, description } = cfg[status] ?? cfg.expired;
+
+  return new EmbedBuilder()
     .setColor(color)
-    .setTitle(title)
+    .setAuthor({ name: 'AEGIS  ·  DOMINION TRIVIA  ·  CLOSED' })
+    .setTitle(banner)
+    .setDescription(description)
     .addFields(
-      { name: '❓ Question', value: question, inline: false },
-      { name: '✅ Answer',   value: `**${answer}**`, inline: false },
-    );
-
-  if (winner) {
-    embed.addFields({ name: '🏆 Winner', value: `<@${winner.id}> — ConCoins awarded!`, inline: false });
-  }
-
-  return embed;
+      { name: '📋  Question', value: `\`\`\`${question}\`\`\``, inline: false },
+      { name: '✅  Answer',   value: `> **${answer}**`,          inline: false },
+    )
+    .setFooter({ text: 'AEGIS Trivia  ·  TheConclave Dominion' })
+    .setTimestamp();
 }
 
+/**
+ * Inline error embed — validation failures, duplicate sessions, etc.
+ */
 function errorEmbed(msg) {
-  return new EmbedBuilder().setColor(0xFF4444).setDescription(`⚠️ ${msg}`);
+  return new EmbedBuilder()
+    .setColor(0xB71C1C)
+    .setAuthor({ name: 'AEGIS  ·  ERROR' })
+    .setDescription(`\`\`\`diff\n- ${msg}\n\`\`\``);
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// EXPORTS
+// FACTORY EXPORT
+// Usage in bot.js:
+//   const { handleTriviaCommand, handleTriviaButton, handleTriviaModalSubmit }
+//     = require('./trivia_fix')(mappedQuestions);
+//
+// If called with no argument (legacy), falls through to Supabase / hardcoded bank.
 // ══════════════════════════════════════════════════════════════════════════
 
-module.exports = {
-  handleTriviaCommand,
-  handleTriviaButton,
-  handleTriviaModalSubmit,
+module.exports = function initTrivia(questionBank) {
+  if (Array.isArray(questionBank) && questionBank.length > 0) {
+    _questionBank = questionBank;
+    console.log(`[TRIVIA] Loaded ${_questionBank.length} questions from bot.js bank.`);
+  } else {
+    console.warn('[TRIVIA] No question bank passed — will use Supabase / hardcoded fallback.');
+  }
+  return { handleTriviaCommand, handleTriviaButton, handleTriviaModalSubmit };
 };
