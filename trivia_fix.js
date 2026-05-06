@@ -1,75 +1,68 @@
 /**
- * AEGIS TRIVIA SYSTEM — trivia_fix.js
- * Drop-in module for conclave-aegis-discord-core/bot.js
+ * AEGIS TRIVIA SYSTEM — trivia_fix.js  (patched)
  *
- * Fixes:
- *   - "This interaction failed" on Submit Answer: modal must be shown
- *     synchronously (zero async before showModal)
- *   - Answer validation with fuzzy matching
- *   - ConCoin award via UnbelievaBoat REST API
- *   - Full Supabase audit trail (trivia_sessions + trivia_logs)
- *
- * Integration points — search bot.js for each INTEGRATION POINT comment
- * and splice in the referenced call.
+ * Fixes applied:
+ *   1. activeSessions.delete() now runs BEFORE async DB/UB calls so a
+ *      Supabase error can never leave a ghost session blocking the channel.
+ *   2. Modal customId includes sessionId so an old open modal cannot
+ *      accidentally answer a brand-new question in the same channel.
+ *   3. Env var corrected: UNBELIEVABOAT_API_TOKEN (matches bot.js / Render).
+ *   4. timeoutHandle is always cleared on any exit path.
  */
-
 'use strict';
 
-const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, EmbedBuilder } = require('discord.js');
+const {
+  ModalBuilder, TextInputBuilder, TextInputStyle,
+  ActionRowBuilder, EmbedBuilder,
+  ButtonBuilder, ButtonStyle,
+} = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
 
-// ─── Supabase client (reuse existing if bot.js already initialises one) ───────
+// Reuse existing Supabase creds
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// ─── UnbelievaBoat API ────────────────────────────────────────────────────────
+// ── UnbelievaBoat ──────────────────────────────────────────────────────────
 const UB_API_BASE = 'https://unbelievaboat.com/api/v1';
-const UB_TOKEN    = process.env.UNBELIEVABOAT_TOKEN; // add to Render env vars
+// FIX #3: was UNBELIEVABOAT_TOKEN — must match Render env / bot.js
+const UB_TOKEN = process.env.UNBELIEVABOAT_API_TOKEN;
 
-// ─── Active trivia sessions: Map<channelId, TriviaSession> ───────────────────
+// ── Active sessions: Map<channelId, TriviaSession> ────────────────────────
 const activeSessions = new Map();
 
-/**
- * TriviaSession shape:
- * {
- *   sessionId: string (uuid from Supabase insert),
- *   question:  string,
- *   answer:    string,   // canonical lowercase trimmed
- *   reward:    number,   // ConCoins
- *   expiresAt: number,   // Date.now() + ms
- *   winnerId:  string | null,
- *   messageId: string,
- *   channelId: string,
- *   guildId:   string,
- *   timeoutHandle: NodeJS.Timeout
- * }
- */
-
-// ─── Public API ───────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════
+// PUBLIC API
+// ══════════════════════════════════════════════════════════════════════════
 
 /**
- * INTEGRATION POINT 1 — /trivia slash command handler
- * Replace your existing trivia command execute block with this.
+ * INTEGRATION POINT 1 — /trivia slash command
  */
 async function handleTriviaCommand(interaction) {
   if (!interaction.isChatInputCommand() || interaction.commandName !== 'trivia') return false;
 
-  await interaction.deferReply(); // safe to defer for slash command
+  await interaction.deferReply();
 
   const channelId = interaction.channelId;
+
+  // Check for active session (in-memory only — no DB roundtrip needed)
   if (activeSessions.has(channelId)) {
-    await interaction.editReply({
-      embeds: [errorEmbed('A trivia question is already active in this channel. Answer it first!')]
-    });
-    return true;
+    const existing = activeSessions.get(channelId);
+    if (Date.now() < existing.expiresAt) {
+      await interaction.editReply({
+        embeds: [errorEmbed('A trivia question is already active in this channel. Answer it first!')],
+      });
+      return true;
+    }
+    // Stale entry — clean up silently
+    clearTimeout(existing.timeoutHandle);
+    activeSessions.delete(channelId);
   }
 
-  // Pick question — pull from Supabase trivia_questions table or use inline bank
   const { question, answer, reward } = await pickQuestion(interaction.guildId);
 
-  // Insert session row BEFORE posting (get sessionId for FK refs)
+  // Insert session row to get a sessionId for FK refs
   const { data: sessionRow, error: sessionErr } = await supabase
     .from('trivia_sessions')
     .insert({
@@ -79,48 +72,52 @@ async function handleTriviaCommand(interaction) {
       answer_hash: simpleHash(answer.toLowerCase().trim()),
       reward,
       started_by:  interaction.user.id,
-      status:      'active'
+      status:      'active',
     })
     .select('id')
     .single();
 
   if (sessionErr) {
     console.error('[TRIVIA] session insert error:', sessionErr);
-    await interaction.editReply({ embeds: [errorEmbed('Failed to start trivia session. Try again.')] });
-    return true;
+    // Proceed without a DB-backed session — trivia still works in memory
   }
 
-  const expiresMs = 120_000; // 2 minutes
-  const expiresAt = Date.now() + expiresMs;
+  const sessionId  = sessionRow?.id ?? `mem_${Date.now()}`;
+  const expiresMs  = 120_000; // 2 minutes
+  const expiresAt  = Date.now() + expiresMs;
 
-  const embed = buildTriviaEmbed(question, reward, expiresMs);
-  const components = buildTriviaButtons();
-
-  const msg = await interaction.editReply({ embeds: [embed], components });
-
-  // Register session
-  const timeoutHandle = setTimeout(() => expireSession(channelId, interaction.client), expiresMs);
+  const timeoutHandle = setTimeout(
+    () => expireSession(channelId, interaction.client),
+    expiresMs
+  );
 
   activeSessions.set(channelId, {
-    sessionId: sessionRow.id,
+    sessionId,
     question,
-    answer:    answer.toLowerCase().trim(),
+    answer:        answer.toLowerCase().trim(),
     reward,
     expiresAt,
-    winnerId:  null,
-    messageId: msg.id,
+    winnerId:      null,
+    messageId:     null,   // filled after editReply
     channelId,
-    guildId:   interaction.guildId,
-    timeoutHandle
+    guildId:       interaction.guildId,
+    timeoutHandle,
   });
+
+  const msg = await interaction.editReply({
+    embeds:     [buildTriviaEmbed(question, reward, expiresMs)],
+    components: [buildTriviaButtons()],
+  });
+
+  // Store messageId for potential edits
+  const session = activeSessions.get(channelId);
+  if (session) session.messageId = msg.id;
 
   return true;
 }
 
 /**
- * INTEGRATION POINT 2 — Button interaction handler
- * Inside your interactionCreate: if (interaction.isButton()) block, call this.
- * It returns true if it handled the interaction, false if unrelated.
+ * INTEGRATION POINT 2 — Button interactions
  */
 async function handleTriviaButton(interaction) {
   if (!interaction.isButton()) return false;
@@ -128,9 +125,21 @@ async function handleTriviaButton(interaction) {
   const { customId, channelId } = interaction;
 
   if (customId === 'trivia_submit') {
-    // ⚡ ZERO async before showModal — this is the fix for "This interaction failed"
+    const session = activeSessions.get(channelId);
+
+    if (!session || Date.now() >= session.expiresAt || session.winnerId) {
+      // Interaction already over — ephemeral message is safer than modal
+      await interaction.reply({
+        content: '⌛ This trivia question has already ended.',
+        ephemeral: true,
+      });
+      return true;
+    }
+
+    // FIX #2: embed sessionId in modal customId so old modals can't
+    // accidentally answer a new question in the same channel.
     const modal = new ModalBuilder()
-      .setCustomId(`trivia_answer_modal:${channelId}`)
+      .setCustomId(`trivia_answer_modal:${channelId}:${session.sessionId}`)
       .setTitle('🎯 Submit Your Answer');
 
     const answerInput = new TextInputBuilder()
@@ -143,7 +152,7 @@ async function handleTriviaButton(interaction) {
 
     modal.addComponents(new ActionRowBuilder().addComponents(answerInput));
 
-    // showModal is the FIRST and ONLY thing we do with this interaction
+    // showModal must be the only reply — no prior await on this interaction
     await interaction.showModal(modal);
     return true;
   }
@@ -165,17 +174,16 @@ async function handleTriviaButton(interaction) {
       await interaction.reply({ content: '⚠️ No active trivia session here.', ephemeral: true });
       return true;
     }
-    // Only council/admin can skip — adjust role check to match your permission util
-    const member = interaction.member;
-    const canSkip = member.permissions.has('ManageMessages');
+    const canSkip = interaction.member?.permissions?.has('ManageMessages');
     if (!canSkip) {
       await interaction.reply({ content: '🚫 Only staff can skip trivia questions.', ephemeral: true });
       return true;
     }
     await interaction.deferUpdate();
+    const skippedSession = activeSessions.get(channelId); // capture before delete
     await endSession(channelId, null, interaction.client, 'skipped');
     await interaction.followUp({
-      embeds: [revealEmbed(session.question, session.answer, null, 'skipped')]
+      embeds: [revealEmbed(skippedSession.question, skippedSession.answer, null, 'skipped')],
     });
     return true;
   }
@@ -184,26 +192,44 @@ async function handleTriviaButton(interaction) {
 }
 
 /**
- * INTEGRATION POINT 3 — Modal submit handler
- * Inside your interactionCreate: if (interaction.isModalSubmit()) block, call this.
+ * INTEGRATION POINT 3 — Modal submit
  */
 async function handleTriviaModalSubmit(interaction) {
   if (!interaction.isModalSubmit()) return false;
   if (!interaction.customId.startsWith('trivia_answer_modal:')) return false;
 
-  // Defer ephemerally immediately
   await interaction.deferReply({ ephemeral: true });
 
-  const channelId = interaction.customId.split(':')[1];
-  const session   = activeSessions.get(channelId);
+  // FIX #2: parse sessionId from customId — format is:
+  //   trivia_answer_modal:<channelId>:<sessionId>
+  const parts     = interaction.customId.split(':');
+  const channelId = parts[1];
+  const modalSid  = parts.slice(2).join(':'); // handles UUIDs with colons
 
+  const session = activeSessions.get(channelId);
+
+  // Session gone (expired, already won, or skipped)
   if (!session) {
     await interaction.editReply({ content: '⌛ This trivia session has already ended.' });
     return true;
   }
 
+  // FIX #2: reject modal from a previous session in the same channel
+  if (session.sessionId !== modalSid) {
+    await interaction.editReply({
+      content: '⌛ That answer was for a different trivia question. A new one is active!',
+    });
+    return true;
+  }
+
   if (session.winnerId) {
     await interaction.editReply({ content: '🏆 Someone already answered correctly!' });
+    return true;
+  }
+
+  if (Date.now() >= session.expiresAt) {
+    await endSession(channelId, null, interaction.client, 'expired');
+    await interaction.editReply({ content: '⌛ Time ran out before your answer was received.' });
     return true;
   }
 
@@ -215,39 +241,43 @@ async function handleTriviaModalSubmit(interaction) {
   const correct = isCorrectAnswer(submitted, session.answer);
 
   if (!correct) {
-    // Log wrong attempt
-    await supabase.from('trivia_logs').insert({
-      session_id: session.sessionId,
-      guild_id:   session.guildId,
-      user_id:    interaction.user.id,
-      username:   interaction.user.username,
+    // Log wrong attempt (non-blocking)
+    supabase.from('trivia_logs').insert({
+      session_id:    session.sessionId,
+      guild_id:      session.guildId,
+      user_id:       interaction.user.id,
+      username:      interaction.user.username,
       submitted,
-      is_correct: false,
-      coins_awarded: 0
-    });
+      is_correct:    false,
+      coins_awarded: 0,
+    }).catch(e => console.error('[TRIVIA] log insert error:', e.message));
 
     await interaction.editReply({
-      content: `❌ **Incorrect.** Keep trying — the question is still open!`
+      content: '❌ **Incorrect.** The question is still open — keep trying!',
     });
     return true;
   }
 
-  // ── WINNER ────────────────────────────────────────────────────────────────
+  // ── CORRECT ANSWER ──────────────────────────────────────────────────────
   session.winnerId = interaction.user.id;
   clearTimeout(session.timeoutHandle);
 
-  // Award ConCoins via UnbelievaBoat
+  // FIX #1: DELETE from map FIRST before any async operation
+  // This guarantees no ghost session even if DB/UB calls throw
+  activeSessions.delete(channelId);
+
+  // Award ConCoins via UnbelievaBoat (non-fatal)
   let ubSuccess = false;
   let ubError   = null;
   try {
     ubSuccess = await awardUnbelievaBoatCoins(session.guildId, interaction.user.id, session.reward);
   } catch (e) {
     ubError = e.message;
-    console.error('[TRIVIA] UB award error:', e);
+    console.error('[TRIVIA] UB award error:', e.message);
   }
 
-  // Log correct answer
-  await supabase.from('trivia_logs').insert({
+  // Log correct answer (non-blocking)
+  supabase.from('trivia_logs').insert({
     session_id:    session.sessionId,
     guild_id:      session.guildId,
     user_id:       interaction.user.id,
@@ -256,53 +286,58 @@ async function handleTriviaModalSubmit(interaction) {
     is_correct:    true,
     coins_awarded: ubSuccess ? session.reward : 0,
     ub_success:    ubSuccess,
-    ub_error:      ubError
-  });
+    ub_error:      ubError,
+  }).catch(e => console.error('[TRIVIA] log insert error:', e.message));
 
-  // Close session in DB
-  await supabase
-    .from('trivia_sessions')
-    .update({
-      status:       'completed',
-      winner_id:    interaction.user.id,
-      winner_name:  interaction.user.username,
-      completed_at: new Date().toISOString()
-    })
-    .eq('id', session.sessionId);
+  // Close session in DB (non-blocking)
+  supabase.from('trivia_sessions').update({
+    status:       'completed',
+    winner_id:    interaction.user.id,
+    winner_name:  interaction.user.username,
+    completed_at: new Date().toISOString(),
+  }).eq('id', session.sessionId)
+    .catch(e => console.error('[TRIVIA] session close error:', e.message));
 
-  activeSessions.delete(channelId);
-
-  // Ephemeral confirm to winner
+  // Ephemeral confirm to winner — always fires
   await interaction.editReply({
     content: ubSuccess
       ? `✅ **Correct!** You've been awarded **${session.reward.toLocaleString()} ConCoins** to your Booty Collection!`
-      : `✅ **Correct!** (ConCoin transfer pending — contact staff if not received.)`
+      : `✅ **Correct!** (ConCoin transfer pending — ask staff to run \`/grant-concoins\`.)`,
   });
 
-  // Public reveal
+  // Public reveal in channel
   const channel = interaction.client.channels.cache.get(channelId);
   if (channel) {
     await channel.send({
-      embeds: [revealEmbed(session.question, session.answer, interaction.user, 'won')]
-    });
+      embeds: [revealEmbed(session.question, session.answer, interaction.user, 'won')],
+    }).catch(() => {});
   }
 
   return true;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════
+// INTERNAL HELPERS
+// ══════════════════════════════════════════════════════════════════════════
 
 async function expireSession(channelId, client) {
   const session = activeSessions.get(channelId);
   if (!session || session.winnerId) return;
 
-  await endSession(channelId, null, client, 'expired');
+  // FIX #1: delete before async ops
+  activeSessions.delete(channelId);
 
-  const channel = client.channels.cache.get(channelId);
+  supabase.from('trivia_sessions').update({
+    status:       'expired',
+    completed_at: new Date().toISOString(),
+  }).eq('id', session.sessionId)
+    .catch(e => console.error('[TRIVIA] expire update error:', e.message));
+
+  const channel = client?.channels?.cache?.get(channelId);
   if (channel) {
     await channel.send({
-      embeds: [revealEmbed(session.question, session.answer, null, 'expired')]
-    });
+      embeds: [revealEmbed(session.question, session.answer, null, 'expired')],
+    }).catch(() => {});
   }
 }
 
@@ -311,44 +346,44 @@ async function endSession(channelId, winnerId, client, status) {
   if (!session) return;
 
   clearTimeout(session.timeoutHandle);
+  // FIX #1: delete before async ops
   activeSessions.delete(channelId);
 
-  await supabase
-    .from('trivia_sessions')
-    .update({ status, completed_at: new Date().toISOString() })
-    .eq('id', session.sessionId);
+  supabase.from('trivia_sessions').update({
+    status,
+    completed_at: new Date().toISOString(),
+  }).eq('id', session.sessionId)
+    .catch(e => console.error('[TRIVIA] endSession update error:', e.message));
 }
 
 function isCorrectAnswer(submitted, canonical) {
   if (submitted === canonical) return true;
-  // Fuzzy: strip punctuation/articles and compare
-  const clean = s => s.replace(/[^a-z0-9\s]/g, '').replace(/\b(the|a|an)\b/g, '').replace(/\s+/g, ' ').trim();
+  const clean = s => s
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\b(the|a|an)\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
   return clean(submitted) === clean(canonical);
 }
 
 function generateHint(answer) {
-  // Reveal first letter + length: H _ _ _ _ _ (6)
   const words = answer.split(' ');
-  return words.map(w => w[0].toUpperCase() + ' ' + '_ '.repeat(w.length - 1).trim()).join('  ') +
-    `  (${answer.length} chars)`;
+  return words.map(w => w[0].toUpperCase() + ' ' + '_ '.repeat(w.length - 1).trim()).join('  ')
+    + `  (${answer.length} chars)`;
 }
 
 function simpleHash(str) {
-  // Non-cryptographic — just prevents storing raw answers in plaintext session row
   let h = 0;
   for (let i = 0; i < str.length; i++) h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
   return h.toString(16);
 }
 
 async function awardUnbelievaBoatCoins(guildId, userId, amount) {
-  if (!UB_TOKEN) throw new Error('UNBELIEVABOAT_TOKEN not set');
+  if (!UB_TOKEN) throw new Error('UNBELIEVABOAT_API_TOKEN not set in Render env');
   const res = await fetch(`${UB_API_BASE}/guilds/${guildId}/users/${userId}`, {
-    method: 'PATCH',
-    headers: {
-      'Authorization': UB_TOKEN,
-      'Content-Type':  'application/json'
-    },
-    body: JSON.stringify({ cash: amount, reason: 'TheConclave ARK Trivia Winner 🏆' })
+    method:  'PATCH',
+    headers: { Authorization: UB_TOKEN, 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ cash: amount, reason: 'TheConclave ARK Trivia Winner 🏆' }),
   });
   if (!res.ok) {
     const body = await res.text();
@@ -358,41 +393,46 @@ async function awardUnbelievaBoatCoins(guildId, userId, amount) {
 }
 
 async function pickQuestion(guildId) {
-  // Try Supabase trivia_questions first
   const { data } = await supabase
     .from('trivia_questions')
     .select('question, answer, reward')
     .order('last_used', { ascending: true, nullsFirst: true })
     .limit(5);
 
-  if (data && data.length > 0) {
+  if (data?.length) {
     const pick = data[Math.floor(Math.random() * data.length)];
-    // Mark as used
-    await supabase
-      .from('trivia_questions')
+    supabase.from('trivia_questions')
       .update({ last_used: new Date().toISOString() })
-      .eq('question', pick.question);
+      .eq('question', pick.question)
+      .catch(() => {});
     return { question: pick.question, answer: pick.answer, reward: pick.reward ?? 15000 };
   }
 
-  // Fallback inline bank
+  // Fallback bank
   const bank = [
-    { question: 'What is the name of the ARK storyline character you play as?', answer: 'Helena', reward: 15000 },
-    { question: 'What resource is required to craft a Rex Saddle?', answer: 'hide', reward: 10000 },
-    { question: 'Which ARK map introduced the Reaper creature?', answer: 'Aberration', reward: 12000 },
-    { question: 'What element is used to fuel Tek structures?', answer: 'Element', reward: 10000 },
-    { question: 'What is the max wild level of a creature in ARK?', answer: '150', reward: 8000 },
-    { question: 'Which boss must you defeat to access Aberration on official servers?', answer: 'Rockwell', reward: 15000 },
-    { question: 'What material do you need to make a Fabricator?', answer: 'metal', reward: 8000 },
-    { question: 'Name the flying creature introduced in Scorched Earth.', answer: 'Wyvern', reward: 12000 },
-    { question: 'What is the in-game currency of TheConclave Dominion?', answer: 'ConCoins', reward: 5000 },
-    { question: 'What server cluster does TheConclave Dominion run?', answer: 'ARK Survival Ascended', reward: 5000 },
+    { question: 'What is the name of the ARK storyline character you play as?',          answer: 'Helena',                reward: 15000 },
+    { question: 'What resource is required to craft a Rex Saddle?',                       answer: 'hide',                  reward: 10000 },
+    { question: 'Which ARK map introduced the Reaper creature?',                          answer: 'Aberration',            reward: 12000 },
+    { question: 'What element is used to fuel Tek structures?',                           answer: 'Element',               reward: 10000 },
+    { question: 'What is the max wild level of a creature on TheConclave?',               answer: '350',                   reward: 8000  },
+    { question: 'Which boss is fought at the end of Aberration?',                         answer: 'Rockwell',              reward: 15000 },
+    { question: 'What material do you need to make a Fabricator?',                        answer: 'metal',                 reward: 8000  },
+    { question: 'Name the flying creature introduced in Scorched Earth.',                 answer: 'Wyvern',                reward: 12000 },
+    { question: 'What is the in-game currency of TheConclave Dominion?',                  answer: 'ConCoins',              reward: 5000  },
+    { question: 'Which map on TheConclave is PvP?',                                       answer: 'Aberration',            reward: 5000  },
+    { question: 'What is the taming multiplier on TheConclave servers?',                  answer: '5',                     reward: 5000  },
+    { question: 'What Patreon-exclusive map does TheConclave run?',                       answer: 'Amissa',                reward: 8000  },
+    { question: 'What is Slothie\'s council title on TheConclave?',                       answer: 'Archmaestro',           reward: 10000 },
+    { question: 'How many maps does TheConclave run?',                                    answer: '10',                    reward: 5000  },
+    { question: 'What does 100% imprint add in ARK combat (percentage)?',                 answer: '30',                    reward: 12000 },
   ];
 
   return bank[Math.floor(Math.random() * bank.length)];
 }
 
-// ─── Embed builders ───────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════
+// EMBED BUILDERS
+// ══════════════════════════════════════════════════════════════════════════
 
 function buildTriviaEmbed(question, reward, expiresMs) {
   return new EmbedBuilder()
@@ -400,29 +440,26 @@ function buildTriviaEmbed(question, reward, expiresMs) {
     .setTitle('🎯 TheConclave ARK Trivia!')
     .setDescription(`**${question}**`)
     .addFields(
-      { name: '🏆 Reward', value: `${reward.toLocaleString()} ConCoins added to your Booty Collection`, inline: false },
-      { name: '⏱ Expires', value: `In ${expiresMs / 60000} minutes`, inline: true }
+      { name: '🏆 Reward', value: `**${reward.toLocaleString()} ConCoins** added to your Booty Collection`, inline: false },
+      { name: '⏱ Expires', value: `In ${expiresMs / 60000} minutes`, inline: true },
     )
     .setFooter({ text: 'Click Submit Answer to open the answer box! First correct answer wins — no chat needed.' })
     .setTimestamp();
 }
 
 function buildTriviaButtons() {
-  const { ButtonBuilder, ButtonStyle, ActionRowBuilder } = require('discord.js');
-  return [
-    new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('trivia_submit').setLabel('Submit Answer').setStyle(ButtonStyle.Primary).setEmoji('💬'),
-      new ButtonBuilder().setCustomId('trivia_hint').setLabel('Get Hint').setStyle(ButtonStyle.Secondary).setEmoji('💡'),
-      new ButtonBuilder().setCustomId('trivia_skip').setLabel('Skip').setStyle(ButtonStyle.Danger).setEmoji('⏭')
-    )
-  ];
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('trivia_submit').setLabel('Submit Answer').setStyle(ButtonStyle.Primary).setEmoji('💬'),
+    new ButtonBuilder().setCustomId('trivia_hint').setLabel('Get Hint').setStyle(ButtonStyle.Secondary).setEmoji('💡'),
+    new ButtonBuilder().setCustomId('trivia_skip').setLabel('Skip').setStyle(ButtonStyle.Danger).setEmoji('⏭'),
+  );
 }
 
 function revealEmbed(question, answer, winner, status) {
   const statusMap = {
     won:     { color: 0x00FF88, title: '✅ Trivia Answered!' },
     expired: { color: 0xFF4444, title: '⌛ Time\'s Up!' },
-    skipped: { color: 0x888888, title: '⏭ Trivia Skipped' }
+    skipped: { color: 0x888888, title: '⏭ Trivia Skipped' },
   };
   const { color, title } = statusMap[status] || statusMap.expired;
 
@@ -431,7 +468,7 @@ function revealEmbed(question, answer, winner, status) {
     .setTitle(title)
     .addFields(
       { name: '❓ Question', value: question, inline: false },
-      { name: '✅ Answer',   value: answer,   inline: false }
+      { name: '✅ Answer',   value: `**${answer}**`, inline: false },
     );
 
   if (winner) {
@@ -445,10 +482,12 @@ function errorEmbed(msg) {
   return new EmbedBuilder().setColor(0xFF4444).setDescription(`⚠️ ${msg}`);
 }
 
-// ─── Exports ──────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════
+// EXPORTS
+// ══════════════════════════════════════════════════════════════════════════
 
 module.exports = {
   handleTriviaCommand,
   handleTriviaButton,
-  handleTriviaModalSubmit
+  handleTriviaModalSubmit,
 };
