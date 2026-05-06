@@ -2045,6 +2045,12 @@ bot.on(Events.MessageCreate, async msg => {
     }
   }
  
+  ({
+  handleTriviaCommand,
+  handleTriviaButton,
+  handleTriviaModalSubmit
+} = require('./trivia_fix'));
+
   // ── AEGIS CHANNEL AUTO-REPLY ──────────────────────────────────────
   if (!AEGIS_CHANNEL_ID || msg.channelId !== AEGIS_CHANNEL_ID) return;
   const w = checkRate(msg.author.id, 8000);
