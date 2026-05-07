@@ -150,7 +150,7 @@ async function modLog(guild, action, target, actor, reason, extra={}) {
       target_tag:target?.username||String(target), actor_id:actor?.id||'SYSTEM',
       actor_tag:actor?.username||'SYSTEM', reason, extra:JSON.stringify(extra),
       created_at:new Date().toISOString(),
-    }).catch(()=>{});
+    }).then(null, ()=>{});
   } catch {}
 }
  
@@ -249,7 +249,7 @@ function logAiUsage(model, usage, engine='anthropic') {
     input_tokens:  engine==='anthropic' ? (usage?.input_tokens||0)  : (usage?.prompt_tokens||0),
     output_tokens: engine==='anthropic' ? (usage?.output_tokens||0) : (usage?.completion_tokens||0),
     used_search: false, created_at: new Date().toISOString(),
-  }).catch(()=>{});
+  }).then(null, ()=>{});
 }
  
 async function askAegis(msg, uid=null, extraCtx='', channelId=null) {
@@ -435,7 +435,7 @@ async function getSupply() {
 }
 async function claimWeekly(id, tag) {
   return sbQuery(async sb => {
-    const { data:w } = await sb.from('aegis_wallets').select('*').eq('discord_id',id).single().catch(()=>({data:null}));
+    const { data:w } = await sb.from('aegis_wallets').select('*').eq('discord_id',id).single().then(r => r, () => ({data:null}));
     if (!w) { await getWallet(id,tag); return claimWeekly(id,tag); }
     const now=new Date(), last=w.last_daily_claim?new Date(w.last_daily_claim):null;
     const diff = last ? (now-last)/(1000*60*60) : 999;
@@ -471,7 +471,7 @@ async function resetWallet(targetId, targetTag, actorId, actorTag) {
 async function addConcoinBooty(discordId, discordTag, amount, reason = 'Trivia Win') {
   if (!sb || !sbOk()) return null;
   try {
-    const { data: existing } = await sb.from('aegis_concoin_booty').select('*').eq('discord_id', discordId).single().catch(()=>({data:null}));
+    const { data: existing } = await sb.from('aegis_concoin_booty').select('*').eq('discord_id', discordId).single().then(r => r, () => ({data:null}));
     if (existing) {
       const { data } = await sb.from('aegis_concoin_booty').update({
         total_earned:  (existing.total_earned  || 0) + amount,
@@ -502,7 +502,7 @@ async function addConcoinBooty(discordId, discordTag, amount, reason = 'Trivia W
 async function getConcoinBooty(discordId) {
   if (!sb || !sbOk()) return null;
   try {
-    const { data } = await sb.from('aegis_concoin_booty').select('*').eq('discord_id', discordId).single().catch(()=>({data:null}));
+    const { data } = await sb.from('aegis_concoin_booty').select('*').eq('discord_id', discordId).single().then(r => r, () => ({data:null}));
     return data;
   } catch { return null; }
 }
@@ -975,7 +975,7 @@ const TRIVIA_QUESTIONS = [
  
 const activeTrivias = new Map();
 
-// Wire the 200-question bank into trivia module
+// Wire the 200-question bank into the trivia module
 const {
   handleTriviaCommand,
   handleTriviaButton,
@@ -1770,7 +1770,7 @@ if (await handleTriviaModalSubmit(interaction)) return;
       }
       if (sub==='my') {
         if (!sb) return interaction.editReply('⚠️ Supabase not configured.');
-        const { data } = await sb.from('aegis_tribes').select('*').eq('guild_id',interaction.guildId).eq('owner_id',interaction.user.id).single().catch(()=>({data:null}));
+        const { data } = await sb.from('aegis_tribes').select('*').eq('guild_id',interaction.guildId).eq('owner_id',interaction.user.id).single().then(r => r, () => ({data:null}));
         if (!data) return interaction.editReply('📭 You have no registered tribe. Use `/tribe register` to create one.');
         const members=JSON.parse(data.members||'[]');
         return interaction.editReply({ embeds:[base(`🏕️ ${data.tribe_name}`,C.cy).addFields({name:'🗺️ Server',value:data.server,inline:true},{name:'👥 Members',value:members.length?members.join(', '):'Just you',inline:false})] });
@@ -1981,7 +1981,7 @@ if (await handleTriviaModalSubmit(interaction)) return;
       await interaction.editReply({ embeds:[P.ReminderSetPanel(message,fireAt)] });
       setTimeout(async()=>{
         try { await interaction.user.send({ embeds:[P.ReminderFirePanel(message)] }); }
-        catch { const ch=interaction.channel; if (ch) await ch.send({content:`<@${interaction.user.id}>`,embeds:[P.ReminderFirePanel(message)]}).catch(()=>{}); }
+        catch { const ch=interaction.channel; if (ch) await ch.send({content:`<@${interaction.user.id}>`,embeds:[P.ReminderFirePanel(message)]}).then(null, ()=>{}); }
       }, ms);
     }
  
@@ -2033,7 +2033,7 @@ bot.on(Events.MessageCreate, async msg => {
   if (!AEGIS_CHANNEL_ID || msg.channelId !== AEGIS_CHANNEL_ID) return;
   const w = checkRate(msg.author.id, 8000);
   if (w) { const m = await msg.reply(`⏳ Retry in ${w}s.`).catch(()=>null); if (m) setTimeout(()=>m.delete().catch(()=>{}), 4000); return; }
-  msg.channel.sendTyping().catch(()=>{});
+  msg.channel.sendTyping().then(null, ()=>{});
   const r = await askAegis(msg.content, msg.author.id, '', msg.channelId);
   msg.reply(r.slice(0, 1990)).catch(()=>msg.channel.send(r.slice(0, 1990)).catch(()=>{}));
 });
@@ -2043,7 +2043,7 @@ bot.on(Events.MessageCreate, async msg => {
 // ══════════════════════════════════════════════════════════════════════
 bot.on(Events.GuildMemberAdd, async member => {
   try {
-    if (sb&&sbOk()) sb.from('aegis_wallets').upsert({ discord_id:member.id, discord_tag:member.user.username, updated_at:new Date().toISOString() },{ onConflict:'discord_id', ignoreDuplicates:true }).catch(()=>{});
+    if (sb&&sbOk()) sb.from('aegis_wallets').upsert({ discord_id:member.id, discord_tag:member.user.username, updated_at:new Date().toISOString() },{ onConflict:'discord_id', ignoreDuplicates:true }).then(null, ()=>{});
     const ch = member.guild.channels.cache.find(c=>c.name==='welcome'||c.name==='welcomes');
     if (!ch) return;
     await ch.send({ embeds:[P.WelcomePanel(member.user, member.guild.memberCount)] });
