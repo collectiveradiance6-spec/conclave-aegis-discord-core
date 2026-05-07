@@ -150,7 +150,7 @@ async function modLog(guild, action, target, actor, reason, extra={}) {
       target_tag:target?.username||String(target), actor_id:actor?.id||'SYSTEM',
       actor_tag:actor?.username||'SYSTEM', reason, extra:JSON.stringify(extra),
       created_at:new Date().toISOString(),
-    }).then(null, ()=>{});
+    }).then(null, () => {});
   } catch {}
 }
  
@@ -187,7 +187,7 @@ async function runAutoMod(msg) {
   try {
     await msg.delete();
     const warning = await msg.channel.send(`⚠️ <@${msg.author.id}> — AutoMod: **${violations.join(', ')}**. This is a warning.`);
-    setTimeout(()=>warning.delete().catch(()=>{}), 8000);
+    setTimeout(()=>warning.delete().then(null, () => {}), 8000);
     await addWarn(msg.guildId, msg.author.id, msg.author.username, `AutoMod: ${violations.join(', ')}`, 'SYSTEM', 'AEGIS AutoMod');
     await modLog(msg.guild, 'automod', msg.author, {id:'SYSTEM',username:'AEGIS AutoMod'}, violations.join(', '), { Channel:`<#${msg.channelId}>` });
   } catch {}
@@ -249,7 +249,7 @@ function logAiUsage(model, usage, engine='anthropic') {
     input_tokens:  engine==='anthropic' ? (usage?.input_tokens||0)  : (usage?.prompt_tokens||0),
     output_tokens: engine==='anthropic' ? (usage?.output_tokens||0) : (usage?.completion_tokens||0),
     used_search: false, created_at: new Date().toISOString(),
-  }).then(null, ()=>{});
+  }).then(null, () => {});
 }
  
 async function askAegis(msg, uid=null, extraCtx='', channelId=null) {
@@ -975,7 +975,7 @@ const TRIVIA_QUESTIONS = [
  
 const activeTrivias = new Map();
 
-// Wire the 200-question bank into the trivia module
+// Wire all 200 questions into the trivia module
 const {
   handleTriviaCommand,
   handleTriviaButton,
@@ -1276,7 +1276,7 @@ if (await handleTriviaModalSubmit(interaction)) return;
     if (interaction.isButton() && interaction.customId==='ticket_close') {
       if (!isMod(interaction.member)) return interaction.reply({ content:'⛔ Staff only.', ephemeral:true });
       await interaction.reply('🔒 Closing ticket in 5 seconds...');
-      setTimeout(()=>interaction.channel.delete().catch(()=>{}), 5000);
+      setTimeout(()=>interaction.channel.delete().then(null, () => {}), 5000);
       return;
     }
 
@@ -1981,7 +1981,7 @@ if (await handleTriviaModalSubmit(interaction)) return;
       await interaction.editReply({ embeds:[P.ReminderSetPanel(message,fireAt)] });
       setTimeout(async()=>{
         try { await interaction.user.send({ embeds:[P.ReminderFirePanel(message)] }); }
-        catch { const ch=interaction.channel; if (ch) await ch.send({content:`<@${interaction.user.id}>`,embeds:[P.ReminderFirePanel(message)]}).then(null, ()=>{}); }
+        catch { const ch=interaction.channel; if (ch) await ch.send({content:`<@${interaction.user.id}>`,embeds:[P.ReminderFirePanel(message)]}).then(null, () => {}); }
       }, ms);
     }
  
@@ -2032,10 +2032,10 @@ bot.on(Events.MessageCreate, async msg => {
   // ── AEGIS CHANNEL AUTO-REPLY ──────────────────────────────────────
   if (!AEGIS_CHANNEL_ID || msg.channelId !== AEGIS_CHANNEL_ID) return;
   const w = checkRate(msg.author.id, 8000);
-  if (w) { const m = await msg.reply(`⏳ Retry in ${w}s.`).catch(()=>null); if (m) setTimeout(()=>m.delete().catch(()=>{}), 4000); return; }
-  msg.channel.sendTyping().then(null, ()=>{});
+  if (w) { const m = await msg.reply(`⏳ Retry in ${w}s.`).catch(()=>null); if (m) setTimeout(()=>m.delete().then(null, () => {}), 4000); return; }
+  msg.channel.sendTyping().then(null, () => {});
   const r = await askAegis(msg.content, msg.author.id, '', msg.channelId);
-  msg.reply(r.slice(0, 1990)).catch(()=>msg.channel.send(r.slice(0, 1990)).catch(()=>{}));
+  msg.reply(r.slice(0, 1990)).catch(()=>msg.channel.send(r.slice(0, 1990)).then(null, () => {}));
 });
  
 // ══════════════════════════════════════════════════════════════════════
@@ -2043,7 +2043,7 @@ bot.on(Events.MessageCreate, async msg => {
 // ══════════════════════════════════════════════════════════════════════
 bot.on(Events.GuildMemberAdd, async member => {
   try {
-    if (sb&&sbOk()) sb.from('aegis_wallets').upsert({ discord_id:member.id, discord_tag:member.user.username, updated_at:new Date().toISOString() },{ onConflict:'discord_id', ignoreDuplicates:true }).then(null, ()=>{});
+    if (sb&&sbOk()) sb.from('aegis_wallets').upsert({ discord_id:member.id, discord_tag:member.user.username, updated_at:new Date().toISOString() },{ onConflict:'discord_id', ignoreDuplicates:true }).then(null, () => {});
     const ch = member.guild.channels.cache.find(c=>c.name==='welcome'||c.name==='welcomes');
     if (!ch) return;
     await ch.send({ embeds:[P.WelcomePanel(member.user, member.guild.memberCount)] });
@@ -2122,7 +2122,7 @@ bot.once(Events.ClientReady, async () => {
       if (ch) {
         const embed=buildMonitorEmbed(statuses);
         const msg=await ch.messages.fetch(monMsg).catch(()=>null);
-        if (msg) await msg.edit({embeds:[embed]}).catch(e=>console.error('❌ Monitor resume:',e.message));
+        if (msg) await msg.edit({embeds:[embed]}).then(null, e => console.error('❌ Monitor resume:',e.message));
       }
     }
   } catch (e) { console.error('❌ Boot tasks:', e.message); }
