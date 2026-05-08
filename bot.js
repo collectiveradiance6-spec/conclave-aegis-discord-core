@@ -42,9 +42,8 @@ const { createClient } = require('@supabase/supabase-js');
 const Groq      = require('groq-sdk');
 const Anthropic = require('@anthropic-ai/sdk');
 const P         = require('./panels.js');
-const { handleEmbedgisCommand, handleEmbedgisButton, EMBEDGIS_COMMAND } = require('./embedgis');
-
-const _triviaFactory = require('./trivia_fix');
+const { handleEmbedgisCommand, handleEmbedgisButton, handleEmbedgisSelect, EMBEDGIS_COMMAND } = require('./embedgis');
+ const _triviaFactory = require('./trivia_fix');
 
 // ══════════════════════════════════════════════════════════════════════
 // ENV
@@ -1223,11 +1222,12 @@ const activeVotes = new Map();
 bot.on(Events.InteractionCreate, async interaction => {
   try {
     if (await handleWatchtowerInteraction(interaction, bot)) return;
-  if (await handleEmbedgisCommand(interaction)) return;
-  if (await handleEmbedgisButton(interaction)) return;
+    if (await handleEmbedgisCommand(interaction)) return;
+    if (await handleEmbedgisButton(interaction))  return;
+    if (await handleEmbedgisSelect(interaction))  return;
   if (await handleTriviaCommand(interaction)) return;
-  if (await handleTriviaButton(interaction)) return;
-  if (await handleTriviaModalSubmit(interaction)) return;
+if (await handleTriviaButton(interaction)) return;
+if (await handleTriviaModalSubmit(interaction)) return;
  
     if (interaction.isButton() && interaction.customId==='giveaway_enter') {
       const gw = activeGiveaways.get(interaction.message.id);
