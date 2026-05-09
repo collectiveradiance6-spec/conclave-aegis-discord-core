@@ -1,15 +1,22 @@
-/**
- * AEGIS TRIVIA SYSTEM — trivia_fix.js  (patched)
- *
- * Fixes applied:
- *   1. activeSessions.delete() now runs BEFORE async DB/UB calls so a
- *      Supabase error can never leave a ghost session blocking the channel.
- *   2. Modal customId includes sessionId so an old open modal cannot
- *      accidentally answer a brand-new question in the same channel.
- *   3. Env var corrected: UNBELIEVABOAT_API_TOKEN (matches bot.js / Render).
- *   4. timeoutHandle is always cleared on any exit path.
- */
 'use strict';
+
+/**
+ * AEGIS TRIVIA — trivia_fix.js  FINAL v2
+ *
+ * Architecture: triviaFactory(questionBank) — pass TRIVIA_QUESTIONS from bot.js
+ * after the array is defined.
+ *
+ * Wire in bot.js:
+ *   const _triviaFactory = require('./trivia_fix');
+ *   // ... after TRIVIA_QUESTIONS array ...
+ *   const { handleTriviaCommand, handleTriviaButton, handleTriviaModalSubmit }
+ *     = _triviaFactory(TRIVIA_QUESTIONS);
+ *
+ * Root cause of Supabase errors:
+ *   Supabase v2 query builders are thenables, NOT real Promises.
+ *   .catch() does not exist on them. All fire-and-forget DB writes
+ *   go through dbFire() which wraps in Promise.resolve() first.
+ */
 
 module.exports = function triviaFactory(questionBank) {
 
@@ -18,29 +25,36 @@ const {
   ActionRowBuilder, EmbedBuilder,
   ButtonBuilder, ButtonStyle,
 } = require('discord.js');
+
 const { createClient } = require('@supabase/supabase-js');
 
-// Reuse existing Supabase creds
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  { auth: { persistSession: false } }
 );
 
-// ── UnbelievaBoat ──────────────────────────────────────────────────────────
-const UB_API_BASE = 'https://unbelievaboat.com/api/v1';
-// FIX #3: was UNBELIEVABOAT_TOKEN — must match Render env / bot.js
 const UB_TOKEN = process.env.UNBELIEVABOAT_API_TOKEN;
 
-// ── Active sessions: Map<channelId, TriviaSession> ────────────────────────
+// ─────────────────────────────────────────────────────────────────────
+// dbFire — safe fire-and-forget for Supabase v2 thenables
+// Promise.resolve() converts any thenable into a real Promise so
+// .catch() actually works. Never throws — just logs on error.
+// ─────────────────────────────────────────────────────────────────────
+function dbFire(query, label) {
+  Promise.resolve(query).catch(e =>
+    console.error(`[TRIVIA DB:${label}]`, e?.message || String(e))
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Active sessions  Map<channelId, Session>
+// ─────────────────────────────────────────────────────────────────────
 const activeSessions = new Map();
 
-// ══════════════════════════════════════════════════════════════════════════
-// PUBLIC API
-// ══════════════════════════════════════════════════════════════════════════
-
-/**
- * INTEGRATION POINT 1 — /trivia slash command
- */
+// ═════════════════════════════════════════════════════════════════════
+// 1. /trivia slash command
+// ═════════════════════════════════════════════════════════════════════
 async function handleTriviaCommand(interaction) {
   if (!interaction.isChatInputCommand() || interaction.commandName !== 'trivia') return false;
 
@@ -48,46 +62,43 @@ async function handleTriviaCommand(interaction) {
 
   const channelId = interaction.channelId;
 
-  // Check for active session (in-memory only — no DB roundtrip needed)
   if (activeSessions.has(channelId)) {
-    const existing = activeSessions.get(channelId);
-    if (Date.now() < existing.expiresAt) {
+    const stale = activeSessions.get(channelId);
+    if (Date.now() < stale.expiresAt) {
       await interaction.editReply({
-        embeds: [errorEmbed('A trivia question is already active in this channel. Answer it first!')],
+        embeds: [errorEmbed('A trivia question is already active here. Answer it first!')],
       });
       return true;
     }
-    // Stale entry — clean up silently
-    clearTimeout(existing.timeoutHandle);
+    clearTimeout(stale.timeoutHandle);
     activeSessions.delete(channelId);
   }
 
-  const { question, answer, reward } = await pickQuestion(interaction.guildId);
+  const { question, answer, hint, reward } = pickQuestion();
 
-  // Insert session row to get a sessionId for FK refs
-  const { data: sessionRow, error: sessionErr } = await supabase
-    .from('trivia_sessions')
-    .insert({
-      guild_id:    interaction.guildId,
-      channel_id:  channelId,
-      question,
-      answer_hash: simpleHash(answer.toLowerCase().trim()),
-      reward,
-      started_by:  interaction.user.id,
-      status:      'active',
-    })
-    .select('id')
-    .single();
-
-  if (sessionErr) {
-    console.error('[TRIVIA] session insert error:', sessionErr);
-    // Proceed without a DB-backed session — trivia still works in memory
+  // Try to persist session row — trivia works without it
+  let sessionId = `mem_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  try {
+    const { data, error } = await supabase
+      .from('trivia_sessions')
+      .insert({
+        guild_id:    interaction.guildId,
+        channel_id:  channelId,
+        question,
+        answer_hash: simpleHash(answer.toLowerCase().trim()),
+        reward,
+        started_by:  interaction.user.id,
+        status:      'active',
+      })
+      .select('id')
+      .single();
+    if (!error && data?.id) sessionId = data.id;
+  } catch (e) {
+    console.error('[TRIVIA] session insert (non-fatal):', e?.message || e);
   }
 
-  const sessionId  = sessionRow?.id ?? `mem_${Date.now()}`;
-  const expiresMs  = 120_000; // 2 minutes
-  const expiresAt  = Date.now() + expiresMs;
-
+  const expiresMs     = 120_000;
+  const expiresAt     = Date.now() + expiresMs;
   const timeoutHandle = setTimeout(
     () => expireSession(channelId, interaction.client),
     expiresMs
@@ -97,30 +108,26 @@ async function handleTriviaCommand(interaction) {
     sessionId,
     question,
     answer:        answer.toLowerCase().trim(),
+    hint:          hint || '',
     reward,
     expiresAt,
     winnerId:      null,
-    messageId:     null,   // filled after editReply
     channelId,
     guildId:       interaction.guildId,
     timeoutHandle,
   });
 
-  const msg = await interaction.editReply({
+  await interaction.editReply({
     embeds:     [buildTriviaEmbed(question, reward, expiresMs)],
     components: [buildTriviaButtons()],
   });
 
-  // Store messageId for potential edits
-  const session = activeSessions.get(channelId);
-  if (session) session.messageId = msg.id;
-
   return true;
 }
 
-/**
- * INTEGRATION POINT 2 — Button interactions
- */
+// ═════════════════════════════════════════════════════════════════════
+// 2. Button interactions
+// ═════════════════════════════════════════════════════════════════════
 async function handleTriviaButton(interaction) {
   if (!interaction.isButton()) return false;
 
@@ -128,33 +135,24 @@ async function handleTriviaButton(interaction) {
 
   if (customId === 'trivia_submit') {
     const session = activeSessions.get(channelId);
-
     if (!session || Date.now() >= session.expiresAt || session.winnerId) {
-      // Interaction already over — ephemeral message is safer than modal
-      await interaction.reply({
-        content: '⌛ This trivia question has already ended.',
-        ephemeral: true,
-      });
+      await interaction.reply({ content: '⌛ This trivia question has already ended.', ephemeral: true });
       return true;
     }
-
-    // FIX #2: embed sessionId in modal customId so old modals can't
-    // accidentally answer a new question in the same channel.
     const modal = new ModalBuilder()
-      .setCustomId(`trivia_answer_modal:${channelId}:${session.sessionId}`)
-      .setTitle('🎯 Submit Your Answer');
-
-    const answerInput = new TextInputBuilder()
-      .setCustomId('trivia_answer_input')
-      .setLabel('Type your answer below')
-      .setStyle(TextInputStyle.Short)
-      .setPlaceholder('e.g. Helena')
-      .setRequired(true)
-      .setMaxLength(120);
-
-    modal.addComponents(new ActionRowBuilder().addComponents(answerInput));
-
-    // showModal must be the only reply — no prior await on this interaction
+      .setCustomId(`trivia_modal:${channelId}:${session.sessionId}`)
+      .setTitle('⚔️ Claim the Vault');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('answer_input')
+          .setLabel('Your Answer')
+          .setStyle(TextInputStyle.Short)
+          .setPlaceholder('Type your answer — first correct wins')
+          .setRequired(true)
+          .setMaxLength(200)
+      )
+    );
     await interaction.showModal(modal);
     return true;
   }
@@ -162,256 +160,228 @@ async function handleTriviaButton(interaction) {
   if (customId === 'trivia_hint') {
     const session = activeSessions.get(channelId);
     if (!session) {
-      await interaction.reply({ content: '⚠️ No active trivia session here.', ephemeral: true });
+      await interaction.reply({ content: '⚠️ No active trivia here.', ephemeral: true });
       return true;
     }
-    const hint = generateHint(session.answer);
-    await interaction.reply({ content: `💡 Hint: **${hint}**`, ephemeral: true });
+    const hintText = session.hint || generateHint(session.answer);
+    await interaction.reply({ content: `🔍 **Hint:** ${hintText}`, ephemeral: true });
     return true;
   }
 
   if (customId === 'trivia_skip') {
     const session = activeSessions.get(channelId);
     if (!session) {
-      await interaction.reply({ content: '⚠️ No active trivia session here.', ephemeral: true });
+      await interaction.reply({ content: '⚠️ No active trivia here.', ephemeral: true });
       return true;
     }
-    const canSkip = interaction.member?.permissions?.has('ManageMessages');
-    if (!canSkip) {
-      await interaction.reply({ content: '🚫 Only staff can skip trivia questions.', ephemeral: true });
+    if (!interaction.member?.permissions?.has('ManageMessages')) {
+      await interaction.reply({ content: '🚫 Staff only.', ephemeral: true });
       return true;
     }
     await interaction.deferUpdate();
-    const skippedSession = activeSessions.get(channelId); // capture before delete
-    await endSession(channelId, null, interaction.client, 'skipped');
-    await interaction.followUp({
-      embeds: [revealEmbed(skippedSession.question, skippedSession.answer, null, 'skipped')],
-    });
+    const { question, answer, sessionId } = session;
+    clearTimeout(session.timeoutHandle);
+    activeSessions.delete(channelId);
+    dbFire(
+      supabase.from('trivia_sessions')
+        .update({ status: 'skipped', completed_at: new Date().toISOString() })
+        .eq('id', sessionId),
+      'skip'
+    );
+    await interaction.followUp({ embeds: [revealEmbed(question, answer, null, 'skipped')] });
     return true;
   }
 
   return false;
 }
 
-/**
- * INTEGRATION POINT 3 — Modal submit
- */
+// ═════════════════════════════════════════════════════════════════════
+// 3. Modal submit
+// ═════════════════════════════════════════════════════════════════════
 async function handleTriviaModalSubmit(interaction) {
   if (!interaction.isModalSubmit()) return false;
-  if (!interaction.customId.startsWith('trivia_answer_modal:')) return false;
+  if (!interaction.customId.startsWith('trivia_modal:')) return false;
 
   await interaction.deferReply({ ephemeral: true });
 
-  // FIX #2: parse sessionId from customId — format is:
-  //   trivia_answer_modal:<channelId>:<sessionId>
   const parts     = interaction.customId.split(':');
   const channelId = parts[1];
-  const modalSid  = parts.slice(2).join(':'); // handles UUIDs with colons
+  const modalSid  = parts.slice(2).join(':');
 
   const session = activeSessions.get(channelId);
 
-  // Session gone (expired, already won, or skipped)
   if (!session) {
     await interaction.editReply({ content: '⌛ This trivia session has already ended.' });
     return true;
   }
-
-  // FIX #2: reject modal from a previous session in the same channel
-  if (session.sessionId !== modalSid) {
-    await interaction.editReply({
-      content: '⌛ That answer was for a different trivia question. A new one is active!',
-    });
+  if (String(session.sessionId) !== String(modalSid)) {
+    await interaction.editReply({ content: '⌛ That was for a different question. A new one is active!' });
     return true;
   }
-
   if (session.winnerId) {
     await interaction.editReply({ content: '🏆 Someone already answered correctly!' });
     return true;
   }
-
   if (Date.now() >= session.expiresAt) {
-    await endSession(channelId, null, interaction.client, 'expired');
-    await interaction.editReply({ content: '⌛ Time ran out before your answer was received.' });
+    clearTimeout(session.timeoutHandle);
+    activeSessions.delete(channelId);
+    await interaction.editReply({ content: '⌛ Time ran out before your answer arrived.' });
     return true;
   }
 
-  const submitted = interaction.fields
-    .getTextInputValue('trivia_answer_input')
-    .toLowerCase()
-    .trim();
-
-  const correct = isCorrectAnswer(submitted, session.answer);
+  const submitted = interaction.fields.getTextInputValue('answer_input').toLowerCase().trim();
+  const correct   = isCorrectAnswer(submitted, session.answer);
 
   if (!correct) {
-    // Log wrong attempt (non-blocking)
+    dbFire(
+      supabase.from('trivia_logs').insert({
+        session_id:    session.sessionId,
+        guild_id:      session.guildId,
+        user_id:       interaction.user.id,
+        username:      interaction.user.username,
+        submitted,
+        is_correct:    false,
+        coins_awarded: 0,
+      }),
+      'wrong-log'
+    );
+    await interaction.editReply({ content: '❌ **Wrong.** The question is still open — try again.' });
+    return true;
+  }
+
+  // ── CORRECT ──────────────────────────────────────────────────────
+  session.winnerId = interaction.user.id;
+  clearTimeout(session.timeoutHandle);
+  activeSessions.delete(channelId); // DELETE FIRST — before any async
+
+  let ubSuccess = false, ubError = null;
+  try {
+    ubSuccess = await awardCoins(session.guildId, interaction.user.id, session.reward);
+  } catch (e) {
+    ubError = e.message;
+    console.error('[TRIVIA] UB award error:', e.message);
+  }
+
+  dbFire(
     supabase.from('trivia_logs').insert({
       session_id:    session.sessionId,
       guild_id:      session.guildId,
       user_id:       interaction.user.id,
       username:      interaction.user.username,
       submitted,
-      is_correct:    false,
-      coins_awarded: 0,
-    }).then(null, e => console.error('[TRIVIA] log insert error:', e.message));
+      is_correct:    true,
+      coins_awarded: ubSuccess ? session.reward : 0,
+      ub_success:    ubSuccess,
+      ub_error:      ubError,
+    }),
+    'correct-log'
+  );
 
-    await interaction.editReply({
-      content: '❌ **Incorrect.** The question is still open — keep trying!',
-    });
-    return true;
-  }
+  dbFire(
+    supabase.from('trivia_sessions').update({
+      status:       'completed',
+      winner_id:    interaction.user.id,
+      winner_name:  interaction.user.username,
+      completed_at: new Date().toISOString(),
+    }).eq('id', session.sessionId),
+    'session-close'
+  );
 
-  // ── CORRECT ANSWER ──────────────────────────────────────────────────────
-  session.winnerId = interaction.user.id;
-  clearTimeout(session.timeoutHandle);
-
-  // FIX #1: DELETE from map FIRST before any async operation
-  // This guarantees no ghost session even if DB/UB calls throw
-  activeSessions.delete(channelId);
-
-  // Award ConCoins via UnbelievaBoat (non-fatal)
-  let ubSuccess = false;
-  let ubError   = null;
-  try {
-    ubSuccess = await awardUnbelievaBoatCoins(session.guildId, interaction.user.id, session.reward);
-  } catch (e) {
-    ubError = e.message;
-    console.error('[TRIVIA] UB award error:', e.message);
-  }
-
-  // Log correct answer (non-blocking)
-  supabase.from('trivia_logs').insert({
-    session_id:    session.sessionId,
-    guild_id:      session.guildId,
-    user_id:       interaction.user.id,
-    username:      interaction.user.username,
-    submitted,
-    is_correct:    true,
-    coins_awarded: ubSuccess ? session.reward : 0,
-    ub_success:    ubSuccess,
-    ub_error:      ubError,
-  }).then(null, e => console.error('[TRIVIA] log insert error:', e.message));
-
-  // Close session in DB (non-blocking)
-  supabase.from('trivia_sessions').update({
-    status:       'completed',
-    winner_id:    interaction.user.id,
-    winner_name:  interaction.user.username,
-    completed_at: new Date().toISOString(),
-  }).eq('id', session.sessionId)
-    .then(null, e => console.error('[TRIVIA] session close error:', e.message));
-
-  // Ephemeral confirm to winner — always fires
   await interaction.editReply({
     content: ubSuccess
-      ? `✅ **Correct!** You've been awarded **${session.reward.toLocaleString()} ConCoins** to your Booty Collection!`
-      : `✅ **Correct!** (ConCoin transfer pending — ask staff to run \`/grant-concoins\`.)`,
+      ? `✅ **Correct. The vault is yours.**\n\`+${session.reward.toLocaleString()} ConCoins\` added to your Booty Collection.`
+      : `✅ **Correct.** Ask staff to run \`/grant-concoins\` if coins don't appear.`,
   });
 
-  // Public reveal in channel
-  const channel = interaction.client.channels.cache.get(channelId);
-  if (channel) {
-    await channel.send({
-      embeds: [revealEmbed(session.question, session.answer, interaction.user, 'won')],
-    }).then(null, () => {});
+  const ch = interaction.client.channels.cache.get(channelId);
+  if (ch) {
+    Promise.resolve(
+      ch.send({ embeds: [revealEmbed(session.question, session.answer, interaction.user, 'won', session.reward)] })
+    ).catch(() => {});
   }
 
   return true;
 }
 
-// ══════════════════════════════════════════════════════════════════════════
-// INTERNAL HELPERS
-// ══════════════════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════════════
+// INTERNAL
+// ═════════════════════════════════════════════════════════════════════
 
 async function expireSession(channelId, client) {
   const session = activeSessions.get(channelId);
   if (!session || session.winnerId) return;
-
-  // FIX #1: delete before async ops
   activeSessions.delete(channelId);
-
-  supabase.from('trivia_sessions').update({
-    status:       'expired',
-    completed_at: new Date().toISOString(),
-  }).eq('id', session.sessionId)
-    .then(null, e => console.error('[TRIVIA] expire update error:', e.message));
-
-  const channel = client?.channels?.cache?.get(channelId);
-  if (channel) {
-    await channel.send({
-      embeds: [revealEmbed(session.question, session.answer, null, 'expired')],
-    }).then(null, () => {});
+  dbFire(
+    supabase.from('trivia_sessions')
+      .update({ status: 'expired', completed_at: new Date().toISOString() })
+      .eq('id', session.sessionId),
+    'expire'
+  );
+  const ch = client?.channels?.cache?.get(channelId);
+  if (ch) {
+    Promise.resolve(
+      ch.send({ embeds: [revealEmbed(session.question, session.answer, null, 'expired')] })
+    ).catch(() => {});
   }
 }
 
-async function endSession(channelId, winnerId, client, status) {
-  const session = activeSessions.get(channelId);
-  if (!session) return;
-
-  clearTimeout(session.timeoutHandle);
-  // FIX #1: delete before async ops
-  activeSessions.delete(channelId);
-
-  supabase.from('trivia_sessions').update({
-    status,
-    completed_at: new Date().toISOString(),
-  }).eq('id', session.sessionId)
-    .then(null, e => console.error('[TRIVIA] endSession update error:', e.message));
+function pickQuestion() {
+  if (questionBank?.length) {
+    const raw = questionBank[Math.floor(Math.random() * questionBank.length)];
+    return {
+      question: raw.q,
+      answer:   raw.a,
+      hint:     raw.hint || '',
+      reward:   15000,
+    };
+  }
+  // absolute last-resort fallback — should never hit if bot.js wires correctly
+  return { question: 'Which map on TheConclave is PvP?', answer: 'aberration', hint: 'Underground biomes.', reward: 15000 };
 }
 
 function isCorrectAnswer(submitted, canonical) {
-  // Normalize: lowercase, strip markdown/bullets/newlines, strip punctuation
   const normalize = s => s
     .toLowerCase()
-    .replace(/[*•\-_`]/g, ' ')   // bullets, markdown
-    .replace(/\n|\r/g, ' ')       // newlines
-    .replace(/[^a-z0-9\s]/g, ' ') // punctuation
+    .replace(/[*•\-_`]/g, ' ')
+    .replace(/\n|\r/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
   const ns = normalize(submitted);
   const nc = normalize(canonical);
 
-  // 1. Exact match after normalize
   if (ns === nc) return true;
 
-  // Stop words to ignore when extracting key tokens
   const STOP = new Set(['the','a','an','and','or','of','to','with','by',
     'for','in','on','at','is','it','its','that','this','be','are','was',
     'you','your','does','do','what','which','how','when','where','who']);
 
   const keyTokens = s => s.split(' ')
     .filter(t => t.length >= 3 && !STOP.has(t))
-    .map(t => t.replace(/s$/, '')); // basic singular
+    .map(t => t.replace(/s$/, ''));
 
-  const canonTokens = [...new Set(keyTokens(nc))]; // unique key words from answer
+  const canonTokens = [...new Set(keyTokens(nc))];
   const subWords    = new Set(keyTokens(ns));
 
-  // 2. Check canonical is empty after stripping (fallback to normalize match)
   if (canonTokens.length === 0) return ns.includes(nc) || nc.includes(ns);
 
-  // 3. Count how many canonical key tokens appear in submitted
   const matched = canonTokens.filter(t =>
-    subWords.has(t) ||                          // exact token match
-    [...subWords].some(w => w.startsWith(t) || t.startsWith(w)) // prefix match
+    subWords.has(t) ||
+    [...subWords].some(w => w.startsWith(t) || t.startsWith(w))
   ).length;
 
   const ratio = matched / canonTokens.length;
 
-  // Short answers (1-2 key words): require all to match
   if (canonTokens.length <= 2) return ratio === 1.0;
-
-  // Longer answers (3+ key words): require 75% match
-  // e.g. "forest desert ice titan" needs 3 of 4 tokens
   if (ratio >= 0.75) return true;
 
-  // 4. Fallback: submitted contains canonical or vice versa
   return ns.includes(nc) || nc.includes(ns);
 }
 
 function generateHint(answer) {
-  const words = answer.split(' ');
-  return words.map(w => w[0].toUpperCase() + ' ' + '_ '.repeat(w.length - 1).trim()).join('  ')
-    + `  (${answer.length} chars)`;
+  return answer.split(' ').map(w => w[0].toUpperCase() + ' ' + '_ '.repeat(w.length - 1).trim()).join('  ')
+    + ` (${answer.length} chars)`;
 }
 
 function simpleHash(str) {
@@ -420,113 +390,117 @@ function simpleHash(str) {
   return h.toString(16);
 }
 
-async function awardUnbelievaBoatCoins(guildId, userId, amount) {
+async function awardCoins(guildId, userId, amount) {
   if (!UB_TOKEN) throw new Error('UNBELIEVABOAT_API_TOKEN not set in Render env');
-  const res = await fetch(`${UB_API_BASE}/guilds/${guildId}/users/${userId}`, {
+  const res = await fetch(`https://unbelievaboat.com/api/v1/guilds/${guildId}/users/${userId}`, {
     method:  'PATCH',
     headers: { Authorization: UB_TOKEN, 'Content-Type': 'application/json' },
     body:    JSON.stringify({ cash: amount, reason: 'TheConclave ARK Trivia Winner 🏆' }),
   });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`UB API ${res.status}: ${body}`);
-  }
+  if (!res.ok) throw new Error(`UB API ${res.status}: ${await res.text()}`);
   return true;
 }
 
-async function pickQuestion(guildId) {
-  const { data } = await supabase
-    .from('trivia_questions')
-    .select('question, answer, reward')
-    .order('last_used', { ascending: true, nullsFirst: true })
-    .limit(5);
+// ═════════════════════════════════════════════════════════════════════
+// EMBED BUILDERS — cinematic dark design
+// ═════════════════════════════════════════════════════════════════════
 
-  if (data?.length) {
-    const pick = data[Math.floor(Math.random() * data.length)];
-    supabase.from('trivia_questions')
-      .update({ last_used: new Date().toISOString() })
-      .eq('question', pick.question)
-      .then(null, () => {});
-    return { question: pick.question, answer: pick.answer, reward: pick.reward ?? 15000 };
-  }
-
-  // Fallback bank
-  const bank = [
-    { question: 'What is the name of the ARK storyline character you play as?',          answer: 'Helena',                reward: 15000 },
-    { question: 'What resource is required to craft a Rex Saddle?',                       answer: 'hide',                  reward: 10000 },
-    { question: 'Which ARK map introduced the Reaper creature?',                          answer: 'Aberration',            reward: 12000 },
-    { question: 'What element is used to fuel Tek structures?',                           answer: 'Element',               reward: 10000 },
-    { question: 'What is the max wild level of a creature on TheConclave?',               answer: '350',                   reward: 8000  },
-    { question: 'Which boss is fought at the end of Aberration?',                         answer: 'Rockwell',              reward: 15000 },
-    { question: 'What material do you need to make a Fabricator?',                        answer: 'metal',                 reward: 8000  },
-    { question: 'Name the flying creature introduced in Scorched Earth.',                 answer: 'Wyvern',                reward: 12000 },
-    { question: 'What is the in-game currency of TheConclave Dominion?',                  answer: 'ConCoins',              reward: 5000  },
-    { question: 'Which map on TheConclave is PvP?',                                       answer: 'Aberration',            reward: 5000  },
-    { question: 'What is the taming multiplier on TheConclave servers?',                  answer: '5',                     reward: 5000  },
-    { question: 'What Patreon-exclusive map does TheConclave run?',                       answer: 'Amissa',                reward: 8000  },
-    { question: 'What is Slothie\'s council title on TheConclave?',                       answer: 'Archmaestro',           reward: 10000 },
-    { question: 'How many maps does TheConclave run?',                                    answer: '10',                    reward: 5000  },
-    { question: 'What does 100% imprint add in ARK combat (percentage)?',                 answer: '30',                    reward: 12000 },
-  ];
-
-  return bank[Math.floor(Math.random() * bank.length)];
+function rewardColor(reward) {
+  if (reward >= 25000) return 0xE040FB; // prismatic violet — elite
+  if (reward >= 18000) return 0xFF6B00; // ember amber      — hard
+  if (reward >= 12000) return 0x00C8FF; // arc cyan         — medium
+  return                       0x9DAFBD; // slate silver     — standard
 }
 
-// ══════════════════════════════════════════════════════════════════════════
-// EMBED BUILDERS
-// ══════════════════════════════════════════════════════════════════════════
+function rewardTier(reward) {
+  if (reward >= 25000) return '👑  ELITE';
+  if (reward >= 18000) return '🔥  HARD';
+  if (reward >= 12000) return '⚡  MEDIUM';
+  return                       '📜  STANDARD';
+}
 
 function buildTriviaEmbed(question, reward, expiresMs) {
+  const expiryUnix = Math.floor((Date.now() + expiresMs) / 1000);
+
   return new EmbedBuilder()
-    .setColor(0xE8A020)
-    .setTitle('🎯 TheConclave ARK Trivia!')
-    .setDescription(`**${question}**`)
-    .addFields(
-      { name: '🏆 Reward', value: `**${reward.toLocaleString()} ConCoins** added to your Booty Collection`, inline: false },
-      { name: '⏱ Expires', value: `In ${expiresMs / 60000} minutes`, inline: true },
+    .setColor(rewardColor(reward))
+    .setAuthor({ name: 'AEGIS  ·  DOMINION TRIVIA' })
+    .setTitle('❓  A Question Emerges from the Void')
+    .setDescription(
+      ['```', question, '```', '> *First correct answer claims the vault.*'].join('\n')
     )
-    .setFooter({ text: 'Click Submit Answer to open the answer box! First correct answer wins — no chat needed.' })
+    .addFields(
+      { name: '💰  Reward',     value: `\`${reward.toLocaleString()}\` **ConCoins**`, inline: true },
+      { name: '🏷️  Difficulty', value: rewardTier(reward),                            inline: true },
+      { name: '⏳  Closes',     value: `<t:${expiryUnix}:R>`,                         inline: true },
+    )
+    .setFooter({ text: 'Hit ⚔️ Answer · 🔍 Hint is ephemeral · ⏭ Skip is staff-only  ·  TheConclave Dominion' })
     .setTimestamp();
 }
 
 function buildTriviaButtons() {
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('trivia_submit').setLabel('Submit Answer').setStyle(ButtonStyle.Primary).setEmoji('💬'),
-    new ButtonBuilder().setCustomId('trivia_hint').setLabel('Get Hint').setStyle(ButtonStyle.Secondary).setEmoji('💡'),
-    new ButtonBuilder().setCustomId('trivia_skip').setLabel('Skip').setStyle(ButtonStyle.Danger).setEmoji('⏭'),
+    new ButtonBuilder()
+      .setCustomId('trivia_submit')
+      .setLabel('Answer')
+      .setStyle(ButtonStyle.Primary)
+      .setEmoji('⚔️'),
+    new ButtonBuilder()
+      .setCustomId('trivia_hint')
+      .setLabel('Hint')
+      .setStyle(ButtonStyle.Secondary)
+      .setEmoji('🔍'),
+    new ButtonBuilder()
+      .setCustomId('trivia_skip')
+      .setLabel('Skip  [Staff]')
+      .setStyle(ButtonStyle.Danger)
+      .setEmoji('⏭'),
   );
 }
 
-function revealEmbed(question, answer, winner, status) {
-  const statusMap = {
-    won:     { color: 0x00FF88, title: '✅ Trivia Answered!' },
-    expired: { color: 0xFF4444, title: '⌛ Time\'s Up!' },
-    skipped: { color: 0x888888, title: '⏭ Trivia Skipped' },
+function revealEmbed(question, answer, winner, status, reward = 0) {
+  const cfg = {
+    won: {
+      color:       0x00E676,
+      banner:      '✅  Vault Claimed',
+      description: winner
+        ? `<@${winner.id}> **struck first and seized the reward.**\n\`+${reward.toLocaleString()} ConCoins\` deposited to their Booty Collection.`
+        : '✅ Correct answer submitted.',
+    },
+    expired: {
+      color:       0x37474F,
+      banner:      '⌛  Consumed by the Void',
+      description: 'No survivor answered in time. The knowledge returns to the dark.',
+    },
+    skipped: {
+      color:       0x546E7A,
+      banner:      '⏭  Question Dissolved',
+      description: 'A council member skipped this question.',
+    },
   };
-  const { color, title } = statusMap[status] || statusMap.expired;
 
-  const embed = new EmbedBuilder()
+  const { color, banner, description } = cfg[status] ?? cfg.expired;
+
+  return new EmbedBuilder()
     .setColor(color)
-    .setTitle(title)
+    .setAuthor({ name: 'AEGIS  ·  DOMINION TRIVIA  ·  CLOSED' })
+    .setTitle(banner)
+    .setDescription(description)
     .addFields(
-      { name: '❓ Question', value: question, inline: false },
-      { name: '✅ Answer',   value: `**${answer}**`, inline: false },
-    );
-
-  if (winner) {
-    embed.addFields({ name: '🏆 Winner', value: `<@${winner.id}> — ConCoins awarded!`, inline: false });
-  }
-
-  return embed;
+      { name: '📋  Question', value: `\`\`\`${question}\`\`\``, inline: false },
+      { name: '✅  Answer',   value: `> **${answer}**`,          inline: false },
+    )
+    .setFooter({ text: 'AEGIS Trivia  ·  TheConclave Dominion' })
+    .setTimestamp();
 }
 
 function errorEmbed(msg) {
-  return new EmbedBuilder().setColor(0xFF4444).setDescription(`⚠️ ${msg}`);
+  return new EmbedBuilder()
+    .setColor(0xB71C1C)
+    .setAuthor({ name: 'AEGIS  ·  ERROR' })
+    .setDescription(`\`\`\`diff\n- ${msg}\n\`\`\``);
 }
 
-// ══════════════════════════════════════════════════════════════════════════
-// EXPORTS
-// ══════════════════════════════════════════════════════════════════════════
+return { handleTriviaCommand, handleTriviaButton, handleTriviaModalSubmit };
 
-  return { handleTriviaCommand, handleTriviaButton, handleTriviaModalSubmit };
 }; // end triviaFactory
