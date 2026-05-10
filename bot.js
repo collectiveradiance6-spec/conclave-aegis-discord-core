@@ -1449,7 +1449,7 @@ if (await handleTriviaModalSubmit(interaction)) return;
       const allFields   = interaction.fields.fields;
       const issue       = allFields.get('issue')?.value || allFields.get('reason')?.value || '—';
       const embedFields = [
-        { name: '👤 User',    value: `${interaction.user} (${interaction.user.tag})`, inline: true },
+        { name: '👤 User',    value: `${interaction.user} (${interaction.user.username})`, inline: true },
         { name: '🏷️ Type',   value: meta.label, inline: true },
         { name: '🕐 Opened', value: `<t:${Math.floor(Date.now()/1000)}:R>`, inline: true },
       ];
@@ -1479,7 +1479,7 @@ if (await handleTriviaModalSubmit(interaction)) return;
           name: threadName.slice(0, 100),
           autoArchiveDuration: 10080, // 7 days
           type: ChannelType.PrivateThread,
-          reason: `Ticket: ${type} — ${interaction.user.tag}`,
+          reason: `Ticket: ${type} — ${interaction.user.username}`,
           invitable: false,
         });
 
@@ -1587,7 +1587,7 @@ if (await handleTriviaModalSubmit(interaction)) return;
           `═══════════════════════════════════════════`,
           `TICKET TRANSCRIPT — TheConclave Dominion`,
           `Thread: ${ch.name}`,
-          `Closed by: ${interaction.user.tag}`,
+          `Closed by: ${interaction.user.username}`,
           `Date: ${new Date().toLocaleString('en-US',{dateStyle:'full',timeStyle:'short'})}`,
           `═══════════════════════════════════════════`,
           '',
@@ -1610,7 +1610,7 @@ if (await handleTriviaModalSubmit(interaction)) return;
               .setTitle(`📋 Transcript — ${ch.name}`)
               .addFields(
                 { name: '🏷️ Status',    value: isResolve ? '✅ Resolved' : '🔒 Closed', inline: true },
-                { name: '👤 Closed by', value: interaction.user.tag, inline: true },
+                { name: '👤 Closed by', value: interaction.user.username, inline: true },
                 { name: '📅 Date',      value: `<t:${Math.floor(Date.now()/1000)}:F>`, inline: true },
               )
               .setFooter({ text: 'TheConclave Dominion · AEGIS Ticket System' })
