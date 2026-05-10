@@ -1405,20 +1405,11 @@ if (await handleTriviaModalSubmit(interaction)) return;
       return interaction.showModal(modal);
     }
 
-    // ── TICKET MODAL SUBMIT — create channel ────────────────────────
+    // ── TICKET MODAL SUBMIT — create thread ────────────────────────
     if (interaction.isModalSubmit() && interaction.customId.startsWith('ticket_modal_')) {
       await interaction.deferReply({ ephemeral: true });
       const type = interaction.customId.replace('ticket_modal_', '');
-      const safeName = interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g,'-').slice(0,16);
 
-      // Channel names map to your exact category names
-      const CHANNEL_PREFIX = {
-        support:    'support-tickets',
-        starterkit: 'starter-kit-tickets',
-        concoin:    'concoin-shop-tickets',
-        claveshard: 'clvsd-shop-support',
-        basewatch:  'aegis-tower-base-watch',
-      };
       const TYPE_META = {
         support:    { label:'Support Ticket',               emoji:'🛡️', color:0x00D4FF },
         starterkit: { label:'Starter Kit Request',           emoji:'🎁', color:0x35ED7E },
@@ -1427,12 +1418,7 @@ if (await handleTriviaModalSubmit(interaction)) return;
         basewatch:  { label:'🛡️ Base Watch Request 🛡️',   emoji:'👁️', color:0x7B2FFF },
       };
 
-      const meta = TYPE_META[type] || TYPE_META.support;
-      const prefix = CHANNEL_PREFIX[type] || type;
-      const chName = `${prefix}-${safeName}`.slice(0, 100);
-
-      // Map type to its log channel ID — tickets open as threads INSIDE these channels
-      const LOG_CHANNELS = {
+      const LOG_CHANNEL_IDS = {
         support:    LOG_SUPPORT,
         starterkit: LOG_STARTERKIT,
         concoin:    LOG_CONCOIN,
@@ -1440,14 +1426,22 @@ if (await handleTriviaModalSubmit(interaction)) return;
         basewatch:  LOG_BASEWATCH,
       };
 
-      const logChId = LOG_CHANNELS[type];
-      const logCh   = logChId ? interaction.guild.channels.cache.get(logChId) : null;
-      if (!logCh) return interaction.editReply('⚠️ Log channel not found — contact an admin.');
+      const meta    = TYPE_META[type] || TYPE_META.support;
+      const logChId = LOG_CHANNEL_IDS[type];
 
-      // Check for existing open thread for this user in this channel
-      await logCh.threads.fetchActive().catch(() => {});
+      // Fetch channel fresh — don't rely on cache
+      let logCh = null;
+      try {
+        logCh = logChId ? await interaction.guild.channels.fetch(logChId) : null;
+      } catch(e) {
+        console.error(`[Tickets] Failed to fetch log channel ${logChId}:`, e.message);
+      }
+      if (!logCh) return interaction.editReply(`⚠️ Log channel not found (ID: ${logChId}) — tell an admin.`);
+
+      // Check for existing open thread for this user
+      try { await logCh.threads.fetchActive(); } catch {}
       const existingThread = logCh.threads.cache.find(t =>
-        t.name.toLowerCase().includes(interaction.user.username.toLowerCase().slice(0,10)) && !t.archived
+        !t.archived && t.name.toLowerCase().includes(interaction.user.username.toLowerCase().slice(0,10))
       );
       if (existingThread) return interaction.editReply(`⚠️ You already have an open ticket: ${existingThread}`);
 
@@ -1474,6 +1468,13 @@ if (await handleTriviaModalSubmit(interaction)) return;
       try {
         // Create private thread inside the log channel
         const threadName = `${meta.emoji} ${interaction.user.username} — ${new Date().toLocaleDateString('en-US',{month:'short',day:'numeric'})}`;
+
+        // Verify channel supports threads
+        if (![ChannelType.GuildText, ChannelType.GuildForum, ChannelType.GuildAnnouncement].includes(logCh.type)) {
+          console.error(`[Tickets] Channel ${logChId} type ${logCh.type} doesn't support threads`);
+          return interaction.editReply(`⚠️ Log channel type (${logCh.type}) doesn't support threads. Tell an admin.`);
+        }
+
         const thread = await logCh.threads.create({
           name: threadName.slice(0, 100),
           autoArchiveDuration: 10080, // 7 days
@@ -1531,7 +1532,10 @@ if (await handleTriviaModalSubmit(interaction)) return;
         }
 
         return interaction.editReply({ content: `✅ Ticket opened: ${thread}` });
-      } catch (e) { return interaction.editReply(`⚠️ Error: ${e.message}`); }
+      } catch (e) {
+        console.error('[Tickets] Thread creation error:', e);
+        return interaction.editReply("Failed to create ticket: " + e.message + " — ensure bot has Manage Threads permission in the log channel.");
+      }
     }
 
     // ── TICKET CLAIM ──────────────────────────────────────────────────
