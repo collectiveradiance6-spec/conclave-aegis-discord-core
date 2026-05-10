@@ -53,11 +53,12 @@ let handleTriviaCommand, handleTriviaButton, handleTriviaModalSubmit;
 const {
   DISCORD_BOT_TOKEN, DISCORD_CLIENT_ID, DISCORD_GUILD_ID,
   CYBER_NEXUS_GUILD_ID = '1502913390761345044',
-  LOG_SUPPORT    = process.env.LOG_SUPPORT    || '1503110133540978769',
-  LOG_STARTERKIT = process.env.LOG_STARTERKIT || '1503109898093727906',
-  LOG_CONCOIN    = process.env.LOG_CONCOIN    || '1503109720456691742',
-  LOG_CLAVESHARD = process.env.LOG_CLAVESHARD || '1503109559022256251',
-  LOG_BASEWATCH  = process.env.LOG_BASEWATCH  || '1503109371910029415',
+  LOG_SUPPORT        = process.env.LOG_SUPPORT        || '1503110133540978769',
+  LOG_STARTERKIT     = process.env.LOG_STARTERKIT     || '1503109898093727906',
+  LOG_CONCOIN        = process.env.LOG_CONCOIN        || '1503109720456691742',
+  LOG_CLAVESHARD     = process.env.LOG_CLAVESHARD     || '1503109559022256251',
+  LOG_BASEWATCH      = process.env.LOG_BASEWATCH      || '1503109371910029415',
+  TRANSCRIPT_CHANNEL = process.env.TRANSCRIPT_CHANNEL || '1503111460790735041',
   ROLE_OWNER_ID, ROLE_ADMIN_ID, ROLE_HELPER_ID,
   GROQ_API_KEY, ANTHROPIC_API_KEY,
   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
@@ -1419,67 +1420,78 @@ if (await handleTriviaModalSubmit(interaction)) return;
       const prefix = CHANNEL_PREFIX[type] || type;
       const chName = `${prefix}-${safeName}`.slice(0, 100);
 
-      const existing = interaction.guild.channels.cache.find(ch => ch.name === chName);
-      if (existing) return interaction.editReply(`⚠️ You already have an open ticket: ${existing}`);
+      // Map type to its log channel ID — tickets open as threads INSIDE these channels
+      const LOG_CHANNELS = {
+        support:    LOG_SUPPORT,
+        starterkit: LOG_STARTERKIT,
+        concoin:    LOG_CONCOIN,
+        claveshard: LOG_CLAVESHARD,
+        basewatch:  LOG_BASEWATCH,
+      };
 
-      // Find matching category by name
-      const categoryName = CHANNEL_PREFIX[type] || 'tickets';
-      const category = interaction.guild.channels.cache.find(ch =>
-        ch.type === 4 && (
-          ch.name.toLowerCase().includes(categoryName.toLowerCase()) ||
-          ch.name.toLowerCase().includes('ticket')
-        )
+      const logChId = LOG_CHANNELS[type];
+      const logCh   = logChId ? interaction.guild.channels.cache.get(logChId) : null;
+      if (!logCh) return interaction.editReply('⚠️ Log channel not found — contact an admin.');
+
+      // Check for existing open thread for this user in this channel
+      await logCh.threads.fetchActive().catch(() => {});
+      const existingThread = logCh.threads.cache.find(t =>
+        t.name.toLowerCase().includes(interaction.user.username.toLowerCase().slice(0,10)) && !t.archived
       );
+      if (existingThread) return interaction.editReply(`⚠️ You already have an open ticket: ${existingThread}`);
+
+      // Build fields from modal inputs
+      const allFields   = interaction.fields.fields;
+      const issue       = allFields.get('issue')?.value || allFields.get('reason')?.value || '—';
+      const embedFields = [
+        { name: '👤 User',    value: `${interaction.user} (${interaction.user.tag})`, inline: true },
+        { name: '🏷️ Type',   value: meta.label, inline: true },
+        { name: '🕐 Opened', value: `<t:${Math.floor(Date.now()/1000)}:R>`, inline: true },
+      ];
+      const fieldMap = {
+        issue:'📋 Issue', reason:'📋 Reason', server:'🗺️ Server',
+        character:'🦖 Character & Server', platform:'🎮 Platform', tribe:'🏕️ Tribe',
+        order_ref:'🔖 Order Ref', tier:'💎 Tier Selected', order_details:'📋 Order Details',
+        payment:'💳 Payment', amount:'💰 Amount', proof:'📎 Proof',
+        location:'📍 Location', duration:'⏱️ Duration',
+      };
+      for (const [key, label] of Object.entries(fieldMap)) {
+        const val = allFields.get(key)?.value;
+        if (val) embedFields.push({ name: label, value: val.slice(0,500), inline: key!=='issue'&&key!=='reason'&&key!=='order_details' });
+      }
 
       try {
-        const ch = await interaction.guild.channels.create({
-          name: chName,
-          type: ChannelType.GuildText,
-          parent: category?.id || null,
-          permissionOverwrites: [
-            { id: interaction.guild.roles.everyone, deny: [PermissionFlagsBits.ViewChannel] },
-            { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
-            { id: interaction.guild.members.me.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels] },
-            ...(ROLE_ADMIN_ID  ? [{ id: ROLE_ADMIN_ID,  allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }] : []),
-            ...(ROLE_HELPER_ID ? [{ id: ROLE_HELPER_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }] : []),
-          ],
+        // Create private thread inside the log channel
+        const threadName = `${meta.emoji} ${interaction.user.username} — ${new Date().toLocaleDateString('en-US',{month:'short',day:'numeric'})}`;
+        const thread = await logCh.threads.create({
+          name: threadName.slice(0, 100),
+          autoArchiveDuration: 10080, // 7 days
+          type: ChannelType.PrivateThread,
+          reason: `Ticket: ${type} — ${interaction.user.tag}`,
+          invitable: false,
         });
 
-        // Build fields from modal inputs
-        const allFields = interaction.fields.fields;
-        const issue     = allFields.get('issue')?.value || allFields.get('reason')?.value || '—';
-        const embedFields = [
-          { name: '👤 User',    value: `${interaction.user} (${interaction.user.tag})`, inline: true },
-          { name: '🏷️ Type',   value: meta.label, inline: true },
-          { name: '🕐 Opened', value: `<t:${Math.floor(Date.now()/1000)}:R>`, inline: true },
-        ];
+        // Add the user to the thread
+        await thread.members.add(interaction.user.id).catch(() => {});
 
-        // Add all form fields dynamically
-        const fieldMap = {
-          issue:         '📋 Issue / Description',
-          reason:        '📋 Reason',
-          server:        '🗺️ Server',
-          character:     '🦖 Character & Server',
-          platform:      '🎮 Platform',
-          tribe:         '🏕️ Tribe',
-          order_ref:     '🔖 Order Ref',
-          tier:          '💎 Tier Selected',
-          order_details: '📋 Order Details',
-          payment:       '💳 Payment',
-          amount:        '💰 Amount',
-          proof:         '📎 Proof',
-          location:      '📍 Location',
-          duration:      '⏱️ Duration',
-        };
-        for (const [key, label] of Object.entries(fieldMap)) {
-          const val = allFields.get(key)?.value;
-          if (val) embedFields.push({ name: label, value: val.slice(0, 500), inline: key !== 'issue' && key !== 'reason' });
+        // Add staff roles to thread
+        if (ROLE_ADMIN_ID) {
+          const adminRole = interaction.guild.roles.cache.get(ROLE_ADMIN_ID);
+          if (adminRole) {
+            const admins = interaction.guild.members.cache.filter(m => m.roles.cache.has(ROLE_ADMIN_ID));
+            for (const [,m] of admins) await thread.members.add(m.id).catch(() => {});
+          }
+        }
+        if (ROLE_HELPER_ID) {
+          const helpers = interaction.guild.members.cache.filter(m => m.roles.cache.has(ROLE_HELPER_ID));
+          for (const [,m] of helpers) await thread.members.add(m.id).catch(() => {});
         }
 
-        await ch.send({
+        // Post ticket embed inside the thread
+        await thread.send({
           content: [
             interaction.user.toString(),
-            ROLE_ADMIN_ID  ? `<@&${ROLE_ADMIN_ID}>` : '',
+            ROLE_ADMIN_ID  ? `<@&${ROLE_ADMIN_ID}>`  : '',
             ROLE_HELPER_ID ? `<@&${ROLE_HELPER_ID}>` : '',
           ].filter(Boolean).join(' '),
           embeds: [
@@ -1487,7 +1499,7 @@ if (await handleTriviaModalSubmit(interaction)) return;
               .setColor(meta.color)
               .setTitle(`${meta.emoji} ${meta.label}`)
               .addFields(...embedFields)
-              .setFooter({ text: 'TheConclave Dominion · Use the buttons below to manage this ticket' })
+              .setFooter({ text: 'TheConclave Dominion · Staff use buttons below to manage' })
               .setTimestamp(),
           ],
           components: [new ActionRowBuilder().addComponents(
@@ -1500,84 +1512,111 @@ if (await handleTriviaModalSubmit(interaction)) return;
         // Log to Supabase
         if (sb && sbOk()) {
           sb.from('aegis_tickets').insert({
-            guild_id: interaction.guildId, channel_id: ch.id,
+            guild_id: interaction.guildId, channel_id: thread.id,
             user_id: interaction.user.id, user_tag: interaction.user.username,
-            type, issue: issue.slice(0, 500), status: 'open',
+            type, issue: issue.slice(0,500), status: 'open',
             created_at: new Date().toISOString(),
           }).catch(() => {});
         }
 
-        // Post to the hidden admin log channel for this ticket type
-        const LOG_CHANNELS = {
-          support:    LOG_SUPPORT,
-          starterkit: LOG_STARTERKIT,
-          concoin:    LOG_CONCOIN,
-          claveshard: LOG_CLAVESHARD,
-          basewatch:  LOG_BASEWATCH,
-        };
-        const logChId = LOG_CHANNELS[type];
-        if (logChId) {
-          const logCh = interaction.guild.channels.cache.get(logChId);
-          if (logCh) {
-            logCh.send({
-              embeds: [
-                new EmbedBuilder()
-                  .setColor(meta.color)
-                  .setTitle(`${meta.emoji} New ${meta.label}`)
-                  .setDescription(`**Ticket Channel:** ${ch}\n**User:** ${interaction.user} (${interaction.user.tag})`)
-                  .addFields(
-                    ...embedFields.filter(f => !['👤 User','🏷️ Type','🕐 Opened'].includes(f.name))
-                  )
-                  .setFooter({ text: `Guild: ${interaction.guildId} · Channel: ${ch.id}` })
-                  .setTimestamp(),
-              ],
-              components: [new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                  .setLabel('Jump to Ticket')
-                  .setStyle(ButtonStyle.Link)
-                  .setURL(`https://discord.com/channels/${interaction.guildId}/${ch.id}`),
-              )],
-            }).catch(() => {});
-          }
-        }
-
-        return interaction.editReply({ content: `✅ Ticket created: ${ch}` });
+        return interaction.editReply({ content: `✅ Ticket opened: ${thread}` });
       } catch (e) { return interaction.editReply(`⚠️ Error: ${e.message}`); }
     }
 
-    // ── TICKET CLOSE / CLAIM ────────────────────────────────────────
-    if (interaction.isButton() && interaction.customId==='ticket_close') {
-      if (!isMod(interaction.member)) return interaction.reply({ content:'⛔ Staff only.', ephemeral:true });
-      await interaction.reply('🔒 Closing ticket in 5 seconds...');
-      // Log close to Supabase
-      if (sb && sbOk()) {
-        sb.from('aegis_tickets').update({ status:'closed', closed_at: new Date().toISOString(), closed_by: interaction.user.username })
-          .eq('channel_id', interaction.channelId).catch(() => {});
-      }
-      setTimeout(() => interaction.channel.delete().catch(() => {}), 5000);
-      return;
-    }
+    // ── TICKET CLAIM ──────────────────────────────────────────────────
     if (interaction.isButton() && interaction.customId==='ticket_claim') {
       if (!isMod(interaction.member)) return interaction.reply({ content:'⛔ Staff only.', ephemeral:true });
-      await interaction.reply({ content: `✋ Ticket claimed by ${interaction.user}`, ephemeral: false });
+      await interaction.reply({ content: `✋ **${interaction.user}** has claimed this ticket.\nOnly they will handle it from here.` });
       if (sb && sbOk()) {
         sb.from('aegis_tickets').update({ claimed_by: interaction.user.username, status: 'claimed' })
           .eq('channel_id', interaction.channelId).catch(() => {});
       }
       return;
     }
-    if (interaction.isButton() && interaction.customId==='ticket_resolve') {
+
+    // ── TICKET CLOSE / RESOLVE — save transcript ──────────────────────
+    if (interaction.isButton() && ['ticket_close','ticket_resolve'].includes(interaction.customId)) {
       if (!isMod(interaction.member)) return interaction.reply({ content:'⛔ Staff only.', ephemeral:true });
+
+      const isResolve = interaction.customId === 'ticket_resolve';
       await interaction.reply({
-        embeds: [new EmbedBuilder().setColor(0x35ED7E).setTitle('✅ Ticket Resolved')
-          .setDescription(`Resolved by ${interaction.user}\n\nThis channel will be deleted in **10 seconds**.`)
+        embeds: [new EmbedBuilder()
+          .setColor(isResolve ? 0x35ED7E : 0xFF4444)
+          .setTitle(isResolve ? '✅ Ticket Resolved' : '🔒 Ticket Closed')
+          .setDescription(`${isResolve ? 'Resolved' : 'Closed'} by ${interaction.user}\nSaving transcript... thread will archive shortly.`)
           .setTimestamp()],
       });
+
+      // Update Supabase
       if (sb && sbOk()) {
-        sb.from('aegis_tickets').update({ status: 'closed', closed_by: interaction.user.username, closed_at: new Date().toISOString() })
-          .eq('channel_id', interaction.channelId).catch(() => {});
+        sb.from('aegis_tickets').update({
+          status: 'closed', closed_by: interaction.user.username,
+          closed_at: new Date().toISOString(),
+        }).eq('channel_id', interaction.channelId).catch(() => {});
       }
-      setTimeout(() => interaction.channel.delete().catch(() => {}), 10000);
+
+      // Generate transcript — fetch last 200 messages
+      try {
+        const ch = interaction.channel;
+        const messages = await ch.messages.fetch({ limit: 100 });
+        const sorted   = [...messages.values()].reverse();
+
+        // Build text transcript
+        const lines = sorted.map(m => {
+          const time = new Date(m.createdTimestamp).toLocaleString('en-US',{dateStyle:'short',timeStyle:'short'});
+          const content = m.content || (m.embeds[0]?.title ? `[Embed: ${m.embeds[0].title}]` : '[attachment/embed]');
+          return `[${time}] ${m.author.username}: ${content}`;
+        }).join('\n');
+
+        const transcriptText = [
+          `═══════════════════════════════════════════`,
+          `TICKET TRANSCRIPT — TheConclave Dominion`,
+          `Thread: ${ch.name}`,
+          `Closed by: ${interaction.user.tag}`,
+          `Date: ${new Date().toLocaleString('en-US',{dateStyle:'full',timeStyle:'short'})}`,
+          `═══════════════════════════════════════════`,
+          '',
+          lines,
+          '',
+          `═══════════════════════════════════════════`,
+          `END OF TRANSCRIPT`,
+        ].join('\n');
+
+        // Post to transcript channel
+        const transcriptCh = interaction.guild.channels.cache.get(TRANSCRIPT_CHANNEL);
+        if (transcriptCh) {
+          const { AttachmentBuilder } = require('discord.js');
+          const buf = Buffer.from(transcriptText, 'utf8');
+          const attachment = new AttachmentBuilder(buf, { name: `transcript-${ch.name}-${Date.now()}.txt` });
+
+          await transcriptCh.send({
+            embeds: [new EmbedBuilder()
+              .setColor(isResolve ? 0x35ED7E : 0xFF4444)
+              .setTitle(`📋 Transcript — ${ch.name}`)
+              .addFields(
+                { name: '🏷️ Status',    value: isResolve ? '✅ Resolved' : '🔒 Closed', inline: true },
+                { name: '👤 Closed by', value: interaction.user.tag, inline: true },
+                { name: '📅 Date',      value: `<t:${Math.floor(Date.now()/1000)}:F>`, inline: true },
+              )
+              .setFooter({ text: 'TheConclave Dominion · AEGIS Ticket System' })
+              .setTimestamp()],
+            files: [attachment],
+          }).catch(() => {});
+        }
+      } catch (transcriptErr) {
+        console.warn('[Tickets] Transcript error:', transcriptErr.message);
+      }
+
+      // Archive the thread instead of deleting
+      setTimeout(async () => {
+        try {
+          if (interaction.channel.isThread()) {
+            await interaction.channel.setArchived(true);
+          } else {
+            await interaction.channel.delete();
+          }
+        } catch {}
+      }, 8000);
       return;
     }
 
