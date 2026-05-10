@@ -30,6 +30,7 @@
 require('dotenv').config();
  
 const { sendWatchtowerPanel, handleWatchtowerInteraction } = require('./watchtower-system');
+const { startNitradoMonitor } = require('./src/monitors/nitradoMonitor');
 const http = require('http');
 const axios = require('axios');
 const {
@@ -2119,6 +2120,7 @@ bot.once(Events.ClientReady, async () => {
   console.log(`   Health:      :${BOT_PORT}`);
   bot.user.setActivity('🪙 /trivia | 15,000 ConCoins per win!', { type:3 });
   await registerCommands();
+  startNitradoMonitor(bot); // ── Multi-guild Nitrado monitor (Dominion + Cyber Nexus)
  
   if (!DISCORD_GUILD_ID) return;
   try {
