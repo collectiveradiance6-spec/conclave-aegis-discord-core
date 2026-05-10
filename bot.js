@@ -1405,7 +1405,7 @@ if (await handleTriviaModalSubmit(interaction)) return;
       return interaction.showModal(modal);
     }
 
-    // ── TICKET MODAL SUBMIT — create thread ────────────────────────
+    // ── TICKET MODAL SUBMIT — post to admin log via webhook ─────────
     if (interaction.isModalSubmit() && interaction.customId.startsWith('ticket_modal_')) {
       await interaction.deferReply({ ephemeral: true });
       const type = interaction.customId.replace('ticket_modal_', '');
@@ -1418,32 +1418,19 @@ if (await handleTriviaModalSubmit(interaction)) return;
         basewatch:  { label:'🛡️ Base Watch Request 🛡️',   emoji:'👁️', color:0x7B2FFF },
       };
 
-      const LOG_CHANNEL_IDS = {
-        support:    LOG_SUPPORT,
-        starterkit: LOG_STARTERKIT,
-        concoin:    LOG_CONCOIN,
-        claveshard: LOG_CLAVESHARD,
-        basewatch:  LOG_BASEWATCH,
+      // Webhook URLs — set these in Render env vars
+      // Each is the webhook for the corresponding admin log channel
+      const WEBHOOKS = {
+        support:    process.env.WEBHOOK_SUPPORT,
+        starterkit: process.env.WEBHOOK_STARTERKIT,
+        concoin:    process.env.WEBHOOK_CONCOIN,
+        claveshard: process.env.WEBHOOK_CLAVESHARD,
+        basewatch:  process.env.WEBHOOK_BASEWATCH,
       };
 
-      const meta    = TYPE_META[type] || TYPE_META.support;
-      const logChId = LOG_CHANNEL_IDS[type];
-
-      // Fetch channel fresh — don't rely on cache
-      let logCh = null;
-      try {
-        logCh = logChId ? await interaction.guild.channels.fetch(logChId) : null;
-      } catch(e) {
-        console.error(`[Tickets] Failed to fetch log channel ${logChId}:`, e.message);
-      }
-      if (!logCh) return interaction.editReply(`⚠️ Log channel not found (ID: ${logChId}) — tell an admin.`);
-
-      // Check for existing open thread for this user
-      try { await logCh.threads.fetchActive(); } catch {}
-      const existingThread = logCh.threads.cache.find(t =>
-        !t.archived && t.name.toLowerCase().includes(interaction.user.username.toLowerCase().slice(0,10))
-      );
-      if (existingThread) return interaction.editReply(`⚠️ You already have an open ticket: ${existingThread}`);
+      const meta       = TYPE_META[type] || TYPE_META.support;
+      const webhookUrl = WEBHOOKS[type];
+      if (!webhookUrl) return interaction.editReply('⚠️ No webhook configured for this ticket type — tell an admin.');
 
       // Build fields from modal inputs
       const allFields   = interaction.fields.fields;
@@ -1465,76 +1452,54 @@ if (await handleTriviaModalSubmit(interaction)) return;
         if (val) embedFields.push({ name: label, value: val.slice(0,500), inline: key!=='issue'&&key!=='reason'&&key!=='order_details' });
       }
 
+      // Build fields from modal inputs (moved up before try)
+      // Already built above — use existing embedFields
+
       try {
-        // Create private thread inside the log channel
-        const threadName = `${meta.emoji} ${interaction.user.username} — ${new Date().toLocaleDateString('en-US',{month:'short',day:'numeric'})}`;
+        // Post to webhook — no permission issues, no thread complexity
+        const { WebhookClient } = require('discord.js');
+        const webhook = new WebhookClient({ url: webhookUrl });
 
-        // Verify channel supports threads
-        if (![ChannelType.GuildText, ChannelType.GuildForum, ChannelType.GuildAnnouncement].includes(logCh.type)) {
-          console.error(`[Tickets] Channel ${logChId} type ${logCh.type} doesn't support threads`);
-          return interaction.editReply(`⚠️ Log channel type (${logCh.type}) doesn't support threads. Tell an admin.`);
-        }
+        const mentionLine = [
+          `<@${interaction.user.id}>`,
+          ROLE_ADMIN_ID  ? `<@&${ROLE_ADMIN_ID}>`  : '',
+          ROLE_HELPER_ID ? `<@&${ROLE_HELPER_ID}>` : '',
+        ].filter(Boolean).join(' ');
 
-        const thread = await logCh.threads.create({
-          name: threadName.slice(0, 100),
-          autoArchiveDuration: 10080, // 7 days
-          type: ChannelType.PrivateThread,
-          reason: `Ticket: ${type} — ${interaction.user.username}`,
-          invitable: false,
+        await webhook.send({
+          content: mentionLine,
+          embeds: [{
+            color:  meta.color,
+            title:  `${meta.emoji} ${meta.label}`,
+            fields: embedFields,
+            footer: { text: 'TheConclave Dominion · AEGIS Ticket System' },
+            timestamp: new Date().toISOString(),
+          }],
+          username:   'AEGIS Tickets',
+          avatarURL:  'https://theconclavedominion.com/THECONCLAVE.png',
+          allowedMentions: { users: [interaction.user.id], roles: [ROLE_ADMIN_ID, ROLE_HELPER_ID].filter(Boolean) },
         });
 
-        // Add the user to the thread
-        await thread.members.add(interaction.user.id).catch(() => {});
-
-        // Add staff roles to thread
-        if (ROLE_ADMIN_ID) {
-          const adminRole = interaction.guild.roles.cache.get(ROLE_ADMIN_ID);
-          if (adminRole) {
-            const admins = interaction.guild.members.cache.filter(m => m.roles.cache.has(ROLE_ADMIN_ID));
-            for (const [,m] of admins) await thread.members.add(m.id).catch(() => {});
-          }
-        }
-        if (ROLE_HELPER_ID) {
-          const helpers = interaction.guild.members.cache.filter(m => m.roles.cache.has(ROLE_HELPER_ID));
-          for (const [,m] of helpers) await thread.members.add(m.id).catch(() => {});
-        }
-
-        // Post ticket embed inside the thread
-        await thread.send({
-          content: [
-            interaction.user.toString(),
-            ROLE_ADMIN_ID  ? `<@&${ROLE_ADMIN_ID}>`  : '',
-            ROLE_HELPER_ID ? `<@&${ROLE_HELPER_ID}>` : '',
-          ].filter(Boolean).join(' '),
-          embeds: [
-            new EmbedBuilder()
-              .setColor(meta.color)
-              .setTitle(`${meta.emoji} ${meta.label}`)
-              .addFields(...embedFields)
-              .setFooter({ text: 'TheConclave Dominion · Staff use buttons below to manage' })
-              .setTimestamp(),
-          ],
-          components: [new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('ticket_close').setLabel('🔒 Close').setStyle(ButtonStyle.Danger),
-            new ButtonBuilder().setCustomId('ticket_claim').setLabel('✋ Claim').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('ticket_resolve').setLabel('✅ Resolve').setStyle(ButtonStyle.Success),
-          )],
-        });
+        webhook.destroy();
 
         // Log to Supabase
         if (sb && sbOk()) {
           sb.from('aegis_tickets').insert({
-            guild_id: interaction.guildId, channel_id: thread.id,
-            user_id: interaction.user.id, user_tag: interaction.user.username,
+            guild_id:   interaction.guildId,
+            channel_id: type + '_webhook',
+            user_id:    interaction.user.id,
+            user_tag:   interaction.user.username,
             type, issue: issue.slice(0,500), status: 'open',
             created_at: new Date().toISOString(),
           }).catch(() => {});
         }
 
-        return interaction.editReply({ content: `✅ Ticket opened: ${thread}` });
+        return interaction.editReply({ content: `✅ Your ${meta.label} has been submitted. Staff will respond in <#${
+          { support: LOG_SUPPORT, starterkit: LOG_STARTERKIT, concoin: LOG_CONCOIN, claveshard: LOG_CLAVESHARD, basewatch: LOG_BASEWATCH }[type]
+        }>.` });
       } catch (e) {
-        console.error('[Tickets] Thread creation error:', e);
-        return interaction.editReply("Failed to create ticket: " + e.message + " — ensure bot has Manage Threads permission in the log channel.");
+        console.error('[Tickets] Webhook error:', e.message);
+        return interaction.editReply('Failed to submit ticket: ' + e.message);
       }
     }
 
@@ -2538,8 +2503,21 @@ if (await handleTriviaModalSubmit(interaction)) return;
     }
  
   } catch (e) {
-    console.error(`❌ /${interaction.commandName}:`, e.message);
-    try { await interaction.editReply(`⚠️ Error: ${e.message.slice(0,200)}`); } catch {}
+    const label = interaction.isChatInputCommand()
+      ? `/${interaction.commandName}`
+      : interaction.isButton()
+        ? `button:${interaction.customId}`
+        : interaction.isModalSubmit()
+          ? `modal:${interaction.customId}`
+          : 'interaction';
+    console.error(`❌ ${label}:`, e.message);
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply(`⚠️ Error: ${e.message.slice(0,200)}`);
+      } else {
+        await interaction.reply({ content: `⚠️ Error: ${e.message.slice(0,200)}`, ephemeral: true });
+      }
+    } catch {}
   }
 });
  
