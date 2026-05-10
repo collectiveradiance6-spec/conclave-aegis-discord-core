@@ -1181,6 +1181,11 @@ const ALL_COMMANDS = [
     .addRoleOption(o=>o.setName('role').setDescription('Role').setRequired(true))
     .addStringOption(o=>o.setName('action').setDescription('Action').setRequired(true).addChoices({name:'Add',value:'add'},{name:'Remove',value:'remove'})),
   new SlashCommandBuilder().setName('ticket').setDescription('🎫 [ADMIN] Post support ticket panel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+  new SlashCommandBuilder().setName('panel-support').setDescription('🛡️ [ADMIN] Post general support panel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+  new SlashCommandBuilder().setName('panel-starterkit').setDescription('🎁 [ADMIN] Post starter kit panel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+  new SlashCommandBuilder().setName('panel-concoin').setDescription('🪙 [ADMIN] Post ConCoin shop panel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+  new SlashCommandBuilder().setName('panel-claveshard').setDescription('📚 [ADMIN] Post ClaveShard shop panel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+  new SlashCommandBuilder().setName('panel-basewatch').setDescription('🛡️ [ADMIN] Post base watch panel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
   new SlashCommandBuilder().setName('purge').setDescription('🗑️ [ADMIN] Delete messages in bulk').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     .addIntegerOption(o=>o.setName('count').setDescription('Number of messages (max 100)').setRequired(true).setMinValue(1).setMaxValue(100))
     .addUserOption(o=>o.setName('user').setDescription('Only purge from this user').setRequired(false)),
@@ -1334,10 +1339,32 @@ if (await handleTriviaModalSubmit(interaction)) return;
           new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('proof').setLabel('Proof / Transaction Reference').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Screenshot link or transaction ID')),
         ],
         claveshard: [
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('order_ref').setLabel('Order Reference # (if you have it)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('e.g. ORD-ABC123XY')),
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('issue').setLabel('What is your order issue?').setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('Missing items, wrong tier, not received, dispute...')),
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('character').setLabel('Character Name & Server').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('e.g. MyChar on Aberration')),
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('platform').setLabel('Platform').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Xbox / PlayStation / PC / Switch')),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('tier').setLabel('Tier / Item Selection')
+              .setStyle(TextInputStyle.Short).setRequired(true)
+              .setPlaceholder('T1 Foundation Drop / T2 Shiny Starter / T3 Tek Spark / T5 Boss Spark / T6 Boss Ready / T8 Med Resources / T10 Dominion Upgrade / T12 Large Resources / T15 Crown Drop / T20 Gate Expansion / T30 Dedicated Refill / Dino Insurance')
+              .setMinLength(1).setMaxLength(50)
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('character').setLabel('Character Name & Server / Map')
+              .setStyle(TextInputStyle.Short).setRequired(true)
+              .setPlaceholder('e.g. SurvivorX on Aberration')
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('platform').setLabel('Platform')
+              .setStyle(TextInputStyle.Short).setRequired(true)
+              .setPlaceholder('Xbox / PlayStation / PC / Switch')
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('order_details').setLabel('Order Details / Special Requests')
+              .setStyle(TextInputStyle.Paragraph).setRequired(false)
+              .setPlaceholder('Specific dino type, colors, species name, delivery notes, anything extra...')
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('payment').setLabel('Payment Method + Confirmation')
+              .setStyle(TextInputStyle.Short).setRequired(false)
+              .setPlaceholder('Cash App / Chime + last 4 digits of transaction or username')
+          ),
         ],
         basewatch: [
           new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('tribe').setLabel('Tribe Name').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Your tribe name')),
@@ -1415,18 +1442,20 @@ if (await handleTriviaModalSubmit(interaction)) return;
 
         // Add all form fields dynamically
         const fieldMap = {
-          issue:     '📋 Issue / Description',
-          reason:    '📋 Reason',
-          server:    '🗺️ Server',
-          character: '🦖 Character',
-          platform:  '🎮 Platform',
-          tribe:     '🏕️ Tribe',
-          order_ref: '🔖 Order Ref',
-          amount:    '💰 Amount',
-          proof:     '📎 Proof',
-          location:  '📍 Location',
-          duration:  '⏱️ Duration',
-          concoin_amount: '🪙 ConCoin Amount',
+          issue:         '📋 Issue / Description',
+          reason:        '📋 Reason',
+          server:        '🗺️ Server',
+          character:     '🦖 Character & Server',
+          platform:      '🎮 Platform',
+          tribe:         '🏕️ Tribe',
+          order_ref:     '🔖 Order Ref',
+          tier:          '💎 Tier Selected',
+          order_details: '📋 Order Details',
+          payment:       '💳 Payment',
+          amount:        '💰 Amount',
+          proof:         '📎 Proof',
+          location:      '📍 Location',
+          duration:      '⏱️ Duration',
         };
         for (const [key, label] of Object.entries(fieldMap)) {
           const val = allFields.get(key)?.value;
@@ -2122,6 +2151,141 @@ if (await handleTriviaModalSubmit(interaction)) return;
       catch (e) { return interaction.editReply(`⚠️ Role change failed: ${e.message}`); }
     }
  
+    // ── DEDICATED PANEL COMMANDS ────────────────────────────────────────────
+    if (['panel-support','panel-starterkit','panel-concoin','panel-claveshard','panel-basewatch'].includes(cmd)) {
+      if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
+      const type = cmd.replace('panel-', '');
+
+      const PANELS = {
+        support: {
+          color: 0x00D4FF, emoji: '🛡️', title: 'TheConclave Support',
+          desc: [
+            '`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`',
+            '',
+            '**Need help from the Council?**',
+            'Click the button below to open a private support ticket.',
+            '',
+            '**What we can help with:**',
+            '> 🗺️ Server issues & questions',
+            '> ⚔️ Disputes & rule clarifications',
+            '> 🐛 Bug reports & glitches',
+            '> 🙏 General Dominion help',
+            '',
+            '`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`',
+            '-# Tickets are private · Council responds within 24 hours',
+          ].join('\n'),
+          btn: new ButtonBuilder().setCustomId('tkt_support').setLabel('🛡️ Open Support Ticket').setStyle(ButtonStyle.Primary),
+        },
+        starterkit: {
+          color: 0x35ED7E, emoji: '🎁', title: 'Starter Kit Requests',
+          desc: [
+            '`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`',
+            '',
+            '**New to TheConclave? Claim your starter kit!**',
+            '',
+            '**Kits include:**',
+            '> 🦖 A starter dino for your journey',
+            '> 🏠 Basic building materials',
+            '> 🍗 Food & survival supplies',
+            '> 📦 ConCoins to get started',
+            '',
+            '**Requirements:**',
+            '> New member (first 72h)',
+            '> One kit per player per server',
+            '',
+            '`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`',
+            '-# Fulfilled by Council within 24 hours',
+          ].join('\n'),
+          btn: new ButtonBuilder().setCustomId('tkt_starterkit').setLabel('🎁 Request Starter Kit').setStyle(ButtonStyle.Success),
+        },
+        concoin: {
+          color: 0xFFB800, emoji: '🪙', title: 'ConCoin Shop',
+          desc: [
+            '`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`',
+            '',
+            '**ConCoin Shop — In-Server Economy**',
+            'Open a ticket for purchases, transfers, or disputes.',
+            '',
+            '**ConCoins are used for:**',
+            '> 🏪 In-server market transactions',
+            '> 🎰 Event & giveaway entries',
+            '> 💱 Player-to-player trades',
+            '',
+            '**Earn ConCoins via:**',
+            '> 📅 Daily & weekly Discord activity',
+            '> 🎉 Events & competitions',
+            '> ⬆️ Tier purchases include ConCoins',
+            '',
+            '`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`',
+            '-# All ConCoin issues handled by Council',
+          ].join('\n'),
+          btn: new ButtonBuilder().setCustomId('tkt_concoin').setLabel('🪙 Open ConCoin Ticket').setStyle(ButtonStyle.Primary),
+        },
+        claveshard: {
+          color: 0xFF4CD2, emoji: '📚', title: '📚 ClaveShard Shop 👀',
+          desc: [
+            '`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`',
+            '',
+            '**ClaveShard Shop — Premium Dinos, Items & Resources**',
+            'Click to open an order ticket with full tier details.',
+            '',
+            '> 💠 **Tier 1** — Foundation Drop · 1 shard',
+            '            > 💎 **Tier 2** — Shiny Starter · 2 shards',
+            '            > ✨ **Tier 3** — Tek Spark · 3 shards',
+            '            > 🔥 **Tier 5** — Boss Spark · 5 shards',
+            '            > ⚔️ **Tier 6** — Boss Ready · 6 shards',
+            '            > 🧬 **Tier 8** — Medium Resources · 8 shards',
+            '            > 🛡️ **Tier 10** — Dominion Upgrade · 10 shards',
+            '            > 🌟 **Tier 12** — Large Resources · 12 shards',
+            '            > 👑 **Tier 15** — Crown Drop · 15 shards',
+            '            > 🏰 **Tier 20** — Gate Expansion · 20 shards',
+            '            > 💰 **Tier 30** — Dedicated Refill · 30 shards',
+            '            > 🐉 **Dino Insurance** — Protect your named dino',
+            '',
+            '**Payment:** Cash App `$TheConclaveDominion` · Chime `$TheConclaveDominion`',
+            '**Delivery:** 24–72 hours via Council',
+            '',
+            '`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`',
+            '-# Click below to open your order ticket',
+          ].join('\n'),
+          btn: new ButtonBuilder().setCustomId('tkt_claveshard').setLabel('📚 Open Shop Ticket 👀').setStyle(ButtonStyle.Primary),
+        },
+        basewatch: {
+          color: 0x7B2FFF, emoji: '🛡️', title: '🛡️ AEGIS Base Watch 🛡️',
+          desc: [
+            '`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`',
+            '',
+            '**AEGIS Tower — Base Protection Requests**',
+            'Going offline? Request protection from the Council.',
+            '',
+            '**Base watch includes:**',
+            '> 👁️ Council monitors your base area',
+            '> 🚨 Alert if suspicious activity detected',
+            '> 📸 Screenshot evidence if incident occurs',
+            '',
+            '**Requirements:**',
+            '> Server member in good standing',
+            '> 48h notice recommended',
+            '> Coordinates or description required',
+            '',
+            '`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`',
+            '-# AEGIS sees all · The Dominion protects its own',
+          ].join('\n'),
+          btn: new ButtonBuilder().setCustomId('tkt_basewatch').setLabel('🛡️ Request Base Watch').setStyle(ButtonStyle.Danger),
+        },
+      };
+
+      const panel = PANELS[type];
+      const embed = new EmbedBuilder()
+        .setColor(panel.color)
+        .setTitle(`${panel.emoji} ${panel.title}`)
+        .setDescription(panel.desc)
+        .setFooter({ text: 'TheConclave Dominion · Powered by AEGIS' })
+        .setTimestamp();
+      await interaction.channel.send({ embeds: [embed], components: [new ActionRowBuilder().addComponents(panel.btn)] });
+      return interaction.editReply(`✅ ${panel.title} panel posted.`);
+    }
+
     if (cmd==='ticket') {
       if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
       const row = new ActionRowBuilder().addComponents(
