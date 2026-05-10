@@ -1290,22 +1290,22 @@ if (await handleTriviaModalSubmit(interaction)) return;
  
     if (interaction.isButton() && interaction.customId==='giveaway_enter') {
       const gw = activeGiveaways.get(interaction.message.id);
-      if (!gw) return interaction.reply({ content:'⚠️ Giveaway no longer active.', ephemeral:true });
-      if (Date.now()>gw.endTime) return interaction.reply({ content:'⏰ Giveaway has ended.', ephemeral:true });
-      if (gw.entries.has(interaction.user.id)) return interaction.reply({ content:'✅ Already entered!', ephemeral:true });
+      if (!gw) return interaction.reply({ content:'⚠️ Giveaway no longer active.', flags: 64 });
+      if (Date.now()>gw.endTime) return interaction.reply({ content:'⏰ Giveaway has ended.', flags: 64 });
+      if (gw.entries.has(interaction.user.id)) return interaction.reply({ content:'✅ Already entered!', flags: 64 });
       if (gw.shardCost>0) {
         try { await deductShards(interaction.user.id, interaction.user.username, gw.shardCost, `Giveaway entry: ${gw.prize}`, 'SYSTEM', 'AEGIS'); }
-        catch (e) { return interaction.reply({ content:`⚠️ Entry requires **${gw.shardCost} 💎** in your wallet. ${e.message}`, ephemeral:true }); }
+        catch (e) { return interaction.reply({ content:`⚠️ Entry requires **${gw.shardCost} 💎** in your wallet. ${e.message}`, flags: 64 }); }
       }
       gw.entries.add(interaction.user.id);
-      return interaction.reply({ content:`🎉 You entered the **${gw.prize}** giveaway!${gw.shardCost>0?` (−${gw.shardCost} 💎)`:''} Good luck!`, ephemeral:true });
+      return interaction.reply({ content:`🎉 You entered the **${gw.prize}** giveaway!${gw.shardCost>0?` (−${gw.shardCost} 💎)`:''} Good luck!`, flags: 64 });
     }
  
     if (interaction.isButton() && interaction.customId?.startsWith('vote_')) {
       const [,msgId,optIdx] = interaction.customId.split('_');
       const vote = activeVotes.get(msgId);
-      if (!vote) return interaction.reply({ content:'⚠️ Vote expired.', ephemeral:true });
-      if (Date.now()>vote.ends) return interaction.reply({ content:'⏰ Vote has ended.', ephemeral:true });
+      if (!vote) return interaction.reply({ content:'⚠️ Vote expired.', flags: 64 });
+      if (Date.now()>vote.ends) return interaction.reply({ content:'⏰ Vote has ended.', flags: 64 });
       for (const [,voters] of vote.votes) voters.delete(interaction.user.id);
       if (!vote.votes.has(parseInt(optIdx))) vote.votes.set(parseInt(optIdx), new Set());
       vote.votes.get(parseInt(optIdx)).add(interaction.user.id);
@@ -1313,13 +1313,13 @@ if (await handleTriviaModalSubmit(interaction)) return;
       const resultLines=vote.options.map((o,i)=>{ const count=vote.votes.get(i)?.size||0; const pct=totalVotes?Math.round((count/totalVotes)*100):0; const bar='█'.repeat(Math.round(pct/5))+'░'.repeat(20-Math.round(pct/5)); return `**${i+1}.** ${o}\n\`${bar}\` **${pct}%** (${count} votes)`; }).join('\n\n');
       try { const msg=await interaction.message.fetch(); await msg.edit({ embeds:[base(`🗳️ ${vote.question}`,C.cy).setDescription(resultLines+`\n\n> Total votes: **${totalVotes}** · Ends <t:${Math.floor(vote.ends/1000)}:R>`)] }); }
       catch {}
-      return interaction.reply({ content:`✅ Voted for **${vote.options[parseInt(optIdx)]}**!`, ephemeral:true });
+      return interaction.reply({ content:`✅ Voted for **${vote.options[parseInt(optIdx)]}**!`, flags: 64 });
     }
  
     // ── TICKET SYSTEM — TYPE SELECTOR ─────────────────────────────────
     if (interaction.isButton() && interaction.customId==='ticket_open') {
       return interaction.reply({
-        ephemeral: true,
+        flags: 64,
         embeds: [new EmbedBuilder()
           .setColor(0x00D4FF)
           .setTitle('🎫 Open a Support Ticket')
@@ -1381,7 +1381,7 @@ if (await handleTriviaModalSubmit(interaction)) return;
           new ActionRowBuilder().addComponents(
             new TextInputBuilder().setCustomId('tier').setLabel('Tier / Item Selection')
               .setStyle(TextInputStyle.Short).setRequired(true)
-              .setPlaceholder('T1 Foundation Drop / T2 Shiny Starter / T3 Tek Spark / T5 Boss Spark / T6 Boss Ready / T8 Med Resources / T10 Dominion Upgrade / T12 Large Resources / T15 Crown Drop / T20 Gate Expansion / T30 Dedicated Refill / Dino Insurance')
+              .setPlaceholder('T1/T2/T3/T5/T6/T8/T10/T12/T15/T20/T30 or Dino Insurance')
               .setMinLength(1).setMaxLength(50)
           ),
           new ActionRowBuilder().addComponents(
@@ -1420,7 +1420,7 @@ if (await handleTriviaModalSubmit(interaction)) return;
 
     // ── TICKET MODAL SUBMIT — post to admin log via webhook ─────────
     if (interaction.isModalSubmit() && interaction.customId.startsWith('ticket_modal_')) {
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({ flags: 64 });
       const type = interaction.customId.replace('ticket_modal_', '');
 
       const TYPE_META = {
@@ -1518,7 +1518,7 @@ if (await handleTriviaModalSubmit(interaction)) return;
 
     // ── TICKET CLAIM ──────────────────────────────────────────────────
     if (interaction.isButton() && interaction.customId==='ticket_claim') {
-      if (!isMod(interaction.member)) return interaction.reply({ content:'⛔ Staff only.', ephemeral:true });
+      if (!isMod(interaction.member)) return interaction.reply({ content:'⛔ Staff only.', flags: 64 });
       await interaction.reply({ content: `✋ **${interaction.user}** has claimed this ticket.\nOnly they will handle it from here.` });
       if (sb && sbOk()) {
         sb.from('aegis_tickets').update({ claimed_by: interaction.user.username, status: 'claimed' })
@@ -1529,7 +1529,7 @@ if (await handleTriviaModalSubmit(interaction)) return;
 
     // ── TICKET CLOSE / RESOLVE — save transcript ──────────────────────
     if (interaction.isButton() && ['ticket_close','ticket_resolve'].includes(interaction.customId)) {
-      if (!isMod(interaction.member)) return interaction.reply({ content:'⛔ Staff only.', ephemeral:true });
+      if (!isMod(interaction.member)) return interaction.reply({ content:'⛔ Staff only.', flags: 64 });
 
       const isResolve = interaction.customId === 'ticket_resolve';
       await interaction.reply({
@@ -1620,7 +1620,7 @@ if (await handleTriviaModalSubmit(interaction)) return;
     if (cmd==='watchtower') {
       if (!isAdmin(interaction.member)) return interaction.editReply('❌ Admin only.');
       await sendWatchtowerPanel(interaction.channel);
-      return interaction.editReply({ content:'✅ Watchtower panel posted.', ephemeral:true });
+      return interaction.editReply({ content:'✅ Watchtower panel posted.', flags: 64 });
     }
  
     // ════════════════════════════════════════════════════════════════
@@ -2552,7 +2552,7 @@ if (await handleTriviaModalSubmit(interaction)) return;
       if (interaction.deferred || interaction.replied) {
         await interaction.editReply(`⚠️ Error: ${e.message.slice(0,200)}`);
       } else {
-        await interaction.reply({ content: `⚠️ Error: ${e.message.slice(0,200)}`, ephemeral: true });
+        await interaction.reply({ content: `⚠️ Error: ${e.message.slice(0,200)}`, flags: 64 });
       }
     } catch {}
   }
