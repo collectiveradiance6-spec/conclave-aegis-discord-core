@@ -7,7 +7,7 @@
 // Configs are cached in memory and refreshed every 5 minutes.
 // ============================================================
 
-const { supabase } = require('../utils/supabaseClient'); // adjust path if needed
+const { supabase } = require('../knowledge_db');
 
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
