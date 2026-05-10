@@ -1195,7 +1195,18 @@ const ALL_COMMANDS = [
     .addUserOption(o=>o.setName('user').setDescription('Member').setRequired(true))
     .addRoleOption(o=>o.setName('role').setDescription('Role').setRequired(true))
     .addStringOption(o=>o.setName('action').setDescription('Action').setRequired(true).addChoices({name:'Add',value:'add'},{name:'Remove',value:'remove'})),
-  new SlashCommandBuilder().setName('ticket').setDescription('🎫 [ADMIN] Post support ticket panel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+  new SlashCommandBuilder()
+    .setName('ticket')
+    .setDescription('[ADMIN] Post a ticket panel in this channel')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
+    .addStringOption(o => o.setName('type').setDescription('Which panel to post').setRequired(true).addChoices(
+      { name: '🛡️ Support',          value: 'support' },
+      { name: '🎁 Starter Kit',       value: 'starterkit' },
+      { name: '🪙 ConCoin Shop',       value: 'concoin' },
+      { name: '📚 ClaveShard Shop',    value: 'claveshard' },
+      { name: '🛡️ Base Watch',        value: 'basewatch' },
+      { name: '🎫 All-in-one',        value: 'all' },
+    )),
   new SlashCommandBuilder().setName('panel-support').setDescription('🛡️ [ADMIN] Post general support panel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
   new SlashCommandBuilder().setName('panel-starterkit').setDescription('🎁 [ADMIN] Post starter kit panel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
   new SlashCommandBuilder().setName('panel-concoin').setDescription('🪙 [ADMIN] Post ConCoin shop panel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
@@ -1466,7 +1477,7 @@ if (await handleTriviaModalSubmit(interaction)) return;
         const thread = await logCh.threads.create({
           name: threadName.slice(0, 100),
           autoArchiveDuration: 10080, // 7 days
-          type: ChannelType.PrivateThread,
+          type: ChannelType.PublicThread,
           reason: `Ticket: ${type} — ${interaction.user.tag}`,
           invitable: false,
         });
@@ -2375,31 +2386,65 @@ if (await handleTriviaModalSubmit(interaction)) return;
 
     if (cmd==='ticket') {
       if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('ticket_open').setLabel('🎫 Open a Ticket').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setLabel('📋 Rules').setStyle(ButtonStyle.Link).setURL('https://theconclavedominion.com/terms'),
-        new ButtonBuilder().setLabel('💎 Shop').setStyle(ButtonStyle.Link).setURL('https://theconclavedominion.com/claveshard-shop'),
-      );
-      const embed = new EmbedBuilder()
-        .setColor(0x7B2FFF)
-        .setTitle('🎫 TheConclave Support Center')
-        .setDescription([
-          '**Need help? We have 5 ticket categories:**',
-          '',
-          '🛡️ **support-tickets** — General server help & questions',
-          '🎁 **starter-kit-tickets** — New player starter kit requests',
-          '🪙 **concoin-shop-tickets** — ConCoin purchases & economy',
-          '📚 **clvsd-shop-tickets 👀** — ClaveShard orders & fulfillment',
-          '🛡️ **aegis-base-watch 🛡️** — AEGIS tower base protection',
-          '',
-          '> Click **Open a Ticket** and select your category.',
-          '> All tickets are **private** — only you and staff can see them.',
-          '-# Council responds within 24 hours',
-        ].join('\n'))
-        .setFooter({ text: 'TheConclave Dominion · Powered by AEGIS' })
-        .setTimestamp();
-      await interaction.channel.send({ embeds: [embed], components: [row] });
-      return interaction.editReply('✅ Ticket panel posted.');
+      const selectedType = interaction.options.getString('type');
+      switch (selectedType) {
+
+        case 'support': {
+          const embed = new EmbedBuilder().setColor(54527).setTitle('🛡️ Support Tickets')
+            .setDescription("**Need help from the Council?**\nClick below to open a private support ticket.\n\n> 🗺️ Server issues & questions\n> ⚔️ Disputes & rule clarifications\n> 🐛 Bug reports & glitches\n> 🙏 General Dominion help\n\n-# Tickets are private · Council responds within 24 hours")
+            .setFooter({text:'TheConclave Dominion · Powered by AEGIS'}).setTimestamp();
+          const btn = new ButtonBuilder().setCustomId('tkt_support').setLabel('🛡️ Open Support Ticket').setStyle(ButtonStyle.Primary);
+          await interaction.channel.send({embeds:[embed],components:[new ActionRowBuilder().addComponents(btn)]});
+          return interaction.editReply('✅ Support Tickets panel posted.');
+        }
+        case 'starterkit': {
+          const embed = new EmbedBuilder().setColor(3534206).setTitle('🎁 Starter Kit Requests')
+            .setDescription("**New to TheConclave? Claim your starter kit!**\n\n> 🦖 Starter dino for your journey\n> 🏠 Basic building materials\n> 🍗 Food & survival supplies\n> 📦 ConCoins to get started\n\n*One kit per player per server · First 72h only*\n-# Fulfilled by Council within 24 hours")
+            .setFooter({text:'TheConclave Dominion · Powered by AEGIS'}).setTimestamp();
+          const btn = new ButtonBuilder().setCustomId('tkt_starterkit').setLabel('🎁 Request Starter Kit').setStyle(ButtonStyle.Success);
+          await interaction.channel.send({embeds:[embed],components:[new ActionRowBuilder().addComponents(btn)]});
+          return interaction.editReply('✅ Starter Kit Requests panel posted.');
+        }
+        case 'concoin': {
+          const embed = new EmbedBuilder().setColor(16758784).setTitle('🪙 ConCoin Shop')
+            .setDescription("**ConCoin Shop — In-Server Economy**\nOpen a ticket for purchases, transfers, or disputes.\n\n> 🏪 In-server market transactions\n> 🎰 Event & giveaway entries\n> 💱 Player-to-player trades\n\n-# All ConCoin issues handled by Council")
+            .setFooter({text:'TheConclave Dominion · Powered by AEGIS'}).setTimestamp();
+          const btn = new ButtonBuilder().setCustomId('tkt_concoin').setLabel('🪙 Open ConCoin Ticket').setStyle(ButtonStyle.Primary);
+          await interaction.channel.send({embeds:[embed],components:[new ActionRowBuilder().addComponents(btn)]});
+          return interaction.editReply('✅ ConCoin Shop panel posted.');
+        }
+        case 'claveshard': {
+          const embed = new EmbedBuilder().setColor(16731346).setTitle('📚 ClaveShard Shop')
+            .setDescription("**ClaveShard Shop — Premium Dinos, Items & Resources**\n\n> 💠 T1 Foundation Drop — 1 shard\n> 💎 T2 Shiny Starter — 2 shards\n> ✨ T3 Tek Spark — 3 shards\n> 🔥 T5 Boss Spark — 5 shards\n> ⚔️ T6 Boss Ready — 6 shards\n> 🧬 T8 Medium Resources — 8 shards\n> 🛡️ T10 Dominion Upgrade — 10 shards\n> 🌟 T12 Large Resources — 12 shards\n> 👑 T15 Crown Drop — 15 shards\n> 🏰 T20 Gate Expansion — 20 shards\n> 💰 T30 Dedicated Refill — 30 shards\n> 🐉 Dino Insurance — Open ticket\n\n**Payment:** Cash App `$TheConclaveDominion`\n-# Click below to open your order ticket")
+            .setFooter({text:'TheConclave Dominion · Powered by AEGIS'}).setTimestamp();
+          const btn = new ButtonBuilder().setCustomId('tkt_claveshard').setLabel('📚 Open Shop Ticket 👀').setStyle(ButtonStyle.Primary);
+          await interaction.channel.send({embeds:[embed],components:[new ActionRowBuilder().addComponents(btn)]});
+          return interaction.editReply('✅ ClaveShard Shop panel posted.');
+        }
+        case 'basewatch': {
+          const embed = new EmbedBuilder().setColor(8073215).setTitle('🛡️ AEGIS Base Watch')
+            .setDescription("**AEGIS Tower — Base Protection Requests**\nGoing offline? Request protection from the Council.\n\n> 👁️ Council monitors your base area\n> 🚨 Alert if suspicious activity detected\n> 📸 Screenshot evidence if incident occurs\n\n*48h notice recommended · Coordinates required*\n-# AEGIS sees all · The Dominion protects its own")
+            .setFooter({text:'TheConclave Dominion · Powered by AEGIS'}).setTimestamp();
+          const btn = new ButtonBuilder().setCustomId('tkt_basewatch').setLabel('🛡️ Request Base Watch').setStyle(ButtonStyle.Danger);
+          await interaction.channel.send({embeds:[embed],components:[new ActionRowBuilder().addComponents(btn)]});
+          return interaction.editReply('✅ AEGIS Base Watch panel posted.');
+        }
+        default: {
+          // All-in-one panel
+          const embed = new EmbedBuilder().setColor(0x7B2FFF).setTitle('🎫 TheConclave Support Center')
+            .setDescription('**Need help? We have 5 ticket categories:**\n\n🛡️ **support-tickets** — General server help & questions\n🎁 **starter-kit-tickets** — New player starter kit requests\n🪙 **concoin-shop-tickets** — ConCoin purchases & economy\n📚 **clvsd-shop-tickets 👀** — ClaveShard orders & fulfillment\n🛡️ **aegis-base-watch 🛡️** — AEGIS tower base protection\n\n> Click **Open a Ticket** and select your category.\n> All tickets are **private** — only you and staff can see them.\n-# Council responds within 24 hours')
+            .setFooter({text:'TheConclave Dominion · Powered by AEGIS'}).setTimestamp();
+          await interaction.channel.send({
+            embeds:[embed],
+            components:[new ActionRowBuilder().addComponents(
+              new ButtonBuilder().setCustomId('ticket_open').setLabel('🎫 Open a Ticket').setStyle(ButtonStyle.Primary),
+              new ButtonBuilder().setLabel('📋 Rules').setStyle(ButtonStyle.Link).setURL('https://theconclavedominion.com/terms'),
+              new ButtonBuilder().setLabel('💎 Shop').setStyle(ButtonStyle.Link).setURL('https://theconclavedominion.com/claveshard-shop'),
+            )],
+          });
+          return interaction.editReply('✅ All-in-one panel posted.');
+        }
+      }
     }
  
     if (cmd==='purge') {
