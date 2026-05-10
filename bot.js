@@ -1418,14 +1418,12 @@ if (await handleTriviaModalSubmit(interaction)) return;
         basewatch:  { label:'🛡️ Base Watch Request 🛡️',   emoji:'👁️', color:0x7B2FFF },
       };
 
-      // Webhook URLs — set these in Render env vars
-      // Each is the webhook for the corresponding admin log channel
       const WEBHOOKS = {
-        support:    process.env.WEBHOOK_SUPPORT,
-        starterkit: process.env.WEBHOOK_STARTERKIT,
-        concoin:    process.env.WEBHOOK_CONCOIN,
-        claveshard: process.env.WEBHOOK_CLAVESHARD,
-        basewatch:  process.env.WEBHOOK_BASEWATCH,
+        support:    process.env.WEBHOOK_SUPPORT    || 'https://discord.com/api/webhooks/1503146823244578866/4wV_fkKANn51KcCIzgy5SbV_K1ptn8PqkAgT1D6NG96J4dpVju2pNQZYhwmzUm2fJ48D',
+        starterkit: process.env.WEBHOOK_STARTERKIT || 'https://discord.com/api/webhooks/1503147111049330819/FusaukOH1UOINnqJOmhhd_ik1wubaPZWQ8WYESGGPRvngMwW6W_vvb-raTmDEoQ3lDWG',
+        concoin:    process.env.WEBHOOK_CONCOIN    || 'https://discord.com/api/webhooks/1503147801935220947/jUfK0R7LRb4ga8yVqJH4Z3wV7REw6tlTB_1Cu6J88nZPHQ8-PTeNQB_7Zj6j0errDU9A',
+        claveshard: process.env.WEBHOOK_CLAVESHARD || 'https://discord.com/api/webhooks/1503147971829829642/y0zvK6zSoDGBCn4R7Qugxv1naBb74XDWBkPyo6K8uc9cnY7HV0FKNNwjY0CEr6hoKWHC',
+        basewatch:  process.env.WEBHOOK_BASEWATCH  || 'https://discord.com/api/webhooks/1503148110812155965/yh_lP_HNEnIcvDqxQob06qi0ewTNep6KLYPH-MOVe-Xk2sDUmTk77HO6HXWnpofvihMG',
       };
 
       const meta       = TYPE_META[type] || TYPE_META.support;
