@@ -53,12 +53,26 @@ let handleTriviaCommand, handleTriviaButton, handleTriviaModalSubmit;
 const {
   DISCORD_BOT_TOKEN, DISCORD_CLIENT_ID, DISCORD_GUILD_ID,
   CYBER_NEXUS_GUILD_ID = '1502913390761345044',
+  LOG_SUPPORT    = process.env.LOG_SUPPORT    || '1503110133540978769',
+  LOG_STARTERKIT = process.env.LOG_STARTERKIT || '1503109898093727906',
+  LOG_CONCOIN    = process.env.LOG_CONCOIN    || '1503109720456691742',
+  LOG_CLAVESHARD = process.env.LOG_CLAVESHARD || '1503109559022256251',
+  LOG_BASEWATCH  = process.env.LOG_BASEWATCH  || '1503109371910029415',
   ROLE_OWNER_ID, ROLE_ADMIN_ID, ROLE_HELPER_ID,
   GROQ_API_KEY, ANTHROPIC_API_KEY,
   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
   AEGIS_CHANNEL_ID,
 } = process.env;
- 
+
+// ── TICKET LOG CHANNELS (Cyber Nexus — hidden admin channels) ────────────────
+const TICKET_LOG_CHANNELS = {
+  support:    process.env.TICKET_LOG_SUPPORT    || '1503110133540978769',
+  starterkit: process.env.TICKET_LOG_STARTERKIT || '1503109898093727906',
+  concoin:    process.env.TICKET_LOG_CONCOIN    || '1503109720456691742',
+  claveshard: process.env.TICKET_LOG_CLAVESHARD || '1503109559022256251',
+  basewatch:  process.env.TICKET_LOG_BASEWATCH  || '1503109371910029415',
+};
+
 if (!DISCORD_BOT_TOKEN) { console.error('❌ DISCORD_BOT_TOKEN missing'); process.exit(1); }
  
 const BOT_PORT   = parseInt(process.env.BOT_PORT || '3001');
@@ -1491,6 +1505,40 @@ if (await handleTriviaModalSubmit(interaction)) return;
             type, issue: issue.slice(0, 500), status: 'open',
             created_at: new Date().toISOString(),
           }).catch(() => {});
+        }
+
+        // Post to the hidden admin log channel for this ticket type
+        const LOG_CHANNELS = {
+          support:    LOG_SUPPORT,
+          starterkit: LOG_STARTERKIT,
+          concoin:    LOG_CONCOIN,
+          claveshard: LOG_CLAVESHARD,
+          basewatch:  LOG_BASEWATCH,
+        };
+        const logChId = LOG_CHANNELS[type];
+        if (logChId) {
+          const logCh = interaction.guild.channels.cache.get(logChId);
+          if (logCh) {
+            logCh.send({
+              embeds: [
+                new EmbedBuilder()
+                  .setColor(meta.color)
+                  .setTitle(`${meta.emoji} New ${meta.label}`)
+                  .setDescription(`**Ticket Channel:** ${ch}\n**User:** ${interaction.user} (${interaction.user.tag})`)
+                  .addFields(
+                    ...embedFields.filter(f => !['👤 User','🏷️ Type','🕐 Opened'].includes(f.name))
+                  )
+                  .setFooter({ text: `Guild: ${interaction.guildId} · Channel: ${ch.id}` })
+                  .setTimestamp(),
+              ],
+              components: [new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                  .setLabel('Jump to Ticket')
+                  .setStyle(ButtonStyle.Link)
+                  .setURL(`https://discord.com/channels/${interaction.guildId}/${ch.id}`),
+              )],
+            }).catch(() => {});
+          }
         }
 
         return interaction.editReply({ content: `✅ Ticket created: ${ch}` });
