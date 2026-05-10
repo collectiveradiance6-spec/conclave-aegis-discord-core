@@ -1416,8 +1416,8 @@ if (await handleTriviaModalSubmit(interaction)) return;
         support:    'support-tickets',
         starterkit: 'starter-kit-tickets',
         concoin:    'concoin-shop-tickets',
-        claveshard: 'clvsd-shop-tickets',
-        basewatch:  'aegis-base-watch',
+        claveshard: 'clvsd-shop-support',
+        basewatch:  'aegis-tower-base-watch',
       };
       const TYPE_META = {
         support:    { label:'Support Ticket',               emoji:'🛡️', color:0x00D4FF },
@@ -1477,7 +1477,7 @@ if (await handleTriviaModalSubmit(interaction)) return;
         const thread = await logCh.threads.create({
           name: threadName.slice(0, 100),
           autoArchiveDuration: 10080, // 7 days
-          type: ChannelType.PublicThread,
+          type: ChannelType.PrivateThread,
           reason: `Ticket: ${type} — ${interaction.user.tag}`,
           invitable: false,
         });
@@ -2415,7 +2415,7 @@ if (await handleTriviaModalSubmit(interaction)) return;
         }
         case 'claveshard': {
           const embed = new EmbedBuilder().setColor(16731346).setTitle('📚 ClaveShard Shop')
-            .setDescription("**ClaveShard Shop — Premium Dinos, Items & Resources**\n\n> 💠 T1 Foundation Drop — 1 shard\n> 💎 T2 Shiny Starter — 2 shards\n> ✨ T3 Tek Spark — 3 shards\n> 🔥 T5 Boss Spark — 5 shards\n> ⚔️ T6 Boss Ready — 6 shards\n> 🧬 T8 Medium Resources — 8 shards\n> 🛡️ T10 Dominion Upgrade — 10 shards\n> 🌟 T12 Large Resources — 12 shards\n> 👑 T15 Crown Drop — 15 shards\n> 🏰 T20 Gate Expansion — 20 shards\n> 💰 T30 Dedicated Refill — 30 shards\n> 🐉 Dino Insurance — Open ticket\n\n**Payment:** Cash App `$TheConclaveDominion`\n-# Click below to open your order ticket")
+            .setDescription("**ClaveShard Shop — Premium Dinos, Items & Resources**\n\n**ClaveShard Shop — Premium Dinos, Items & Resources**\n\n**💠 Tier 1 — Foundation Drop** \`1 shard\`\n> Lvl 600 Dino · 3 ammo stacks · Full coloring · 100 kibble/cakes/beer\n> 100% imprint · 500 non-Tek structures · Cryofridge + 120 cryopods\n> 50k ConCoins · 2,500 materials · 10 same-type tributes\n> Boss artifact + tribute set (1 run) · Non-Tek blueprint · Revival Token 48h\n\n**💎 Tier 2 — Shiny Starter** \`2 shards\`\n> 60 Dedicated Storage · Lvl 700 Dino · Lvl 500 Random Shiny · Lvl 500 Shiny Shoulder Variant\n\n**✨ Tier 3 — Tek Spark** \`3 shards\`\n> Tek Suit or Blueprint · 1 Shiny Essence · 200% imprint · Lvl 600 T1 Shiny\n\n**🔥 Tier 5 — Boss Spark** \`5 shards\`\n> Boss Defeat Command · Lvl 1000 Dino · Lvl 800 T2 Special Shiny\n> 100 Raw Shiny Essence · 2,500 imprint kibble · 25,000 materials\n\n**⚔️ Tier 6 — Boss Ready** \`6 shards\`\n> Lvl 1250 Breeding Pair/Boss Dinos · 250% imprint Rex/Yuty/Carchar/Therizino\n> 300% imprint Ossidion\n\n**🧬 Tier 8 — Medium Resources** \`8 shards\`\n> 100,000 materials/resources (no element)\n\n**🛡️ Tier 10 — Dominion Upgrade** \`10 shards\`\n> Ascendant Tek Suit or Blueprint Set · Floating Cliff Platform (Limited)\n> 200,000 ConCoins · Combo Shiny Essence (choose 2) · Dino Color Party — 10 dinos\n\n**🌟 Tier 12 — Large Resources** \`12 shards\`\n> 200,000 materials/resources (no element)\n\n**👑 Tier 15 — Crown Drop** \`15 shards\`\n> 30,000 element · Lvl 1500: Rhyniognatha, Reaper King, Aureliax, Elder Claw\n> Dreadnoughtus, Acrocanthosaurus, Helicoprion, Dreadmare, Pyromane\n> 300,000 materials/resources (no element)\n\n**🏰 Tier 20 — Gate Expansion** \`20 shards\`\n> 1×1 Behemoth Gate Expansion · Max 10 gates per Map per Tribe · 600,000 ConCoins\n\n**💰 Tier 30 — Dedicated Refill** \`30 shards\`\n> 1.6 million total resources (no element, no structures/artifacts/trophies)\n\n**🐉 Dino Insurance — Protection Token**\n> One-time use per named dino · Backup may not always save · May require respawn\n\n**Payment:** Cash App \`$TheConclaveDominion\` · Chime \`$TheConclaveDominion\`\n**Delivery:** Council fulfilled within 24–72 hours\n\n-# Click below to open your order ticket")
             .setFooter({text:'TheConclave Dominion · Powered by AEGIS'}).setTimestamp();
           const btn = new ButtonBuilder().setCustomId('tkt_claveshard').setLabel('📚 Open Shop Ticket 👀').setStyle(ButtonStyle.Primary);
           await interaction.channel.send({embeds:[embed],components:[new ActionRowBuilder().addComponents(btn)]});
