@@ -34,7 +34,7 @@ const { startNitradoMonitor } = require('./monitors/nitradoMonitor');
 const http = require('http');
 const axios = require('axios');
 const {
-  Client, GatewayIntentBits, REST, Routes,
+  Client, GatewayIntentBits, REST, Routes, ModalBuilder, TextInputBuilder, TextInputStyle,
   SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits,
   Events, ActionRowBuilder, ButtonBuilder, ButtonStyle,
   StringSelectMenuBuilder, ChannelType,
@@ -52,6 +52,7 @@ let handleTriviaCommand, handleTriviaButton, handleTriviaModalSubmit;
 // ══════════════════════════════════════════════════════════════════════
 const {
   DISCORD_BOT_TOKEN, DISCORD_CLIENT_ID, DISCORD_GUILD_ID,
+  CYBER_NEXUS_GUILD_ID = '1502913390761345044',
   ROLE_OWNER_ID, ROLE_ADMIN_ID, ROLE_HELPER_ID,
   GROQ_API_KEY, ANTHROPIC_API_KEY,
   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
@@ -1213,12 +1214,20 @@ async function registerCommands() {
   try {
     const allJson = ALL_COMMANDS.map(c=>c.toJSON());
     console.log(`📡 Registering ${allJson.length} slash commands...`);
-    if (DISCORD_GUILD_ID) {
-      await rest.put(Routes.applicationGuildCommands(DISCORD_CLIENT_ID, DISCORD_GUILD_ID), { body:allJson });
-      console.log(`✅ Guild commands registered (${allJson.length})`);
-    } else {
-      await rest.put(Routes.applicationCommands(DISCORD_CLIENT_ID), { body:allJson });
-      console.log(`✅ Global commands registered (${allJson.length})`);
+
+    // Register to every guild the bot is in (covers both Dominion + Cyber Nexus)
+    const guildsToRegister = [
+      DISCORD_GUILD_ID,                     // Main Dominion: 1438103556610723922
+      process.env.CYBER_NEXUS_GUILD_ID || '1502913390761345044',
+    ].filter(Boolean);
+
+    for (const guildId of guildsToRegister) {
+      try {
+        await rest.put(Routes.applicationGuildCommands(DISCORD_CLIENT_ID, guildId), { body: allJson });
+        console.log(`✅ Commands registered in guild ${guildId} (${allJson.length} commands)`);
+      } catch (e) {
+        console.warn(`⚠️ Failed to register in guild ${guildId}: ${e.message}`);
+      }
     }
   } catch (e) { console.error('❌ Registration failed:', e.message); }
 }
@@ -1263,30 +1272,137 @@ if (await handleTriviaModalSubmit(interaction)) return;
       return interaction.reply({ content:`✅ Voted for **${vote.options[parseInt(optIdx)]}**!`, ephemeral:true });
     }
  
+    // ── TICKET SYSTEM — TYPE SELECTOR ─────────────────────────────────
     if (interaction.isButton() && interaction.customId==='ticket_open') {
-      await interaction.deferReply({ ephemeral:true });
-      const safeName=interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g,'-').slice(0,20);
-      const existing=interaction.guild.channels.cache.find(c=>c.name===`ticket-${safeName}`);
-      if (existing) return interaction.editReply(`⚠️ You already have an open ticket: ${existing}`);
+      return interaction.reply({
+        ephemeral: true,
+        content: '**What do you need help with?** Select a category:',
+        components: [new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('tkt_general').setLabel('🎫 General Support').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId('tkt_shop').setLabel('💎 Shop Order').setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId('tkt_report').setLabel('🚨 Player Report').setStyle(ButtonStyle.Danger),
+          new ButtonBuilder().setCustomId('tkt_appeal').setLabel('⚖️ Ban Appeal').setStyle(ButtonStyle.Secondary),
+        )],
+      });
+    }
+
+    // ── TICKET MODALS — show form based on type ─────────────────────
+    if (interaction.isButton() && interaction.customId.startsWith('tkt_')) {
+      const type = interaction.customId.replace('tkt_', '');
+      const titles = { general:'General Support', shop:'Shop Order Issue', report:'Player Report', appeal:'Ban Appeal' };
+      const modal = new ModalBuilder().setCustomId(`ticket_modal_${type}`).setTitle(`🎫 ${titles[type]||'Support'}`);
+
+      const rows = {
+        general: [
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('issue').setLabel('What do you need help with?').setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('Describe your issue in detail...')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('server').setLabel('Which server?').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('e.g. Aberration, Scorched Earth...')),
+        ],
+        shop: [
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('order_ref').setLabel('Order Reference # (if you have it)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('e.g. ORD-ABC123')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('issue').setLabel('What is the issue with your order?').setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('Describe what went wrong or what you need...')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('character').setLabel('Character Name & Server').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('e.g. MyChar on Aberration')),
+        ],
+        report: [
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('player').setLabel('Player Username / Discord').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('e.g. BadPlayer#1234')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('issue').setLabel('What happened?').setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('Describe what they did, when it happened...')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('evidence').setLabel('Evidence (screenshot links)').setStyle(TextInputStyle.Paragraph).setRequired(false).setPlaceholder('Paste any image/video links here...')),
+        ],
+        appeal: [
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ban_reason').setLabel('What were you banned for?').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('State the reason as told to you...')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('issue').setLabel('Why should the ban be lifted?').setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('Explain your case honestly...')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('discord_tag').setLabel('Your Discord tag at time of ban').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('If different from current account')),
+        ],
+      };
+
+      modal.addComponents(...(rows[type] || rows.general));
+      return interaction.showModal(modal);
+    }
+
+    // ── TICKET MODAL SUBMIT — create channel ────────────────────────
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('ticket_modal_')) {
+      await interaction.deferReply({ ephemeral: true });
+      const type = interaction.customId.replace('ticket_modal_', '');
+      const safeName = interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g,'-').slice(0,18);
+      const chName = `${type}-${safeName}`;
+
+      const existing = interaction.guild.channels.cache.find(c => c.name === chName);
+      if (existing) return interaction.editReply(`⚠️ You already have an open ${type} ticket: ${existing}`);
+
+      const typeColors  = { general: C.cy, shop: C.go, report: C.rd, appeal: C.pu };
+      const typeEmojis  = { general: '🎫', shop: '💎', report: '🚨', appeal: '⚖️' };
+      const typeLabels  = { general: 'General Support', shop: 'Shop Order', report: 'Player Report', appeal: 'Ban Appeal' };
+      const issue       = interaction.fields.getTextInputValue('issue');
+      const extra1      = interaction.fields.fields.get('server')?.value     || interaction.fields.fields.get('order_ref')?.value   || interaction.fields.fields.get('player')?.value      || interaction.fields.fields.get('ban_reason')?.value  || '';
+      const extra2      = interaction.fields.fields.get('character')?.value  || interaction.fields.fields.get('evidence')?.value    || interaction.fields.fields.get('discord_tag')?.value  || '';
+
       try {
-        const ch=await interaction.guild.channels.create({
-          name:`ticket-${safeName}`, type:ChannelType.GuildText,
-          permissionOverwrites:[
-            { id:interaction.guild.roles.everyone, deny:[PermissionFlagsBits.ViewChannel] },
-            { id:interaction.user.id, allow:[PermissionFlagsBits.ViewChannel,PermissionFlagsBits.SendMessages,PermissionFlagsBits.ReadMessageHistory] },
-            { id:interaction.guild.members.me.id, allow:[PermissionFlagsBits.ViewChannel,PermissionFlagsBits.SendMessages,PermissionFlagsBits.ManageChannels] },
-            ...(ROLE_ADMIN_ID?[{id:ROLE_ADMIN_ID,allow:[PermissionFlagsBits.ViewChannel,PermissionFlagsBits.SendMessages]}]:[]),
-            ...(ROLE_HELPER_ID?[{id:ROLE_HELPER_ID,allow:[PermissionFlagsBits.ViewChannel,PermissionFlagsBits.SendMessages]}]:[]),
+        // Find or skip ticket category
+        const category = interaction.guild.channels.cache.find(c => c.type === 4 && c.name.toLowerCase().includes('ticket'));
+
+        const ch = await interaction.guild.channels.create({
+          name: chName,
+          type: ChannelType.GuildText,
+          parent: category?.id || null,
+          permissionOverwrites: [
+            { id: interaction.guild.roles.everyone, deny: [PermissionFlagsBits.ViewChannel] },
+            { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+            { id: interaction.guild.members.me.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels] },
+            ...(ROLE_ADMIN_ID  ? [{ id: ROLE_ADMIN_ID,  allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }] : []),
+            ...(ROLE_HELPER_ID ? [{ id: ROLE_HELPER_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }] : []),
           ],
         });
-        await ch.send({ embeds:[base('🎫 Support Ticket',C.cy).setDescription(`Hello ${interaction.user}! A staff member will assist you shortly.\n\nDescribe your issue in detail.`).setFooter(FT)], components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('ticket_close').setLabel('🔒 Close Ticket').setStyle(ButtonStyle.Danger))] });
-        return interaction.editReply({ content:`✅ Ticket created: ${ch}` });
-      } catch (e) { return interaction.editReply(`⚠️ Error: ${e.message}`); }
+
+        const fields = [
+          { name: '👤 User',  value: `${interaction.user} (${interaction.user.username})`, inline: true },
+          { name: '🏷️ Type',  value: typeLabels[type] || type, inline: true },
+          { name: '🕐 Opened', value: `<t:${Math.floor(Date.now()/1000)}:R>`, inline: true },
+          { name: '📋 Issue',  value: issue.slice(0, 1000) },
+        ];
+        if (extra1) fields.push({ name: '📌 Details', value: extra1.slice(0, 500), inline: true });
+        if (extra2) fields.push({ name: '📎 Additional', value: extra2.slice(0, 500), inline: true });
+
+        await ch.send({
+          content: `${interaction.user} — ${ROLE_ADMIN_ID ? `<@&${ROLE_ADMIN_ID}>` : ''} ${ROLE_HELPER_ID ? `<@&${ROLE_HELPER_ID}>` : ''}`.trim(),
+          embeds: [base(`${typeEmojis[type]||'🎫'} ${typeLabels[type]||'Support Ticket'}`, typeColors[type]||C.cy)
+            .addFields(...fields).setFooter(FT)],
+          components: [new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('ticket_close').setLabel('🔒 Close Ticket').setStyle(ButtonStyle.Danger),
+            new ButtonBuilder().setCustomId('ticket_claim').setLabel('✋ Claim').setStyle(ButtonStyle.Secondary),
+          )],
+        });
+
+        // Log to Supabase
+        if (sb && sbOk()) {
+          sb.from('aegis_tickets').insert({
+            guild_id: interaction.guildId, channel_id: ch.id, user_id: interaction.user.id,
+            user_tag: interaction.user.username, type, issue: issue.slice(0, 500),
+            status: 'open', created_at: new Date().toISOString(),
+          }).catch(() => {});
+        }
+
+        return interaction.editReply({ content: `✅ Ticket created: ${ch}` });
+      } catch (e) { return interaction.editReply(`⚠️ Error creating ticket: ${e.message}`); }
     }
+
+    // ── TICKET CLOSE / CLAIM ────────────────────────────────────────
     if (interaction.isButton() && interaction.customId==='ticket_close') {
       if (!isMod(interaction.member)) return interaction.reply({ content:'⛔ Staff only.', ephemeral:true });
       await interaction.reply('🔒 Closing ticket in 5 seconds...');
-      setTimeout(()=>interaction.channel.delete().catch(()=>{}), 5000);
+      // Log close to Supabase
+      if (sb && sbOk()) {
+        sb.from('aegis_tickets').update({ status:'closed', closed_at: new Date().toISOString(), closed_by: interaction.user.username })
+          .eq('channel_id', interaction.channelId).catch(() => {});
+      }
+      setTimeout(() => interaction.channel.delete().catch(() => {}), 5000);
+      return;
+    }
+    if (interaction.isButton() && interaction.customId==='ticket_claim') {
+      if (!isMod(interaction.member)) return interaction.reply({ content:'⛔ Staff only.', ephemeral:true });
+      await interaction.reply({ content: `✋ Ticket claimed by ${interaction.user}`, ephemeral: false });
+      if (sb && sbOk()) {
+        sb.from('aegis_tickets').update({ claimed_by: interaction.user.username })
+          .eq('channel_id', interaction.channelId).catch(() => {});
+      }
       return;
     }
 
