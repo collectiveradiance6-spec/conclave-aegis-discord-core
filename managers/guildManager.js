@@ -73,19 +73,22 @@ class GuildManager {
 
   // ── Convenience: update a field in DB + bust cache ─────────
   async updateField(guildId, field, value) {
+  try {
     const { error } = await supabase
       .from('guild_configs')
       .update({ [field]: value })
       .eq('guild_id', guildId);
-
     if (error) {
       console.error(`[GuildManager] Update failed for ${guildId}.${field}:`, error);
       return false;
     }
-
     this._cache.delete(guildId);
     return true;
+  } catch (err) {
+    console.error(`[GuildManager] Update error:`, err);
+    return false;
   }
+}
 
   // ── Get all guilds (for Nitrado monitor loop) ───────────────
   async getAllConfigs() {
