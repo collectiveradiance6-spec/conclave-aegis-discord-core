@@ -36,7 +36,6 @@ const { handleTicketInteraction } = require('./ticket-system');
 
 const { startNitradoMonitor } = require('./monitors/nitradoMonitor');
 const guildManager = require('./managers/guildManager');
- 708ceefd6ec75f507b771f8d64a27de94bd86b0a
 const http = require('http');
 const axios = require('axios');
 const {
@@ -1447,7 +1446,6 @@ bot.on(Events.InteractionCreate, async interaction => {
 
 if (!isTicketInteraction) {
   if (await handleWatchtowerInteraction(interaction, bot)) return;
- 708ceefd6ec75f507b771f8d64a27de94bd86b0a
   if (await handleTriviaCommand(interaction)) return;
   if (await handleTriviaButton(interaction)) return;
   if (await handleTriviaModalSubmit(interaction)) return;
@@ -1779,7 +1777,6 @@ if (!guildCfg) return interaction.editReply('⚠️ Server config not found. Con
       }, 8000);
       return;
     }
- 708ceefd6ec75f507b771f8d64a27de94bd86b0a
 
     if (!interaction.isChatInputCommand()) return;
     const { commandName:cmd } = interaction;
