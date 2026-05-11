@@ -1432,9 +1432,18 @@ if (await handleTriviaModalSubmit(interaction)) return;
       };
 
       // Pull webhook URLs from Supabase guild_configs — fully multi-tenant
-     const { data: guildCfg } = sb
-    ? await sb.from('guild_configs').select('*').eq('guild_id', interaction.guildId).single().catch(() => ({ data: null }))
-    : { data: null };
+     let guildCfg = null;
+if (sb) {
+  try {
+    const { data, error } = await sb
+      .from('guild_configs')
+      .select('*')
+      .eq('guild_id', interaction.guildId)
+      .single();
+    if (!error) guildCfg = data;
+  } catch {}
+}
+if (!guildCfg) return interaction.editReply('⚠️ Server config not found. Contact an admin.');
 
   if (!guildCfg) return interaction.editReply('⚠️ Server config not found. Contact an admin.');
       const WEBHOOKS = {
