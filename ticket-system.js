@@ -1,41 +1,52 @@
 // ═══════════════════════════════════════════════════════════════════════
-// AEGIS TICKET SYSTEM — Fully Self-Contained
-// Mirrors watchtower-system.js pattern exactly:
-// Button → Modal Form → Direct Channel Post + Admin Ping
-// All ticket types: support, starterkit, concoin, claveshard, basewatch
+// AEGIS TICKET SYSTEM v2 — Enhanced Private Ticket Channels
+// Per-player private channel · Live status tracking · Staff action panel
+// Claim → In Progress → Escalate → Resolve/Close · Full transcript
 // ═══════════════════════════════════════════════════════════════════════
 'use strict';
 
 const {
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  ModalBuilder,
-  TextInputBuilder,
-  TextInputStyle,
-  EmbedBuilder,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle,
+  ModalBuilder, TextInputBuilder, TextInputStyle,
+  EmbedBuilder, PermissionFlagsBits, ChannelType,
+  AttachmentBuilder,
 } = require('discord.js');
 
-// ── Channel IDs — reads from env, falls back to hardcoded Dominion IDs ──
+// ── Config from env ──────────────────────────────────────────────────
+const TICKET_CATEGORY_ID = process.env.TICKET_CATEGORY_ID || null;
+const TRANSCRIPT_CHANNEL = process.env.TRANSCRIPT_CHANNEL || '1503111460790735041';
+const ROLE_ADMIN_ID      = process.env.ROLE_ADMIN_ID      || null;
+const ROLE_HELPER_ID     = process.env.ROLE_HELPER_ID     || null;
+
+// Log channels — gets a compact summary ping when any ticket opens
 const LOG_CHANNELS = {
-  support:    process.env.LOG_SUPPORT    || process.env.TICKET_LOG_SUPPORT    || '1503110133540978769',
-  starterkit: process.env.LOG_STARTERKIT || process.env.TICKET_LOG_STARTERKIT || '1503109898093727906',
-  concoin:    process.env.LOG_CONCOIN    || process.env.TICKET_LOG_CONCOIN    || '1503109720456691742',
-  claveshard: process.env.LOG_CLAVESHARD || process.env.TICKET_LOG_CLAVESHARD || '1503109559022256251',
-  basewatch:  process.env.LOG_BASEWATCH  || process.env.TICKET_LOG_BASEWATCH  || '1503109371910029415',
+  support:    process.env.LOG_SUPPORT    || '1503110133540978769',
+  starterkit: process.env.LOG_STARTERKIT || '1503109898093727906',
+  concoin:    process.env.LOG_CONCOIN    || '1503109720456691742',
+  claveshard: process.env.LOG_CLAVESHARD || '1503109559022256251',
+  basewatch:  process.env.LOG_BASEWATCH  || '1503109371910029415',
 };
 
-const TRANSCRIPT_CH = process.env.TRANSCRIPT_CHANNEL || '1503111460790735041';
-
+// ── Type metadata ────────────────────────────────────────────────────
 const TYPE_META = {
-  support:    { label: 'Support Ticket',         emoji: '🛡️', color: 0x00D4FF },
-  starterkit: { label: 'Starter Kit Request',     emoji: '🎁', color: 0x35ED7E },
-  concoin:    { label: 'ConCoin Shop Ticket',      emoji: '🪙', color: 0xFFB800 },
-  claveshard: { label: 'ClaveShard Shop Ticket',   emoji: '💎', color: 0xFF4CD2 },
-  basewatch:  { label: 'Base Watch Request',       emoji: '👁️', color: 0x7B2FFF },
+  support:    { label: 'Support',         emoji: '🛡️', color: 0x00D4FF, prefix: 'sup'  },
+  starterkit: { label: 'Starter Kit',     emoji: '🎁', color: 0x35ED7E, prefix: 'kit'  },
+  concoin:    { label: 'ConCoin Shop',    emoji: '🪙', color: 0xFFB800, prefix: 'cc'   },
+  claveshard: { label: 'ClaveShard Shop', emoji: '💎', color: 0xFF4CD2, prefix: 'clvs' },
+  basewatch:  { label: 'Base Watch',      emoji: '👁️', color: 0x7B2FFF, prefix: 'bw'   },
 };
 
-// ── Modal forms per ticket type ─────────────────────────────────────────
+// ── Status definitions ───────────────────────────────────────────────
+const STATUS = {
+  open:      { label: '🟡 Open — Awaiting Staff', color: 0x7B2FFF },
+  claimed:   { label: '🟢 Claimed',               color: 0x00D4FF },
+  progress:  { label: '🔵 In Progress',            color: 0x0099FF },
+  escalated: { label: '🔴 Escalated',              color: 0xFF4500 },
+  resolved:  { label: '✅ Resolved',               color: 0x35ED7E },
+  closed:    { label: '🔒 Closed',                 color: 0x555555 },
+};
+
+// ── Modal forms ──────────────────────────────────────────────────────
 const FORMS = {
   support: [
     new ActionRowBuilder().addComponents(
@@ -148,16 +159,50 @@ const FORMS = {
   ],
 };
 
-// ── Build embed fields from modal submission ────────────────────────────
-function buildEmbedFields(interaction, type) {
-  const fields = interaction.fields.fields;
-  const embedFields = [
-    { name: '👤 User',    value: `${interaction.user} \`${interaction.user.username}\``, inline: true },
-    { name: '🏷️ Type',   value: TYPE_META[type]?.label || type, inline: true },
-    { name: '🕐 Opened', value: `<t:${Math.floor(Date.now()/1000)}:R>`, inline: true },
-    { name: '🌐 Server', value: `${interaction.guild?.name || 'Unknown'}`, inline: true },
-  ];
+// ── Staff action row ─────────────────────────────────────────────────
+function buildStaffRow(disabled = false) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('tkt_action_claim')
+      .setLabel('🟢 Claim').setStyle(ButtonStyle.Success).setDisabled(disabled),
+    new ButtonBuilder().setCustomId('tkt_action_progress')
+      .setLabel('🔵 In Progress').setStyle(ButtonStyle.Primary).setDisabled(disabled),
+    new ButtonBuilder().setCustomId('tkt_action_escalate')
+      .setLabel('🔴 Escalate').setStyle(ButtonStyle.Danger).setDisabled(disabled),
+    new ButtonBuilder().setCustomId('tkt_action_resolve')
+      .setLabel('✅ Resolve').setStyle(ButtonStyle.Success).setDisabled(disabled),
+    new ButtonBuilder().setCustomId('tkt_action_close')
+      .setLabel('🔒 Close').setStyle(ButtonStyle.Secondary).setDisabled(disabled),
+  );
+}
 
+// ── Build ticket embed ───────────────────────────────────────────────
+function buildTicketEmbed({ interaction, type, ticketId, statusKey = 'open', fields = [] }) {
+  const meta   = TYPE_META[type]   || TYPE_META.support;
+  const status = STATUS[statusKey] || STATUS.open;
+
+  return new EmbedBuilder()
+    .setColor(status.color)
+    .setAuthor({
+      name:    `${interaction.user.username} · ${meta.label} Ticket`,
+      iconURL: interaction.user.displayAvatarURL({ size: 64 }),
+    })
+    .setTitle(`${meta.emoji} ${meta.label} · \`${ticketId}\``)
+    .setDescription([
+      `\`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\``,
+      `> 📊 **Status:** ${status.label}`,
+      `> 🕐 **Opened:** <t:${Math.floor(Date.now() / 1000)}:F>`,
+      `> 👤 **Player:** ${interaction.user} · \`${interaction.user.username}\``,
+      `> 🌐 **Guild:** ${interaction.guild?.name || 'Unknown'}`,
+      `\`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\``,
+    ].join('\n'))
+    .addFields(fields)
+    .setFooter({ text: `TheConclave Dominion · AEGIS Tickets · ${ticketId}` })
+    .setTimestamp();
+}
+
+// ── Extract fields from modal ────────────────────────────────────────
+function buildFields(interaction) {
+  const allFields = interaction.fields.fields;
   const FIELD_MAP = {
     issue:         '📋 Issue / Request',
     reason:        '📋 Reason',
@@ -169,228 +214,318 @@ function buildEmbedFields(interaction, type) {
     order_details: '📋 Order Details',
     payment:       '💳 Payment',
     amount:        '💰 Amount',
-    proof:         '📎 Proof / Reference',
+    proof:         '📎 Proof',
     location:      '📍 Base Location',
     duration:      '⏱️ Watch Duration',
   };
-
+  const out = [];
   for (const [key, label] of Object.entries(FIELD_MAP)) {
-    const val = fields.get(key)?.value;
-    if (val) {
-      embedFields.push({
-        name:   label,
-        value:  val.slice(0, 500),
-        inline: !['issue','reason','order_details','📋 Order Details'].includes(key),
-      });
-    }
+    const val = allFields.get(key)?.value;
+    if (val) out.push({
+      name:   label,
+      value:  val.slice(0, 500),
+      inline: !['issue','reason','order_details'].includes(key),
+    });
   }
-
-  return embedFields;
+  return out;
 }
 
-// ── Main interaction handler — call this FIRST in bot.on(InteractionCreate) ──
+// ── Generate short ticket ID ─────────────────────────────────────────
+function genTicketId(type) {
+  const prefix = (TYPE_META[type]?.prefix || 'tck').toUpperCase();
+  const rand   = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `${prefix}-${rand}`;
+}
+
+// ── Check staff ──────────────────────────────────────────────────────
+function isStaff(member) {
+  if (!member) return false;
+  if (member.permissions?.has(PermissionFlagsBits.ModerateMembers)) return true;
+  if (ROLE_ADMIN_ID  && member.roles?.cache?.has(ROLE_ADMIN_ID))  return true;
+  if (ROLE_HELPER_ID && member.roles?.cache?.has(ROLE_HELPER_ID)) return true;
+  return false;
+}
+
+// ── Update embed status in-place ─────────────────────────────────────
+async function updateStatus(interaction, statusKey) {
+  const status   = STATUS[statusKey] || STATUS.open;
+  const oldEmbed = interaction.message?.embeds?.[0];
+  if (!oldEmbed) return;
+
+  const newDesc = (oldEmbed.description || '')
+    .replace(/> 📊 \*\*Status:\*\*.*/, `> 📊 **Status:** ${status.label}`)
+    .replace(/> 👮 \*\*Staff:\*\*.*\n?/, '')
+    .replace(/(> 🕐 \*\*Opened:\*\*)/, `> 👮 **Staff:** ${interaction.user}\n$1`);
+
+  const updated  = EmbedBuilder.from(oldEmbed).setColor(status.color).setDescription(newDesc);
+  const disabled = ['resolved','closed'].includes(statusKey);
+
+  await interaction.message.edit({
+    embeds:     [updated],
+    components: [buildStaffRow(disabled)],
+  });
+}
+
+// ── Save + post transcript ───────────────────────────────────────────
+async function saveTranscript(channel, closedBy, statusKey, client) {
+  try {
+    const messages = await channel.messages.fetch({ limit: 100 });
+    const sorted   = [...messages.values()].reverse();
+    const lines    = sorted.map(m => {
+      const t = new Date(m.createdTimestamp).toLocaleString('en-US', { dateStyle:'short', timeStyle:'short' });
+      const c = m.content || (m.embeds[0]?.title ? `[Embed: ${m.embeds[0].title}]` : '[attachment]');
+      return `[${t}] ${m.author.username}: ${c}`;
+    }).join('\n');
+
+    const text = [
+      '═══════════════════════════════════════════════',
+      'TICKET TRANSCRIPT — TheConclave Dominion',
+      `Channel:   ${channel.name}`,
+      `Closed by: ${closedBy}`,
+      `Status:    ${STATUS[statusKey]?.label || statusKey}`,
+      `Date:      ${new Date().toLocaleString('en-US',{dateStyle:'full',timeStyle:'short'})}`,
+      '═══════════════════════════════════════════════',
+      '', lines, '', 'END OF TRANSCRIPT',
+    ].join('\n');
+
+    const trCh = client.channels.cache.get(TRANSCRIPT_CHANNEL);
+    if (!trCh) return;
+
+    await trCh.send({
+      embeds: [new EmbedBuilder()
+        .setColor(statusKey === 'resolved' ? 0x35ED7E : 0x555555)
+        .setTitle(`📋 Transcript — ${channel.name}`)
+        .addFields(
+          { name: '🏷️ Status',    value: STATUS[statusKey]?.label || statusKey, inline: true },
+          { name: '👤 Closed by', value: closedBy, inline: true },
+          { name: '📅 Date',      value: `<t:${Math.floor(Date.now()/1000)}:F>`, inline: false },
+        )
+        .setFooter({ text: 'TheConclave Dominion · AEGIS Ticket System' })
+        .setTimestamp()
+      ],
+      files: [new AttachmentBuilder(Buffer.from(text,'utf8'), { name:`transcript-${channel.name}-${Date.now()}.txt` })],
+    });
+  } catch (e) { console.warn('[Tickets] Transcript error:', e.message); }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// MAIN HANDLER
+// ════════════════════════════════════════════════════════════════════
 async function handleTicketInteraction(interaction, client) {
 
-  // ── TYPE SELECTOR (ticket_open button) ─────────────────────────────
+  // ── ticket_open → type selector ───────────────────────────────────
   if (interaction.isButton() && interaction.customId === 'ticket_open') {
     await interaction.reply({
       flags: 64,
       embeds: [new EmbedBuilder()
         .setColor(0x00D4FF)
-        .setTitle('🎫 Open a Support Ticket')
+        .setTitle('🎫 Open a Ticket')
         .setDescription([
-          '**Select the category that matches your request:**',
-          '',
-          '🛡️ **Support** — General server help, questions, issues',
-          '🎁 **Starter Kit** — Request your new player starter kit',
-          '🪙 **ConCoin Shop** — ConCoin purchases, economy issues',
-          '💎 **ClaveShard Shop** — Shard orders, fulfillment',
-          '👁️ **Base Watch** — AEGIS tower base protection requests',
+          '**Choose the category that matches your request:**', '',
+          '🛡️ **Support** — Server help, questions, disputes',
+          '🎁 **Starter Kit** — New player kit request',
+          '🪙 **ConCoin** — Economy, purchases, disputes',
+          '💎 **ClaveShard Shop** — Premium orders & fulfillment',
+          '👁️ **Base Watch** — AEGIS protection requests', '',
+          '-# Your ticket will be a **private channel** — only you and staff can see it.',
         ].join('\n'))
-        .setFooter({ text: 'TheConclave Dominion · Tickets are private' })
+        .setFooter({ text: 'TheConclave Dominion · Powered by AEGIS' })
       ],
       components: [new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('tkt_support').setLabel('🛡️ Support').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId('tkt_starterkit').setLabel('🎁 Starter Kit').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId('tkt_concoin').setLabel('🪙 ConCoin Shop').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('tkt_claveshard').setLabel('💎 ClaveShard Shop').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('tkt_concoin').setLabel('🪙 ConCoin').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('tkt_claveshard').setLabel('💎 ClaveShard').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId('tkt_basewatch').setLabel('👁️ Base Watch').setStyle(ButtonStyle.Danger),
       )],
     });
     return true;
   }
 
-  // ── TICKET TYPE BUTTON → show modal ────────────────────────────────
-  if (interaction.isButton() && interaction.customId.startsWith('tkt_')) {
+  // ── tkt_type → show modal ─────────────────────────────────────────
+  if (interaction.isButton() && interaction.customId.startsWith('tkt_') &&
+      !interaction.customId.startsWith('tkt_action_')) {
     const type = interaction.customId.replace('tkt_', '');
     const meta = TYPE_META[type] || TYPE_META.support;
-    const form = FORMS[type] || FORMS.support;
-
     const modal = new ModalBuilder()
       .setCustomId(`ticket_modal_${type}`)
-      .setTitle(meta.label.slice(0, 45));
-
-    modal.addComponents(...form);
+      .setTitle(`${meta.emoji} ${meta.label} Ticket`.slice(0, 45));
+    modal.addComponents(...(FORMS[type] || FORMS.support));
     await interaction.showModal(modal);
     return true;
   }
 
-  // ── MODAL SUBMIT → post to log channel ─────────────────────────────
+  // ── modal submit → create private channel ────────────────────────
   if (interaction.isModalSubmit() && interaction.customId.startsWith('ticket_modal_')) {
     await interaction.deferReply({ flags: 64 });
 
-    const type    = interaction.customId.replace('ticket_modal_', '');
-    const meta    = TYPE_META[type] || TYPE_META.support;
-    const logChId = LOG_CHANNELS[type];
+    const type     = interaction.customId.replace('ticket_modal_', '');
+    const meta     = TYPE_META[type] || TYPE_META.support;
+    const ticketId = genTicketId(type);
+    const fields   = buildFields(interaction);
+    const safeName = interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g,'-').slice(0,20);
+    const chName   = `${meta.prefix}-${safeName}`.slice(0,100);
 
-    // Check log channel
-    if (!logChId) {
-      return interaction.editReply('⚠️ Ticket log channel not configured. Contact an admin.');
+    // Duplicate check
+    const existing = interaction.guild.channels.cache.find(
+      c => c.name === chName && c.topic?.includes(interaction.user.id)
+    );
+    if (existing) {
+      return interaction.editReply({
+        content: `⚠️ You already have an open **${meta.label}** ticket: ${existing}\nUse that channel or ask staff to close it first.`,
+      });
     }
 
-    const logChannel = await client.channels.fetch(logChId).catch(() => null);
-    if (!logChannel) {
-      return interaction.editReply('⚠️ Ticket log channel not found. Contact an admin.');
+    // Resolve category
+    let categoryId = TICKET_CATEGORY_ID;
+    if (!categoryId) {
+      const logCh = client.channels.cache.get(LOG_CHANNELS[type]);
+      categoryId  = logCh?.parentId || null;
     }
 
-    // Build embed
-    const embedFields = buildEmbedFields(interaction, type);
+    // Build permission overwrites
+    const perms = [
+      { id: interaction.guild.roles.everyone, deny: [PermissionFlagsBits.ViewChannel] },
+      { id: interaction.user.id, allow: [
+        PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles,
+      ]},
+      { id: client.user.id, allow: [
+        PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ManageChannels, PermissionFlagsBits.ManageMessages,
+        PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.EmbedLinks,
+        PermissionFlagsBits.AttachFiles,
+      ]},
+    ];
+    if (ROLE_ADMIN_ID)  perms.push({ id: ROLE_ADMIN_ID,  allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageMessages] });
+    if (ROLE_HELPER_ID) perms.push({ id: ROLE_HELPER_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
 
-    // Staff ping
-    const adminRoleId  = process.env.ROLE_ADMIN_ID;
-    const helperRoleId = process.env.ROLE_HELPER_ID;
-    const pingContent  = [
-      `${interaction.user}`,
-      adminRoleId  ? `<@&${adminRoleId}>`  : '',
-      helperRoleId ? `<@&${helperRoleId}>` : '',
+    // Create channel
+    let ticketCh;
+    try {
+      ticketCh = await interaction.guild.channels.create({
+        name:                 chName,
+        type:                 ChannelType.GuildText,
+        topic:                `${ticketId} · ${interaction.user.id} · ${meta.label}`,
+        parent:               categoryId || undefined,
+        permissionOverwrites: perms,
+      });
+    } catch (e) {
+      console.error('[Tickets] Channel create error:', e.message);
+      return interaction.editReply(`⚠️ Could not create ticket channel: ${e.message}`);
+    }
+
+    // Staff ping string
+    const staffPing = [
+      ROLE_ADMIN_ID  ? `<@&${ROLE_ADMIN_ID}>`  : '',
+      ROLE_HELPER_ID ? `<@&${ROLE_HELPER_ID}>` : '',
     ].filter(Boolean).join(' ');
 
-    // Post to log channel (direct — no webhooks, no Supabase)
-    try {
-      await logChannel.send({
-        content: pingContent,
+    // Post the rich embed + staff action row inside the private channel
+    await ticketCh.send({
+      content: [
+        `${interaction.user} — welcome to your **${meta.label}** ticket!`,
+        `> 🎫 ID: \`${ticketId}\`  ·  ⏰ Staff respond within **24h**`,
+        `> 💬 Describe anything additional below. Staff will respond here.`,
+        staffPing ? `\n${staffPing} — new ticket awaiting response.` : '',
+      ].filter(Boolean).join('\n'),
+      embeds:     [buildTicketEmbed({ interaction, type, ticketId, statusKey: 'open', fields })],
+      components: [buildStaffRow(false)],
+    });
+
+    // Summary ping to log channel
+    const logCh = await client.channels.fetch(LOG_CHANNELS[type]).catch(() => null);
+    if (logCh) {
+      await logCh.send({
+        content: staffPing || undefined,
         embeds: [new EmbedBuilder()
           .setColor(meta.color)
-          .setTitle(`${meta.emoji} New ${meta.label}`)
-          .addFields(embedFields)
-          .setFooter({ text: 'TheConclave Dominion · AEGIS Ticket System' })
+          .setAuthor({
+            name:    `New ${meta.label} — ${interaction.user.username}`,
+            iconURL: interaction.user.displayAvatarURL({ size: 64 }),
+          })
+          .setDescription([
+            `> 🎫 **ID:** \`${ticketId}\``,
+            `> 📂 **Channel:** ${ticketCh}`,
+            `> 👤 **Player:** ${interaction.user}`,
+            fields[0] ? `> 📋 **${fields[0].name}:** ${fields[0].value.slice(0,80)}` : null,
+          ].filter(Boolean).join('\n'))
+          .setFooter({ text: 'TheConclave · AEGIS Ticket System v2' })
+          .setTimestamp()
+        ],
+      }).catch(() => {});
+    }
+
+    // Confirm to player
+    return interaction.editReply({
+      content: [
+        `✅ **Ticket opened!**`,
+        `> 🎫 ID: \`${ticketId}\``,
+        `> 📂 Your channel: ${ticketCh}`,
+        `> ⏰ Staff will respond within 24 hours`,
+      ].join('\n'),
+    });
+  }
+
+  // ── Staff action buttons ──────────────────────────────────────────
+  if (interaction.isButton() && interaction.customId.startsWith('tkt_action_')) {
+    const action = interaction.customId.replace('tkt_action_', '');
+
+    if (!isStaff(interaction.member)) {
+      await interaction.reply({ content: '⛔ Staff only.', flags: 64 });
+      return true;
+    }
+
+    if (action === 'claim') {
+      await updateStatus(interaction, 'claimed');
+      await interaction.reply({ content: `✋ **${interaction.user}** claimed this ticket and will handle it.` });
+      return true;
+    }
+
+    if (action === 'progress') {
+      await updateStatus(interaction, 'progress');
+      await interaction.reply({ content: `🔵 **${interaction.user}** marked this ticket as **In Progress**.` });
+      return true;
+    }
+
+    if (action === 'escalate') {
+      await updateStatus(interaction, 'escalated');
+      const ping = ROLE_ADMIN_ID ? `<@&${ROLE_ADMIN_ID}>` : '@Admin';
+      await interaction.reply({ content: `🔴 ${ping} — **Escalated** by ${interaction.user}. Immediate attention required.` });
+      return true;
+    }
+
+    if (action === 'resolve') {
+      await updateStatus(interaction, 'resolved');
+      await interaction.reply({
+        embeds: [new EmbedBuilder()
+          .setColor(0x35ED7E).setTitle('✅ Ticket Resolved')
+          .setDescription(`Resolved by ${interaction.user}.\n\n*Transcript saved. Channel deletes in **10 seconds**.*`)
           .setTimestamp()
         ],
       });
-    } catch (sendErr) {
-      console.error(`[Tickets] Failed to post to log channel ${logChId}:`, sendErr.message);
-      return interaction.editReply('⚠️ Failed to submit ticket — could not reach log channel. Contact an admin.');
-    }
-
-    // Confirm to user
-    return interaction.editReply({
-      content: `✅ **${meta.label}** submitted successfully!\nStaff will respond in <#${logChId}>.`,
-    });
-  }
-
-  // ── TICKET CLAIM ────────────────────────────────────────────────────
-  if (interaction.isButton() && interaction.customId === 'ticket_claim') {
-    const modPerms = interaction.member?.permissions?.has?.('ModerateMembers');
-    const adminRole = process.env.ROLE_ADMIN_ID;
-    const helperRole = process.env.ROLE_HELPER_ID;
-    const hasRole = interaction.member?.roles?.cache?.has(adminRole) ||
-                    interaction.member?.roles?.cache?.has(helperRole);
-
-    if (!modPerms && !hasRole) {
-      await interaction.reply({ content: '⛔ Staff only.', flags: 64 });
+      await saveTranscript(interaction.channel, interaction.user.username, 'resolved', client);
+      setTimeout(() => interaction.channel.delete().catch(() => {}), 10_000);
       return true;
     }
 
-    await interaction.reply({
-      content: `✋ **${interaction.user}** has claimed this ticket. They will handle it from here.`,
-    });
-    return true;
-  }
-
-  // ── TICKET CLOSE / RESOLVE ──────────────────────────────────────────
-  if (interaction.isButton() && ['ticket_close', 'ticket_resolve'].includes(interaction.customId)) {
-    const modPerms = interaction.member?.permissions?.has?.('ModerateMembers');
-    const adminRole = process.env.ROLE_ADMIN_ID;
-    const helperRole = process.env.ROLE_HELPER_ID;
-    const hasRole = interaction.member?.roles?.cache?.has(adminRole) ||
-                    interaction.member?.roles?.cache?.has(helperRole);
-
-    if (!modPerms && !hasRole) {
-      await interaction.reply({ content: '⛔ Staff only.', flags: 64 });
+    if (action === 'close') {
+      await updateStatus(interaction, 'closed');
+      await interaction.reply({
+        embeds: [new EmbedBuilder()
+          .setColor(0x555555).setTitle('🔒 Ticket Closed')
+          .setDescription(`Closed by ${interaction.user}.\n\n*Transcript saved. Channel deletes in **10 seconds**.*`)
+          .setTimestamp()
+        ],
+      });
+      await saveTranscript(interaction.channel, interaction.user.username, 'closed', client);
+      setTimeout(() => interaction.channel.delete().catch(() => {}), 10_000);
       return true;
     }
-
-    const isResolve = interaction.customId === 'ticket_resolve';
-    await interaction.reply({
-      embeds: [new EmbedBuilder()
-        .setColor(isResolve ? 0x35ED7E : 0xFF4444)
-        .setTitle(isResolve ? '✅ Ticket Resolved' : '🔒 Ticket Closed')
-        .setDescription(`${isResolve ? 'Resolved' : 'Closed'} by ${interaction.user}`)
-        .setTimestamp()
-      ],
-    });
-
-    // Save transcript
-    try {
-      const ch = interaction.channel;
-      const messages = await ch.messages.fetch({ limit: 100 });
-      const sorted   = [...messages.values()].reverse();
-      const lines    = sorted.map(m => {
-        const time    = new Date(m.createdTimestamp).toLocaleString('en-US', { dateStyle:'short', timeStyle:'short' });
-        const content = m.content || (m.embeds[0]?.title ? `[Embed: ${m.embeds[0].title}]` : '[attachment]');
-        return `[${time}] ${m.author.username}: ${content}`;
-      }).join('\n');
-
-      const transcriptText = [
-        '═══════════════════════════════════════════',
-        'TICKET TRANSCRIPT — TheConclave Dominion',
-        `Thread: ${ch.name}`,
-        `Closed by: ${interaction.user.username}`,
-        `Date: ${new Date().toLocaleString('en-US', { dateStyle:'full', timeStyle:'short' })}`,
-        '═══════════════════════════════════════════',
-        '', lines, '',
-        'END OF TRANSCRIPT',
-      ].join('\n');
-
-      const transcriptCh = client.channels.cache.get(TRANSCRIPT_CH);
-      if (transcriptCh) {
-        const { AttachmentBuilder } = require('discord.js');
-        const buf        = Buffer.from(transcriptText, 'utf8');
-        const attachment = new AttachmentBuilder(buf, { name: `transcript-${ch.name}-${Date.now()}.txt` });
-        await transcriptCh.send({
-          embeds: [new EmbedBuilder()
-            .setColor(isResolve ? 0x35ED7E : 0xFF4444)
-            .setTitle(`📋 Transcript — ${ch.name}`)
-            .addFields(
-              { name: '🏷️ Status',    value: isResolve ? '✅ Resolved' : '🔒 Closed', inline: true },
-              { name: '👤 Closed by', value: interaction.user.username, inline: true },
-              { name: '📅 Date',      value: `<t:${Math.floor(Date.now()/1000)}:F>`, inline: true },
-            )
-            .setFooter({ text: 'TheConclave Dominion · AEGIS Ticket System' })
-            .setTimestamp()
-          ],
-          files: [attachment],
-        }).catch(() => {});
-      }
-    } catch (transcriptErr) {
-      console.warn('[Tickets] Transcript error:', transcriptErr.message);
-    }
-
-    // Archive or delete channel
-    setTimeout(async () => {
-      try {
-        if (interaction.channel.isThread()) {
-          await interaction.channel.setArchived(true);
-        } else {
-          await interaction.channel.delete();
-        }
-      } catch {}
-    }, 8000);
 
     return true;
   }
 
-  // Not a ticket interaction
   return false;
 }
 
