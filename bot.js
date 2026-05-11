@@ -1432,7 +1432,11 @@ if (await handleTriviaModalSubmit(interaction)) return;
       };
 
       // Pull webhook URLs from Supabase guild_configs — fully multi-tenant
-      const guildCfg = await guildManager.getConfig(interaction.guildId);
+     const { data: guildCfg } = sb
+    ? await sb.from('guild_configs').select('*').eq('guild_id', interaction.guildId).single().catch(() => ({ data: null }))
+    : { data: null };
+
+  if (!guildCfg) return interaction.editReply('⚠️ Server config not found. Contact an admin.');
       const WEBHOOKS = {
         support:    guildCfg?.webhook_support    || null,
         starterkit: guildCfg?.webhook_starterkit || null,
