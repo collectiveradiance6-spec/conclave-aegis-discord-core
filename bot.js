@@ -30,12 +30,17 @@
 require('dotenv').config();
  
 const { sendWatchtowerPanel, handleWatchtowerInteraction } = require('./watchtower-system');
+<<<<<<< HEAD
 const { handleTicketInteraction } = require('./ticket-system');
 const { startNitradoMonitor } = require('./src/monitors/nitradoMonitor');
+=======
+const { startNitradoMonitor } = require('./monitors/nitradoMonitor');
+const guildManager = require('./managers/guildManager');
+>>>>>>> 708ceefd6ec75f507b771f8d64a27de94bd86b0a
 const http = require('http');
 const axios = require('axios');
 const {
-  Client, GatewayIntentBits, REST, Routes,
+  Client, GatewayIntentBits, REST, Routes, ModalBuilder, TextInputBuilder, TextInputStyle,
   SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits,
   Events, ActionRowBuilder, ButtonBuilder, ButtonStyle,
   StringSelectMenuBuilder, ChannelType,
@@ -53,12 +58,28 @@ let handleTriviaCommand, handleTriviaButton, handleTriviaModalSubmit;
 // ══════════════════════════════════════════════════════════════════════
 const {
   DISCORD_BOT_TOKEN, DISCORD_CLIENT_ID, DISCORD_GUILD_ID,
+  CYBER_NEXUS_GUILD_ID = '1502913390761345044',
+  LOG_SUPPORT        = process.env.LOG_SUPPORT        || '1503110133540978769',
+  LOG_STARTERKIT     = process.env.LOG_STARTERKIT     || '1503109898093727906',
+  LOG_CONCOIN        = process.env.LOG_CONCOIN        || '1503109720456691742',
+  LOG_CLAVESHARD     = process.env.LOG_CLAVESHARD     || '1503109559022256251',
+  LOG_BASEWATCH      = process.env.LOG_BASEWATCH      || '1503109371910029415',
+  TRANSCRIPT_CHANNEL = process.env.TRANSCRIPT_CHANNEL || '1503111460790735041',
   ROLE_OWNER_ID, ROLE_ADMIN_ID, ROLE_HELPER_ID,
   GROQ_API_KEY, ANTHROPIC_API_KEY,
   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
   AEGIS_CHANNEL_ID,
 } = process.env;
- 
+
+// ── TICKET LOG CHANNELS (Cyber Nexus — hidden admin channels) ────────────────
+const TICKET_LOG_CHANNELS = {
+  support:    process.env.TICKET_LOG_SUPPORT    || '1503110133540978769',
+  starterkit: process.env.TICKET_LOG_STARTERKIT || '1503109898093727906',
+  concoin:    process.env.TICKET_LOG_CONCOIN    || '1503109720456691742',
+  claveshard: process.env.TICKET_LOG_CLAVESHARD || '1503109559022256251',
+  basewatch:  process.env.TICKET_LOG_BASEWATCH  || '1503109371910029415',
+};
+
 if (!DISCORD_BOT_TOKEN) { console.error('❌ DISCORD_BOT_TOKEN missing'); process.exit(1); }
  
 const BOT_PORT   = parseInt(process.env.BOT_PORT || '3001');
@@ -1180,7 +1201,35 @@ const ALL_COMMANDS = [
     .addUserOption(o=>o.setName('user').setDescription('Member').setRequired(true))
     .addRoleOption(o=>o.setName('role').setDescription('Role').setRequired(true))
     .addStringOption(o=>o.setName('action').setDescription('Action').setRequired(true).addChoices({name:'Add',value:'add'},{name:'Remove',value:'remove'})),
-  new SlashCommandBuilder().setName('ticket').setDescription('🎫 [ADMIN] Post support ticket panel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+  new SlashCommandBuilder()
+    .setName('ticket')
+    .setDescription('[ADMIN] Post a ticket panel in this channel')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
+    .addStringOption(o => o.setName('type').setDescription('Which panel to post').setRequired(true).addChoices(
+      { name: '🛡️ Support',          value: 'support' },
+      { name: '🎁 Starter Kit',       value: 'starterkit' },
+      { name: '🪙 ConCoin Shop',       value: 'concoin' },
+      { name: '📚 ClaveShard Shop',    value: 'claveshard' },
+      { name: '🛡️ Base Watch',        value: 'basewatch' },
+      { name: '🎫 All-in-one',        value: 'all' },
+    )),
+  new SlashCommandBuilder().setName('panel-support').setDescription('🛡️ [ADMIN] Post general support panel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+  new SlashCommandBuilder()
+    .setName('setup-tickets')
+    .setDescription('[ADMIN] Configure ticket webhooks for this server')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addStringOption(o => o.setName('type').setDescription('Ticket type').setRequired(true).addChoices(
+      { name: 'support',    value: 'support' },
+      { name: 'starterkit', value: 'starterkit' },
+      { name: 'concoin',    value: 'concoin' },
+      { name: 'claveshard', value: 'claveshard' },
+      { name: 'basewatch',  value: 'basewatch' },
+    ))
+    .addStringOption(o => o.setName('webhook').setDescription('Webhook URL for this ticket type').setRequired(true)),
+  new SlashCommandBuilder().setName('panel-starterkit').setDescription('🎁 [ADMIN] Post starter kit panel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+  new SlashCommandBuilder().setName('panel-concoin').setDescription('🪙 [ADMIN] Post ConCoin shop panel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+  new SlashCommandBuilder().setName('panel-claveshard').setDescription('📚 [ADMIN] Post ClaveShard shop panel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+  new SlashCommandBuilder().setName('panel-basewatch').setDescription('🛡️ [ADMIN] Post base watch panel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
   new SlashCommandBuilder().setName('purge').setDescription('🗑️ [ADMIN] Delete messages in bulk').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     .addIntegerOption(o=>o.setName('count').setDescription('Number of messages (max 100)').setRequired(true).setMinValue(1).setMaxValue(100))
     .addUserOption(o=>o.setName('user').setDescription('Only purge from this user').setRequired(false)),
@@ -1214,12 +1263,20 @@ async function registerCommands() {
   try {
     const allJson = ALL_COMMANDS.map(c=>c.toJSON());
     console.log(`📡 Registering ${allJson.length} slash commands...`);
-    if (DISCORD_GUILD_ID) {
-      await rest.put(Routes.applicationGuildCommands(DISCORD_CLIENT_ID, DISCORD_GUILD_ID), { body:allJson });
-      console.log(`✅ Guild commands registered (${allJson.length})`);
-    } else {
-      await rest.put(Routes.applicationCommands(DISCORD_CLIENT_ID), { body:allJson });
-      console.log(`✅ Global commands registered (${allJson.length})`);
+
+    // Register to every guild the bot is in (covers both Dominion + Cyber Nexus)
+    const guildsToRegister = [
+      DISCORD_GUILD_ID,                     // Main Dominion: 1438103556610723922
+      process.env.CYBER_NEXUS_GUILD_ID || '1502913390761345044',
+    ].filter(Boolean);
+
+    for (const guildId of guildsToRegister) {
+      try {
+        await rest.put(Routes.applicationGuildCommands(DISCORD_CLIENT_ID, guildId), { body: allJson });
+        console.log(`✅ Commands registered in guild ${guildId} (${allJson.length} commands)`);
+      } catch (e) {
+        console.warn(`⚠️ Failed to register in guild ${guildId}: ${e.message}`);
+      }
     }
   } catch (e) { console.error('❌ Registration failed:', e.message); }
 }
@@ -1231,30 +1288,33 @@ const activeVotes = new Map();
 // ══════════════════════════════════════════════════════════════════════
 bot.on(Events.InteractionCreate, async interaction => {
   try {
+<<<<<<< HEAD
     if (await handleTicketInteraction(interaction, bot)) return;
     if (await handleWatchtowerInteraction(interaction, bot)) return;
+=======
+    const isTicketInteraction =
+  (interaction.isButton() && (
+    interaction.customId === 'ticket_open' ||
+    interaction.customId?.startsWith('tkt_') ||
+    interaction.customId === 'ticket_claim' ||
+    interaction.customId === 'ticket_close' ||
+    interaction.customId === 'ticket_resolve'
+  )) ||
+  (interaction.isModalSubmit() && interaction.customId?.startsWith('ticket_modal_'));
+
+if (!isTicketInteraction) {
+  if (await handleWatchtowerInteraction(interaction, bot)) return;
+>>>>>>> 708ceefd6ec75f507b771f8d64a27de94bd86b0a
   if (await handleTriviaCommand(interaction)) return;
-if (await handleTriviaButton(interaction)) return;
-if (await handleTriviaModalSubmit(interaction)) return;
- 
-    if (interaction.isButton() && interaction.customId==='giveaway_enter') {
-      const gw = activeGiveaways.get(interaction.message.id);
-      if (!gw) return interaction.reply({ content:'⚠️ Giveaway no longer active.', ephemeral:true });
-      if (Date.now()>gw.endTime) return interaction.reply({ content:'⏰ Giveaway has ended.', ephemeral:true });
-      if (gw.entries.has(interaction.user.id)) return interaction.reply({ content:'✅ Already entered!', ephemeral:true });
-      if (gw.shardCost>0) {
-        try { await deductShards(interaction.user.id, interaction.user.username, gw.shardCost, `Giveaway entry: ${gw.prize}`, 'SYSTEM', 'AEGIS'); }
-        catch (e) { return interaction.reply({ content:`⚠️ Entry requires **${gw.shardCost} 💎** in your wallet. ${e.message}`, ephemeral:true }); }
-      }
-      gw.entries.add(interaction.user.id);
-      return interaction.reply({ content:`🎉 You entered the **${gw.prize}** giveaway!${gw.shardCost>0?` (−${gw.shardCost} 💎)`:''} Good luck!`, ephemeral:true });
-    }
+  if (await handleTriviaButton(interaction)) return;
+  if (await handleTriviaModalSubmit(interaction)) return;
+}
  
     if (interaction.isButton() && interaction.customId?.startsWith('vote_')) {
       const [,msgId,optIdx] = interaction.customId.split('_');
       const vote = activeVotes.get(msgId);
-      if (!vote) return interaction.reply({ content:'⚠️ Vote expired.', ephemeral:true });
-      if (Date.now()>vote.ends) return interaction.reply({ content:'⏰ Vote has ended.', ephemeral:true });
+      if (!vote) return interaction.reply({ content:'⚠️ Vote expired.', flags: 64 });
+      if (Date.now()>vote.ends) return interaction.reply({ content:'⏰ Vote has ended.', flags: 64 });
       for (const [,voters] of vote.votes) voters.delete(interaction.user.id);
       if (!vote.votes.has(parseInt(optIdx))) vote.votes.set(parseInt(optIdx), new Set());
       vote.votes.get(parseInt(optIdx)).add(interaction.user.id);
@@ -1262,30 +1322,321 @@ if (await handleTriviaModalSubmit(interaction)) return;
       const resultLines=vote.options.map((o,i)=>{ const count=vote.votes.get(i)?.size||0; const pct=totalVotes?Math.round((count/totalVotes)*100):0; const bar='█'.repeat(Math.round(pct/5))+'░'.repeat(20-Math.round(pct/5)); return `**${i+1}.** ${o}\n\`${bar}\` **${pct}%** (${count} votes)`; }).join('\n\n');
       try { const msg=await interaction.message.fetch(); await msg.edit({ embeds:[base(`🗳️ ${vote.question}`,C.cy).setDescription(resultLines+`\n\n> Total votes: **${totalVotes}** · Ends <t:${Math.floor(vote.ends/1000)}:R>`)] }); }
       catch {}
-      return interaction.reply({ content:`✅ Voted for **${vote.options[parseInt(optIdx)]}**!`, ephemeral:true });
+      return interaction.reply({ content:`✅ Voted for **${vote.options[parseInt(optIdx)]}**!`, flags: 64 });
     }
  
+    // ── TICKET SYSTEM — TYPE SELECTOR ─────────────────────────────────
     if (interaction.isButton() && interaction.customId==='ticket_open') {
-      await interaction.deferReply({ ephemeral:true });
-      const safeName=interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g,'-').slice(0,20);
-      const existing=interaction.guild.channels.cache.find(c=>c.name===`ticket-${safeName}`);
-      if (existing) return interaction.editReply(`⚠️ You already have an open ticket: ${existing}`);
-      try {
-        const ch=await interaction.guild.channels.create({
-          name:`ticket-${safeName}`, type:ChannelType.GuildText,
-          permissionOverwrites:[
-            { id:interaction.guild.roles.everyone, deny:[PermissionFlagsBits.ViewChannel] },
-            { id:interaction.user.id, allow:[PermissionFlagsBits.ViewChannel,PermissionFlagsBits.SendMessages,PermissionFlagsBits.ReadMessageHistory] },
-            { id:interaction.guild.members.me.id, allow:[PermissionFlagsBits.ViewChannel,PermissionFlagsBits.SendMessages,PermissionFlagsBits.ManageChannels] },
-            ...(ROLE_ADMIN_ID?[{id:ROLE_ADMIN_ID,allow:[PermissionFlagsBits.ViewChannel,PermissionFlagsBits.SendMessages]}]:[]),
-            ...(ROLE_HELPER_ID?[{id:ROLE_HELPER_ID,allow:[PermissionFlagsBits.ViewChannel,PermissionFlagsBits.SendMessages]}]:[]),
-          ],
-        });
-        await ch.send({ embeds:[base('🎫 Support Ticket',C.cy).setDescription(`Hello ${interaction.user}! A staff member will assist you shortly.\n\nDescribe your issue in detail.`).setFooter(FT)], components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('ticket_close').setLabel('🔒 Close Ticket').setStyle(ButtonStyle.Danger))] });
-        return interaction.editReply({ content:`✅ Ticket created: ${ch}` });
-      } catch (e) { return interaction.editReply(`⚠️ Error: ${e.message}`); }
+      return interaction.reply({
+        flags: 64,
+        embeds: [new EmbedBuilder()
+          .setColor(0x00D4FF)
+          .setTitle('🎫 Open a Support Ticket')
+          .setDescription([
+            '**Select the category that matches your request:**',
+            '',
+            '🛡️ **Support** — General server help, questions, issues',
+            '🎁 **Starter Kit** — Request your new player starter kit',
+            '🪙 **ConCoin Shop** — ConCoin purchases, economy issues',
+            '💎 **ClaveShard Shop** — Shard orders, fulfillment issues',
+            '👁️ **Base Watch** — AEGIS tower base protection requests',
+          ].join('\n'))
+          .setFooter({ text: 'TheConclave Dominion · Tickets are private' })
+        ],
+        components: [new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('tkt_support').setLabel('🛡️ Support').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId('tkt_starterkit').setLabel('🎁 Starter Kit').setStyle(ButtonStyle.Success),
+          new ButtonBuilder().setCustomId('tkt_concoin').setLabel('🪙 ConCoin Shop').setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId('tkt_claveshard').setLabel('💎 ClaveShard Shop').setStyle(ButtonStyle.Primary),
+          new ButtonBuilder().setCustomId('tkt_basewatch').setLabel('👁️ Base Watch').setStyle(ButtonStyle.Danger),
+        )],
+      });
     }
+<<<<<<< HEAD
     // ticket_close handled by ticket-system.js
+=======
+
+    // ── TICKET MODALS — tailored form per type ──────────────────────
+    if (interaction.isButton() && interaction.customId.startsWith('tkt_')) {
+      const type = interaction.customId.replace('tkt_', '');
+
+      const TICKET_META = {
+        support:    { title: '🛡️ Support Ticket',              emoji: '🛡️' },
+        starterkit: { title: '🎁 Starter Kit Request',          emoji: '🎁' },
+        concoin:    { title: '🪙 ConCoin Shop Ticket',          emoji: '🪙' },
+        claveshard: { title: '📚 ClaveShard Shop Ticket 👀',    emoji: '💎' },
+        basewatch:  { title: '🛡️ AEGIS Base Watch Request 🛡️', emoji: '👁️' },
+      };
+
+      const meta = TICKET_META[type] || TICKET_META.support;
+      const modal = new ModalBuilder()
+        .setCustomId(`ticket_modal_${type}`)
+        .setTitle(meta.title.slice(0, 45));
+
+      const FORMS = {
+        support: [
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('issue').setLabel('What do you need help with?').setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('Describe your issue in as much detail as possible...')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('server').setLabel('Which server? (if applicable)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('e.g. Aberration, Scorched Earth, Cyber Nexus...')),
+        ],
+        starterkit: [
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('character').setLabel('Character Name').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Your in-game character name')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('server').setLabel('Which Server / Map?').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('e.g. The Island, Scorched Earth...')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('platform').setLabel('Platform').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Xbox / PlayStation / PC / Switch')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('tribe').setLabel('Tribe Name (or Solo?)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Your tribe name, or "Solo"')),
+        ],
+        concoin: [
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('issue').setLabel('What is your ConCoin issue?').setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('Describe your purchase, missing coins, or dispute...')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('amount').setLabel('ConCoin Amount Involved').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('e.g. 500 ConCoins')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('proof').setLabel('Proof / Transaction Reference').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Screenshot link or transaction ID')),
+        ],
+        claveshard: [
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('tier').setLabel('Tier / Item Selection')
+              .setStyle(TextInputStyle.Short).setRequired(true)
+              .setPlaceholder('T1/T2/T3/T5/T6/T8/T10/T12/T15/T20/T30 or Dino Insurance')
+              .setMinLength(1).setMaxLength(50)
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('character').setLabel('Character Name & Server / Map')
+              .setStyle(TextInputStyle.Short).setRequired(true)
+              .setPlaceholder('e.g. SurvivorX on Aberration')
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('platform').setLabel('Platform')
+              .setStyle(TextInputStyle.Short).setRequired(true)
+              .setPlaceholder('Xbox / PlayStation / PC / Switch')
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('order_details').setLabel('Order Details / Special Requests')
+              .setStyle(TextInputStyle.Paragraph).setRequired(false)
+              .setPlaceholder('Specific dino type, colors, species name, delivery notes, anything extra...')
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId('payment').setLabel('Payment Method + Confirmation')
+              .setStyle(TextInputStyle.Short).setRequired(false)
+              .setPlaceholder('Cash App / Chime + last 4 digits of transaction or username')
+          ),
+        ],
+        basewatch: [
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('tribe').setLabel('Tribe Name').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Your tribe name')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('server').setLabel('Server / Map').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('e.g. Aberration, The Island...')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('location').setLabel('Base Location / Coordinates').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('e.g. 45.2 / 67.8 or "Red Obelisk area"')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('duration').setLabel('How long do you need watch?').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('e.g. 48 hours, this weekend, 1 week')),
+          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setLabel('Reason for request').setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('Going offline? Travelling? Explain why you need protection...')),
+        ],
+      };
+
+      modal.addComponents(...(FORMS[type] || FORMS.support));
+      return interaction.showModal(modal);
+    }
+
+    // ── TICKET MODAL SUBMIT — post to admin log via webhook ─────────
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('ticket_modal_')) {
+      await interaction.deferReply({ flags: 64 });
+      const type = interaction.customId.replace('ticket_modal_', '');
+
+      const TYPE_META = {
+        support:    { label:'Support Ticket',               emoji:'🛡️', color:0x00D4FF },
+        starterkit: { label:'Starter Kit Request',           emoji:'🎁', color:0x35ED7E },
+        concoin:    { label:'ConCoin Shop Ticket',           emoji:'🪙', color:0xFFB800 },
+        claveshard: { label:'📚 ClaveShard Shop Ticket 👀', emoji:'💎', color:0xFF4CD2 },
+        basewatch:  { label:'🛡️ Base Watch Request 🛡️',   emoji:'👁️', color:0x7B2FFF },
+      };
+
+      // Pull webhook URLs from Supabase guild_configs — fully multi-tenant
+     let guildCfg = null;
+if (sb) {
+  try {
+    const { data, error } = await sb
+      .from('guild_configs')
+      .select('*')
+      .eq('guild_id', interaction.guildId)
+      .single();
+    if (!error) guildCfg = data;
+  } catch {}
+}
+if (!guildCfg) return interaction.editReply('⚠️ Server config not found. Contact an admin.');
+
+      const WEBHOOKS = {
+        support:    guildCfg?.webhook_support    || null,
+        starterkit: guildCfg?.webhook_starterkit || null,
+        concoin:    guildCfg?.webhook_concoin    || null,
+        claveshard: guildCfg?.webhook_claveshard || null,
+        basewatch:  guildCfg?.webhook_basewatch  || null,
+      };
+
+      const meta       = TYPE_META[type] || TYPE_META.support;
+      const webhookUrl = WEBHOOKS[type];
+      if (!webhookUrl) return interaction.editReply(`⚠️ Ticket system not yet configured for this server. Tell an admin to set up the log channels.`);
+
+      // Build fields from modal inputs
+      const allFields   = interaction.fields.fields;
+      const issue       = allFields.get('issue')?.value || allFields.get('reason')?.value || '—';
+      const embedFields = [
+        { name: '👤 User',    value: `${interaction.user} (${interaction.user.username})`, inline: true },
+        { name: '🏷️ Type',   value: meta.label, inline: true },
+        { name: '🕐 Opened', value: `<t:${Math.floor(Date.now()/1000)}:R>`, inline: true },
+      ];
+      const fieldMap = {
+        issue:'📋 Issue', reason:'📋 Reason', server:'🗺️ Server',
+        character:'🦖 Character & Server', platform:'🎮 Platform', tribe:'🏕️ Tribe',
+        order_ref:'🔖 Order Ref', tier:'💎 Tier Selected', order_details:'📋 Order Details',
+        payment:'💳 Payment', amount:'💰 Amount', proof:'📎 Proof',
+        location:'📍 Location', duration:'⏱️ Duration',
+      };
+      for (const [key, label] of Object.entries(fieldMap)) {
+        const val = allFields.get(key)?.value;
+        if (val) embedFields.push({ name: label, value: val.slice(0,500), inline: key!=='issue'&&key!=='reason'&&key!=='order_details' });
+      }
+
+      // Build fields from modal inputs (moved up before try)
+      // Already built above — use existing embedFields
+
+      try {
+        // Post to webhook — no permission issues, no thread complexity
+        const { WebhookClient } = require('discord.js');
+        const webhook = new WebhookClient({ url: webhookUrl });
+
+        const mentionLine = [
+          `<@${interaction.user.id}>`,
+          ROLE_ADMIN_ID  ? `<@&${ROLE_ADMIN_ID}>`  : '',
+          ROLE_HELPER_ID ? `<@&${ROLE_HELPER_ID}>` : '',
+        ].filter(Boolean).join(' ');
+
+        await webhook.send({
+          content: mentionLine,
+          embeds: [{
+            color:  meta.color,
+            title:  `${meta.emoji} ${meta.label}`,
+            fields: embedFields,
+            footer: { text: 'TheConclave Dominion · AEGIS Ticket System' },
+            timestamp: new Date().toISOString(),
+          }],
+          username:   'AEGIS Tickets',
+          avatarURL:  'https://theconclavedominion.com/THECONCLAVE.png',
+          allowedMentions: { users: [interaction.user.id], roles: [ROLE_ADMIN_ID, ROLE_HELPER_ID].filter(Boolean) },
+        });
+
+        webhook.destroy();
+
+        // Log to Supabase
+        if (sb && sbOk()) {
+          sb.from('aegis_tickets').insert({
+            guild_id:   interaction.guildId,
+            channel_id: type + '_webhook',
+            user_id:    interaction.user.id,
+            user_tag:   interaction.user.username,
+            type, issue: issue.slice(0,500), status: 'open',
+            created_at: new Date().toISOString(),
+          }).catch(() => {});
+        }
+
+        return interaction.editReply({ content: `✅ Your ${meta.label} has been submitted. Staff will respond in <#${
+          { support: LOG_SUPPORT, starterkit: LOG_STARTERKIT, concoin: LOG_CONCOIN, claveshard: LOG_CLAVESHARD, basewatch: LOG_BASEWATCH }[type]
+        }>.` });
+      } catch (e) {
+        console.error('[Tickets] Webhook error:', e.message);
+        return interaction.editReply('Failed to submit ticket: ' + e.message);
+      }
+    }
+
+    // ── TICKET CLAIM ──────────────────────────────────────────────────
+    if (interaction.isButton() && interaction.customId==='ticket_claim') {
+      if (!isMod(interaction.member)) return interaction.reply({ content:'⛔ Staff only.', flags: 64 });
+      await interaction.reply({ content: `✋ **${interaction.user}** has claimed this ticket.\nOnly they will handle it from here.` });
+      if (sb && sbOk()) {
+        sb.from('aegis_tickets').update({ claimed_by: interaction.user.username, status: 'claimed' })
+          .eq('channel_id', interaction.channelId).catch(() => {});
+      }
+      return;
+    }
+
+    // ── TICKET CLOSE / RESOLVE — save transcript ──────────────────────
+    if (interaction.isButton() && ['ticket_close','ticket_resolve'].includes(interaction.customId)) {
+      if (!isMod(interaction.member)) return interaction.reply({ content:'⛔ Staff only.', flags: 64 });
+
+      const isResolve = interaction.customId === 'ticket_resolve';
+      await interaction.reply({
+        embeds: [new EmbedBuilder()
+          .setColor(isResolve ? 0x35ED7E : 0xFF4444)
+          .setTitle(isResolve ? '✅ Ticket Resolved' : '🔒 Ticket Closed')
+          .setDescription(`${isResolve ? 'Resolved' : 'Closed'} by ${interaction.user}\nSaving transcript... thread will archive shortly.`)
+          .setTimestamp()],
+      });
+
+      // Update Supabase
+      if (sb && sbOk()) {
+        sb.from('aegis_tickets').update({
+          status: 'closed', closed_by: interaction.user.username,
+          closed_at: new Date().toISOString(),
+        }).eq('channel_id', interaction.channelId).catch(() => {});
+      }
+
+      // Generate transcript — fetch last 200 messages
+      try {
+        const ch = interaction.channel;
+        const messages = await ch.messages.fetch({ limit: 100 });
+        const sorted   = [...messages.values()].reverse();
+
+        // Build text transcript
+        const lines = sorted.map(m => {
+          const time = new Date(m.createdTimestamp).toLocaleString('en-US',{dateStyle:'short',timeStyle:'short'});
+          const content = m.content || (m.embeds[0]?.title ? `[Embed: ${m.embeds[0].title}]` : '[attachment/embed]');
+          return `[${time}] ${m.author.username}: ${content}`;
+        }).join('\n');
+
+        const transcriptText = [
+          `═══════════════════════════════════════════`,
+          `TICKET TRANSCRIPT — TheConclave Dominion`,
+          `Thread: ${ch.name}`,
+          `Closed by: ${interaction.user.username}`,
+          `Date: ${new Date().toLocaleString('en-US',{dateStyle:'full',timeStyle:'short'})}`,
+          `═══════════════════════════════════════════`,
+          '',
+          lines,
+          '',
+          `═══════════════════════════════════════════`,
+          `END OF TRANSCRIPT`,
+        ].join('\n');
+
+        // Post to transcript channel
+        const transcriptCh = interaction.guild.channels.cache.get(TRANSCRIPT_CHANNEL);
+        if (transcriptCh) {
+          const { AttachmentBuilder } = require('discord.js');
+          const buf = Buffer.from(transcriptText, 'utf8');
+          const attachment = new AttachmentBuilder(buf, { name: `transcript-${ch.name}-${Date.now()}.txt` });
+
+          await transcriptCh.send({
+            embeds: [new EmbedBuilder()
+              .setColor(isResolve ? 0x35ED7E : 0xFF4444)
+              .setTitle(`📋 Transcript — ${ch.name}`)
+              .addFields(
+                { name: '🏷️ Status',    value: isResolve ? '✅ Resolved' : '🔒 Closed', inline: true },
+                { name: '👤 Closed by', value: interaction.user.username, inline: true },
+                { name: '📅 Date',      value: `<t:${Math.floor(Date.now()/1000)}:F>`, inline: true },
+              )
+              .setFooter({ text: 'TheConclave Dominion · AEGIS Ticket System' })
+              .setTimestamp()],
+            files: [attachment],
+          }).catch(() => {});
+        }
+      } catch (transcriptErr) {
+        console.warn('[Tickets] Transcript error:', transcriptErr.message);
+      }
+
+      // Archive the thread instead of deleting
+      setTimeout(async () => {
+        try {
+          if (interaction.channel.isThread()) {
+            await interaction.channel.setArchived(true);
+          } else {
+            await interaction.channel.delete();
+          }
+        } catch {}
+      }, 8000);
+      return;
+    }
+>>>>>>> 708ceefd6ec75f507b771f8d64a27de94bd86b0a
 
     if (!interaction.isChatInputCommand()) return;
     const { commandName:cmd } = interaction;
@@ -1294,7 +1645,7 @@ if (await handleTriviaModalSubmit(interaction)) return;
     if (cmd==='watchtower') {
       if (!isAdmin(interaction.member)) return interaction.editReply('❌ Admin only.');
       await sendWatchtowerPanel(interaction.channel);
-      return interaction.editReply({ content:'✅ Watchtower panel posted.', ephemeral:true });
+      return interaction.editReply({ content:'✅ Watchtower panel posted.', flags: 64 });
     }
  
     // ════════════════════════════════════════════════════════════════
@@ -1905,14 +2256,223 @@ if (await handleTriviaModalSubmit(interaction)) return;
       catch (e) { return interaction.editReply(`⚠️ Role change failed: ${e.message}`); }
     }
  
+    // ── DEDICATED PANEL COMMANDS ────────────────────────────────────────────
+    if (['panel-support','panel-starterkit','panel-concoin','panel-claveshard','panel-basewatch'].includes(cmd)) {
+      if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
+      const type = cmd.replace('panel-', '');
+
+      const PANELS = {
+        support: {
+          color: 0x00D4FF, emoji: '🛡️', title: 'TheConclave Support',
+          desc: [
+            '`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`',
+            '',
+            '**Need help from the Council?**',
+            'Click the button below to open a private support ticket.',
+            '',
+            '**What we can help with:**',
+            '> 🗺️ Server issues & questions',
+            '> ⚔️ Disputes & rule clarifications',
+            '> 🐛 Bug reports & glitches',
+            '> 🙏 General Dominion help',
+            '',
+            '`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`',
+            '-# Tickets are private · Council responds within 24 hours',
+          ].join('\n'),
+          btn: new ButtonBuilder().setCustomId('tkt_support').setLabel('🛡️ Open Support Ticket').setStyle(ButtonStyle.Primary),
+        },
+        starterkit: {
+          color: 0x35ED7E, emoji: '🎁', title: 'Starter Kit Requests',
+          desc: [
+            '`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`',
+            '',
+            '**New to TheConclave? Claim your starter kit!**',
+            '',
+            '**Kits include:**',
+            '> 🦖 A starter dino for your journey',
+            '> 🏠 Basic building materials',
+            '> 🍗 Food & survival supplies',
+            '> 📦 ConCoins to get started',
+            '',
+            '**Requirements:**',
+            '> New member (first 72h)',
+            '> One kit per player per server',
+            '',
+            '`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`',
+            '-# Fulfilled by Council within 24 hours',
+          ].join('\n'),
+          btn: new ButtonBuilder().setCustomId('tkt_starterkit').setLabel('🎁 Request Starter Kit').setStyle(ButtonStyle.Success),
+        },
+        concoin: {
+          color: 0xFFB800, emoji: '🪙', title: 'ConCoin Shop',
+          desc: [
+            '`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`',
+            '',
+            '**ConCoin Shop — In-Server Economy**',
+            'Open a ticket for purchases, transfers, or disputes.',
+            '',
+            '**ConCoins are used for:**',
+            '> 🏪 In-server market transactions',
+            '> 🎰 Event & giveaway entries',
+            '> 💱 Player-to-player trades',
+            '',
+            '**Earn ConCoins via:**',
+            '> 📅 Daily & weekly Discord activity',
+            '> 🎉 Events & competitions',
+            '> ⬆️ Tier purchases include ConCoins',
+            '',
+            '`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`',
+            '-# All ConCoin issues handled by Council',
+          ].join('\n'),
+          btn: new ButtonBuilder().setCustomId('tkt_concoin').setLabel('🪙 Open ConCoin Ticket').setStyle(ButtonStyle.Primary),
+        },
+        claveshard: {
+          color: 0xFF4CD2, emoji: '📚', title: '📚 ClaveShard Shop 👀',
+          desc: [
+            '`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`',
+            '',
+            '**ClaveShard Shop — Premium Dinos, Items & Resources**',
+            'Click to open an order ticket with full tier details.',
+            '',
+            '> 💠 **Tier 1** — Foundation Drop · 1 shard',
+            '            > 💎 **Tier 2** — Shiny Starter · 2 shards',
+            '            > ✨ **Tier 3** — Tek Spark · 3 shards',
+            '            > 🔥 **Tier 5** — Boss Spark · 5 shards',
+            '            > ⚔️ **Tier 6** — Boss Ready · 6 shards',
+            '            > 🧬 **Tier 8** — Medium Resources · 8 shards',
+            '            > 🛡️ **Tier 10** — Dominion Upgrade · 10 shards',
+            '            > 🌟 **Tier 12** — Large Resources · 12 shards',
+            '            > 👑 **Tier 15** — Crown Drop · 15 shards',
+            '            > 🏰 **Tier 20** — Gate Expansion · 20 shards',
+            '            > 💰 **Tier 30** — Dedicated Refill · 30 shards',
+            '            > 🐉 **Dino Insurance** — Protect your named dino',
+            '',
+            '**Payment:** Cash App `$TheConclaveDominion` · Chime `$TheConclaveDominion`',
+            '**Delivery:** 24–72 hours via Council',
+            '',
+            '`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`',
+            '-# Click below to open your order ticket',
+          ].join('\n'),
+          btn: new ButtonBuilder().setCustomId('tkt_claveshard').setLabel('📚 Open Shop Ticket 👀').setStyle(ButtonStyle.Primary),
+        },
+        basewatch: {
+          color: 0x7B2FFF, emoji: '🛡️', title: '🛡️ AEGIS Base Watch 🛡️',
+          desc: [
+            '`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`',
+            '',
+            '**AEGIS Tower — Base Protection Requests**',
+            'Going offline? Request protection from the Council.',
+            '',
+            '**Base watch includes:**',
+            '> 👁️ Council monitors your base area',
+            '> 🚨 Alert if suspicious activity detected',
+            '> 📸 Screenshot evidence if incident occurs',
+            '',
+            '**Requirements:**',
+            '> Server member in good standing',
+            '> 48h notice recommended',
+            '> Coordinates or description required',
+            '',
+            '`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`',
+            '-# AEGIS sees all · The Dominion protects its own',
+          ].join('\n'),
+          btn: new ButtonBuilder().setCustomId('tkt_basewatch').setLabel('🛡️ Request Base Watch').setStyle(ButtonStyle.Danger),
+        },
+      };
+
+      const panel = PANELS[type];
+      const embed = new EmbedBuilder()
+        .setColor(panel.color)
+        .setTitle(`${panel.emoji} ${panel.title}`)
+        .setDescription(panel.desc)
+        .setFooter({ text: 'TheConclave Dominion · Powered by AEGIS' })
+        .setTimestamp();
+      await interaction.channel.send({ embeds: [embed], components: [new ActionRowBuilder().addComponents(panel.btn)] });
+      return interaction.editReply(`✅ ${panel.title} panel posted.`);
+    }
+
+    if (cmd==='setup-tickets') {
+      if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
+      const ticketType = interaction.options.getString('type');
+      const webhookUrl = interaction.options.getString('webhook');
+
+      // Validate it's a Discord webhook URL
+      if (!webhookUrl.startsWith('https://discord.com/api/webhooks/') &&
+          !webhookUrl.startsWith('https://discordapp.com/api/webhooks/')) {
+        return interaction.editReply('⚠️ Invalid webhook URL. Must be a Discord webhook URL.');
+      }
+
+      const field = `webhook_${ticketType}`;
+      const success = await guildManager.updateField(interaction.guildId, field, webhookUrl);
+if (!success) return interaction.editReply(`⚠️ Failed to save webhook. Check logs.`);
+
+      // Bust cache so next ticket picks up new webhook
+      await guildManager.refreshConfig(interaction.guildId);
+
+      return interaction.editReply("✅ " + ticketType + " webhook configured. Test it with /ticket type:" + ticketType);
+    }
+
     if (cmd==='ticket') {
       if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
-      const row=new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('ticket_open').setLabel('🎫 Open a Ticket').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setLabel('📋 View Rules').setStyle(ButtonStyle.Link).setURL('https://theconclavedominion.com/terms.html'),
-      );
-      await interaction.channel.send({ embeds:[P.TicketPanel()], components:[row] });
-      return interaction.editReply('✅ Ticket panel posted.');
+      const selectedType = interaction.options.getString('type');
+      switch (selectedType) {
+
+        case 'support': {
+          const embed = new EmbedBuilder().setColor(54527).setTitle('🛡️ Support Tickets')
+            .setDescription("**Need help from the Council?**\nClick below to open a private support ticket.\n\n> 🗺️ Server issues & questions\n> ⚔️ Disputes & rule clarifications\n> 🐛 Bug reports & glitches\n> 🙏 General Dominion help\n\n-# Tickets are private · Council responds within 24 hours")
+            .setFooter({text:'TheConclave Dominion · Powered by AEGIS'}).setTimestamp();
+          const btn = new ButtonBuilder().setCustomId('tkt_support').setLabel('🛡️ Open Support Ticket').setStyle(ButtonStyle.Primary);
+          await interaction.channel.send({embeds:[embed],components:[new ActionRowBuilder().addComponents(btn)]});
+          return interaction.editReply('✅ Support Tickets panel posted.');
+        }
+        case 'starterkit': {
+          const embed = new EmbedBuilder().setColor(3534206).setTitle('🎁 Starter Kit Requests')
+            .setDescription("**New to TheConclave? Claim your starter kit!**\n\n> 🦖 Starter dino for your journey\n> 🏠 Basic building materials\n> 🍗 Food & survival supplies\n> 📦 ConCoins to get started\n\n*One kit per player per server · First 72h only*\n-# Fulfilled by Council within 24 hours")
+            .setFooter({text:'TheConclave Dominion · Powered by AEGIS'}).setTimestamp();
+          const btn = new ButtonBuilder().setCustomId('tkt_starterkit').setLabel('🎁 Request Starter Kit').setStyle(ButtonStyle.Success);
+          await interaction.channel.send({embeds:[embed],components:[new ActionRowBuilder().addComponents(btn)]});
+          return interaction.editReply('✅ Starter Kit Requests panel posted.');
+        }
+        case 'concoin': {
+          const embed = new EmbedBuilder().setColor(16758784).setTitle('🪙 ConCoin Shop')
+            .setDescription("**ConCoin Shop — In-Server Economy**\nOpen a ticket for purchases, transfers, or disputes.\n\n> 🏪 In-server market transactions\n> 🎰 Event & giveaway entries\n> 💱 Player-to-player trades\n\n-# All ConCoin issues handled by Council")
+            .setFooter({text:'TheConclave Dominion · Powered by AEGIS'}).setTimestamp();
+          const btn = new ButtonBuilder().setCustomId('tkt_concoin').setLabel('🪙 Open ConCoin Ticket').setStyle(ButtonStyle.Primary);
+          await interaction.channel.send({embeds:[embed],components:[new ActionRowBuilder().addComponents(btn)]});
+          return interaction.editReply('✅ ConCoin Shop panel posted.');
+        }
+        case 'claveshard': {
+          const embed = new EmbedBuilder().setColor(16731346).setTitle('📚 ClaveShard Shop')
+            .setDescription("**ClaveShard Shop — Premium Dinos, Items & Resources**\n\n**ClaveShard Shop — Premium Dinos, Items & Resources**\n\n**💠 Tier 1 — Foundation Drop** \`1 shard\`\n> Lvl 600 Dino · 3 ammo stacks · Full coloring · 100 kibble/cakes/beer\n> 100% imprint · 500 non-Tek structures · Cryofridge + 120 cryopods\n> 50k ConCoins · 2,500 materials · 10 same-type tributes\n> Boss artifact + tribute set (1 run) · Non-Tek blueprint · Revival Token 48h\n\n**💎 Tier 2 — Shiny Starter** \`2 shards\`\n> 60 Dedicated Storage · Lvl 700 Dino · Lvl 500 Random Shiny · Lvl 500 Shiny Shoulder Variant\n\n**✨ Tier 3 — Tek Spark** \`3 shards\`\n> Tek Suit or Blueprint · 1 Shiny Essence · 200% imprint · Lvl 600 T1 Shiny\n\n**🔥 Tier 5 — Boss Spark** \`5 shards\`\n> Boss Defeat Command · Lvl 1000 Dino · Lvl 800 T2 Special Shiny\n> 100 Raw Shiny Essence · 2,500 imprint kibble · 25,000 materials\n\n**⚔️ Tier 6 — Boss Ready** \`6 shards\`\n> Lvl 1250 Breeding Pair/Boss Dinos · 250% imprint Rex/Yuty/Carchar/Therizino\n> 300% imprint Ossidion\n\n**🧬 Tier 8 — Medium Resources** \`8 shards\`\n> 100,000 materials/resources (no element)\n\n**🛡️ Tier 10 — Dominion Upgrade** \`10 shards\`\n> Ascendant Tek Suit or Blueprint Set · Floating Cliff Platform (Limited)\n> 200,000 ConCoins · Combo Shiny Essence (choose 2) · Dino Color Party — 10 dinos\n\n**🌟 Tier 12 — Large Resources** \`12 shards\`\n> 200,000 materials/resources (no element)\n\n**👑 Tier 15 — Crown Drop** \`15 shards\`\n> 30,000 element · Lvl 1500: Rhyniognatha, Reaper King, Aureliax, Elder Claw\n> Dreadnoughtus, Acrocanthosaurus, Helicoprion, Dreadmare, Pyromane\n> 300,000 materials/resources (no element)\n\n**🏰 Tier 20 — Gate Expansion** \`20 shards\`\n> 1×1 Behemoth Gate Expansion · Max 10 gates per Map per Tribe · 600,000 ConCoins\n\n**💰 Tier 30 — Dedicated Refill** \`30 shards\`\n> 1.6 million total resources (no element, no structures/artifacts/trophies)\n\n**🐉 Dino Insurance — Protection Token**\n> One-time use per named dino · Backup may not always save · May require respawn\n\n**Payment:** Cash App \`$TheConclaveDominion\` · Chime \`$TheConclaveDominion\`\n**Delivery:** Council fulfilled within 24–72 hours\n\n-# Click below to open your order ticket")
+            .setFooter({text:'TheConclave Dominion · Powered by AEGIS'}).setTimestamp();
+          const btn = new ButtonBuilder().setCustomId('tkt_claveshard').setLabel('📚 Open Shop Ticket 👀').setStyle(ButtonStyle.Primary);
+          await interaction.channel.send({embeds:[embed],components:[new ActionRowBuilder().addComponents(btn)]});
+          return interaction.editReply('✅ ClaveShard Shop panel posted.');
+        }
+        case 'basewatch': {
+          const embed = new EmbedBuilder().setColor(8073215).setTitle('🛡️ AEGIS Base Watch')
+            .setDescription("**AEGIS Tower — Base Protection Requests**\nGoing offline? Request protection from the Council.\n\n> 👁️ Council monitors your base area\n> 🚨 Alert if suspicious activity detected\n> 📸 Screenshot evidence if incident occurs\n\n*48h notice recommended · Coordinates required*\n-# AEGIS sees all · The Dominion protects its own")
+            .setFooter({text:'TheConclave Dominion · Powered by AEGIS'}).setTimestamp();
+          const btn = new ButtonBuilder().setCustomId('tkt_basewatch').setLabel('🛡️ Request Base Watch').setStyle(ButtonStyle.Danger);
+          await interaction.channel.send({embeds:[embed],components:[new ActionRowBuilder().addComponents(btn)]});
+          return interaction.editReply('✅ AEGIS Base Watch panel posted.');
+        }
+        default: {
+          // All-in-one panel
+          const embed = new EmbedBuilder().setColor(0x7B2FFF).setTitle('🎫 TheConclave Support Center')
+            .setDescription('**Need help? We have 5 ticket categories:**\n\n🛡️ **support-tickets** — General server help & questions\n🎁 **starter-kit-tickets** — New player starter kit requests\n🪙 **concoin-shop-tickets** — ConCoin purchases & economy\n📚 **clvsd-shop-tickets 👀** — ClaveShard orders & fulfillment\n🛡️ **aegis-base-watch 🛡️** — AEGIS tower base protection\n\n> Click **Open a Ticket** and select your category.\n> All tickets are **private** — only you and staff can see them.\n-# Council responds within 24 hours')
+            .setFooter({text:'TheConclave Dominion · Powered by AEGIS'}).setTimestamp();
+          await interaction.channel.send({
+            embeds:[embed],
+            components:[new ActionRowBuilder().addComponents(
+              new ButtonBuilder().setCustomId('ticket_open').setLabel('🎫 Open a Ticket').setStyle(ButtonStyle.Primary),
+              new ButtonBuilder().setLabel('📋 Rules').setStyle(ButtonStyle.Link).setURL('https://theconclavedominion.com/terms'),
+              new ButtonBuilder().setLabel('💎 Shop').setStyle(ButtonStyle.Link).setURL('https://theconclavedominion.com/claveshard-shop'),
+            )],
+          });
+          return interaction.editReply('✅ All-in-one panel posted.');
+        }
+      }
     }
  
     if (cmd==='purge') {
@@ -2002,8 +2562,21 @@ if (await handleTriviaModalSubmit(interaction)) return;
     }
  
   } catch (e) {
-    console.error(`❌ /${interaction.commandName}:`, e.message);
-    try { await interaction.editReply(`⚠️ Error: ${e.message.slice(0,200)}`); } catch {}
+    const label = interaction.isChatInputCommand()
+      ? `/${interaction.commandName}`
+      : interaction.isButton()
+        ? `button:${interaction.customId}`
+        : interaction.isModalSubmit()
+          ? `modal:${interaction.customId}`
+          : 'interaction';
+    console.error(`❌ ${label}:`, e.message);
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply(`⚠️ Error: ${e.message.slice(0,200)}`);
+      } else {
+        await interaction.reply({ content: `⚠️ Error: ${e.message.slice(0,200)}`, flags: 64 });
+      }
+    } catch {}
   }
 });
  
@@ -2100,7 +2673,10 @@ healthServer.listen(BOT_PORT, ()=>console.log(`💓 Health: :${BOT_PORT}`));
 // ══════════════════════════════════════════════════════════════════════
 const IGNORE=['Unknown interaction','Unknown Message','Missing Access','Cannot send messages','Unknown Channel'];
 process.on('unhandledRejection', r=>{ const m=r?.message||String(r); if (!IGNORE.some(e=>m.includes(e))) console.error('❌ Rejection:',m); });
-process.on('uncaughtException',  (e,o)=>console.error(`❌ Exception [${o}]:`,e.message));
+process.on('uncaughtException', (e,o) => {
+  if ((e?.message||'').includes('Unknown interaction')) return;
+  console.error(`❌ Exception [${o}]:`, e.message);
+});
 process.on('SIGTERM', ()=>{ STATUS.ready=false; healthServer.close(); bot.destroy(); setTimeout(()=>process.exit(0),3000); });
 process.on('SIGINT',  ()=>{ STATUS.ready=false; healthServer.close(); bot.destroy(); setTimeout(()=>process.exit(0),1000); });
  

@@ -1,24 +1,26 @@
 // ============================================================
 // src/managers/guildManager.js
-// AEGIS v10 — Multi-Guild Config Manager
-// ============================================================
-// Drop this in src/managers/ and import wherever you need
-// guild-specific settings (channels, roles, Nitrado targets).
-// Configs are cached in memory and refreshed every 5 minutes.
+// AEGIS v12.1 — Multi-Guild Config Manager
 // ============================================================
 
-const { supabase } = require('../utils/supabaseClient'); // adjust path if needed
+const { createClient } = require('@supabase/supabase-js');
+
+// Create own Supabase client — no dependency on knowledge_db path
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY,
+  { auth: { persistSession: false } }
+);
 
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 class GuildManager {
   constructor() {
-    this._cache = new Map();   // guildId → { config, fetchedAt }
-    this._pending = new Map(); // guildId → Promise (prevents thundering herd)
+    this._cache   = new Map(); // guildId → { config, fetchedAt }
+    this._pending = new Map(); // guildId → Promise
   }
 
-  // ── Primary method ─────────────────────────────────────────
-  // Returns the guild config object, or null if not found.
+  // ── Primary method ──────────────────────────────────────────
   async getConfig(guildId) {
     if (!guildId) return null;
 
@@ -27,7 +29,6 @@ class GuildManager {
       return cached.config;
     }
 
-    // Deduplicate concurrent fetches for same guild
     if (this._pending.has(guildId)) {
       return this._pending.get(guildId);
     }
@@ -36,8 +37,7 @@ class GuildManager {
     this._pending.set(guildId, promise);
 
     try {
-      const config = await promise;
-      return config;
+      return await promise;
     } finally {
       this._pending.delete(guildId);
     }
@@ -60,34 +60,39 @@ class GuildManager {
       this._cache.set(guildId, { config: data, fetchedAt: Date.now() });
       return data;
     } catch (err) {
-      console.error(`[GuildManager] Fetch error for guild ${guildId}:`, err);
+      console.error(`[GuildManager] Fetch error for guild ${guildId}:`, err.message);
       return null;
     }
   }
 
-  // ── Force refresh a specific guild ─────────────────────────
+  // ── Force refresh ───────────────────────────────────────────
   async refreshConfig(guildId) {
     this._cache.delete(guildId);
     return this.getConfig(guildId);
   }
 
-  // ── Convenience: update a field in DB + bust cache ─────────
+  // ── Update a field in DB + bust cache ──────────────────────
   async updateField(guildId, field, value) {
-    const { error } = await supabase
-      .from('guild_configs')
-      .update({ [field]: value })
-      .eq('guild_id', guildId);
+    try {
+      const { error } = await supabase
+        .from('guild_configs')
+        .update({ [field]: value })
+        .eq('guild_id', guildId);
 
-    if (error) {
-      console.error(`[GuildManager] Update failed for ${guildId}.${field}:`, error);
+      if (error) {
+        console.error(`[GuildManager] Update failed for ${guildId}.${field}:`, error.message);
+        return false;
+      }
+
+      this._cache.delete(guildId);
+      return true;
+    } catch (err) {
+      console.error(`[GuildManager] Update error:`, err.message);
       return false;
     }
-
-    this._cache.delete(guildId);
-    return true;
   }
 
-  // ── Get all guilds (for Nitrado monitor loop) ───────────────
+  // ── Get all guilds (for Nitrado monitor) ────────────────────
   async getAllConfigs() {
     try {
       const { data, error } = await supabase
@@ -96,14 +101,13 @@ class GuildManager {
 
       if (error || !data) return [];
 
-      // Refresh cache with fresh data
       for (const config of data) {
         this._cache.set(config.guild_id, { config, fetchedAt: Date.now() });
       }
 
       return data;
     } catch (err) {
-      console.error('[GuildManager] getAllConfigs error:', err);
+      console.error('[GuildManager] getAllConfigs error:', err.message);
       return [];
     }
   }
@@ -115,7 +119,6 @@ class GuildManager {
     return config[`${feature}_enabled`] === true;
   }
 
-  // ── Theme helpers ───────────────────────────────────────────
   async getTheme(guildId) {
     const config = await this.getConfig(guildId);
     return config?.server_theme ?? 'dominion';
@@ -127,6 +130,5 @@ class GuildManager {
   }
 }
 
-// Export as singleton
 const guildManager = new GuildManager();
 module.exports = guildManager;
