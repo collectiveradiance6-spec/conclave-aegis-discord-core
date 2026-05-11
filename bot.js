@@ -31,6 +31,7 @@ require('dotenv').config();
  
 const { sendWatchtowerPanel, handleWatchtowerInteraction } = require('./watchtower-system');
 const { handleTicketInteraction } = require('./ticket-system');
+const { sendOriginStory } = require('./origin-panels');
 
 const { startNitradoMonitor } = require('./monitors/nitradoMonitor');
 const guildManager = require('./managers/guildManager');
@@ -1173,6 +1174,7 @@ function addWalletSubs(b) {
 const ALL_COMMANDS = [
   addWalletSubs(new SlashCommandBuilder().setName('wallet').setDescription('💎 ClaveShard wallet')),
   addWalletSubs(new SlashCommandBuilder().setName('curr').setDescription('💎 ClaveShard wallet (alias)')),
+ new SlashCommandBuilder().setName('origin').setDescription('🌌 Post the full Conclave Dominion origin story').setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages).addIntegerOption(o => o.setName('delay').setDescription('Seconds between panels (default 4)').setRequired(false).setMinValue(2).setMaxValue(10)),
   new SlashCommandBuilder().setName('weekly').setDescription('🌟 Claim weekly ClaveShards'),
   new SlashCommandBuilder().setName('leaderboard').setDescription('🏆 Top 10 ClaveShard holders'),
   new SlashCommandBuilder().setName('streaks').setDescription('🔥 Weekly claim streak leaderboard'),
@@ -1443,7 +1445,6 @@ bot.on(Events.InteractionCreate, async interaction => {
   (interaction.isModalSubmit() && interaction.customId?.startsWith('ticket_modal_'));
 
 if (!isTicketInteraction) {
-  if (await handleWatchtowerInteraction(interaction, bot)) return;
   if (await handleTriviaCommand(interaction)) return;
   if (await handleTriviaButton(interaction)) return;
   if (await handleTriviaModalSubmit(interaction)) return;
@@ -1785,7 +1786,14 @@ if (!guildCfg) return interaction.editReply('⚠️ Server config not found. Con
       await sendWatchtowerPanel(interaction.channel);
       return interaction.editReply({ content:'✅ Watchtower panel posted.', flags: 64 });
     }
- 
+   
+     if (cmd === 'origin') {
+  if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
+  const secs = (interaction.options.getInteger('delay') || 4) * 1000;
+  await interaction.editReply('🌌 Broadcasting origin story...');
+  await sendOriginStory(interaction.channel, secs);
+  return;
+}
     // ════════════════════════════════════════════════════════════════
     // ECONOMY
     // ════════════════════════════════════════════════════════════════
@@ -2302,7 +2310,20 @@ if (!guildCfg) return interaction.editReply('⚠️ Server config not found. Con
       setTimeout(()=>drawGiveaway(msg.id,interaction.guildId,bot), duration*60*1000);
       return interaction.editReply(`✅ Giveaway started! Ends <t:${Math.floor(endTime/1000)}:R>.`);
     }
- 
+
+    if (interaction.isButton() && interaction.customId==='giveaway_enter') {
+  const gw = activeGiveaways.get(interaction.message.id);
+  if (!gw) return interaction.reply({ content:'⚠️ Giveaway no longer active.', flags: 64 });
+  if (Date.now()>gw.endTime) return interaction.reply({ content:'⏰ Giveaway has ended.', flags: 64 });
+  if (gw.entries.has(interaction.user.id)) return interaction.reply({ content:'✅ Already entered!', flags: 64 });
+  if (gw.shardCost>0) {
+    try { await deductShards(interaction.user.id, interaction.user.username, gw.shardCost, `Giveaway entry: ${gw.prize}`, 'SYSTEM', 'AEGIS'); }
+    catch (e) { return interaction.reply({ content:`⚠️ Entry requires **${gw.shardCost} 💎**. ${e.message}`, flags: 64 }); }
+  }
+  gw.entries.add(interaction.user.id);
+  return interaction.reply({ content:`🎉 You entered **${gw.prize}**!${gw.shardCost>0?` (−${gw.shardCost} 💎)`:''} Good luck!`, flags: 64 });
+}
+   
     if (cmd==='endgiveaway') {
       if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
       const msgId=interaction.options.getString('messageid');
