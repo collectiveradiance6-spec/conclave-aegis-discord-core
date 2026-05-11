@@ -2663,7 +2663,10 @@ healthServer.listen(BOT_PORT, ()=>console.log(`💓 Health: :${BOT_PORT}`));
 // ══════════════════════════════════════════════════════════════════════
 const IGNORE=['Unknown interaction','Unknown Message','Missing Access','Cannot send messages','Unknown Channel'];
 process.on('unhandledRejection', r=>{ const m=r?.message||String(r); if (!IGNORE.some(e=>m.includes(e))) console.error('❌ Rejection:',m); });
-process.on('uncaughtException',  (e,o)=>console.error(`❌ Exception [${o}]:`,e.message));
+process.on('uncaughtException', (e,o) => {
+  if ((e?.message||'').includes('Unknown interaction')) return;
+  console.error(`❌ Exception [${o}]:`, e.message);
+});
 process.on('SIGTERM', ()=>{ STATUS.ready=false; healthServer.close(); bot.destroy(); setTimeout(()=>process.exit(0),3000); });
 process.on('SIGINT',  ()=>{ STATUS.ready=false; healthServer.close(); bot.destroy(); setTimeout(()=>process.exit(0),1000); });
  
