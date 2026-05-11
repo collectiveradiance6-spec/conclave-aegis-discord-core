@@ -1286,7 +1286,7 @@ bot.on(Events.InteractionCreate, async interaction => {
     if (await handleWatchtowerInteraction(interaction, bot)) return;
   if (await handleTriviaCommand(interaction)) return;
 if (await handleTriviaButton(interaction)) return;
-if (await handleTriviaModalSubmit(interaction)) return;
+if (!interaction.customId?.startsWith('ticket_modal_') && await handleTriviaModalSubmit(interaction)) return;
  
     if (interaction.isButton() && interaction.customId==='giveaway_enter') {
       const gw = activeGiveaways.get(interaction.message.id);
@@ -1445,7 +1445,6 @@ if (sb) {
 }
 if (!guildCfg) return interaction.editReply('⚠️ Server config not found. Contact an admin.');
 
-  if (!guildCfg) return interaction.editReply('⚠️ Server config not found. Contact an admin.');
       const WEBHOOKS = {
         support:    guildCfg?.webhook_support    || null,
         starterkit: guildCfg?.webhook_starterkit || null,
@@ -2393,8 +2392,6 @@ if (!guildCfg) return interaction.editReply('⚠️ Server config not found. Con
       const field = `webhook_${ticketType}`;
       const success = await guildManager.updateField(interaction.guildId, field, webhookUrl);
 if (!success) return interaction.editReply(`⚠️ Failed to save webhook. Check logs.`);
-
-      if (error) return interaction.editReply(`⚠️ Failed to save: ${error.message}`);
 
       // Bust cache so next ticket picks up new webhook
       await guildManager.refreshConfig(interaction.guildId);
