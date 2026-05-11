@@ -30,8 +30,6 @@
 require('dotenv').config();
  
 const { sendWatchtowerPanel, handleWatchtowerInteraction } = require('./watchtower-system');
-
-
 const { handleTicketInteraction } = require('./ticket-system');
 
 const { startNitradoMonitor } = require('./monitors/nitradoMonitor');
