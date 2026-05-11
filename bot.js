@@ -30,13 +30,14 @@
 require('dotenv').config();
  
 const { sendWatchtowerPanel, handleWatchtowerInteraction } = require('./watchtower-system');
-<<<<<<< HEAD
+
+
 const { handleTicketInteraction } = require('./ticket-system');
 const { startNitradoMonitor } = require('./src/monitors/nitradoMonitor');
-=======
+
 const { startNitradoMonitor } = require('./monitors/nitradoMonitor');
 const guildManager = require('./managers/guildManager');
->>>>>>> 708ceefd6ec75f507b771f8d64a27de94bd86b0a
+ 708ceefd6ec75f507b771f8d64a27de94bd86b0a
 const http = require('http');
 const axios = require('axios');
 const {
@@ -1288,10 +1289,10 @@ const activeVotes = new Map();
 // ══════════════════════════════════════════════════════════════════════
 bot.on(Events.InteractionCreate, async interaction => {
   try {
-<<<<<<< HEAD
+
     if (await handleTicketInteraction(interaction, bot)) return;
     if (await handleWatchtowerInteraction(interaction, bot)) return;
-=======
+  
     const isTicketInteraction =
   (interaction.isButton() && (
     interaction.customId === 'ticket_open' ||
@@ -1304,7 +1305,7 @@ bot.on(Events.InteractionCreate, async interaction => {
 
 if (!isTicketInteraction) {
   if (await handleWatchtowerInteraction(interaction, bot)) return;
->>>>>>> 708ceefd6ec75f507b771f8d64a27de94bd86b0a
+ 708ceefd6ec75f507b771f8d64a27de94bd86b0a
   if (await handleTriviaCommand(interaction)) return;
   if (await handleTriviaButton(interaction)) return;
   if (await handleTriviaModalSubmit(interaction)) return;
@@ -1352,9 +1353,9 @@ if (!isTicketInteraction) {
         )],
       });
     }
-<<<<<<< HEAD
+
     // ticket_close handled by ticket-system.js
-=======
+
 
     // ── TICKET MODALS — tailored form per type ──────────────────────
     if (interaction.isButton() && interaction.customId.startsWith('tkt_')) {
@@ -1636,7 +1637,7 @@ if (!guildCfg) return interaction.editReply('⚠️ Server config not found. Con
       }, 8000);
       return;
     }
->>>>>>> 708ceefd6ec75f507b771f8d64a27de94bd86b0a
+ 708ceefd6ec75f507b771f8d64a27de94bd86b0a
 
     if (!interaction.isChatInputCommand()) return;
     const { commandName:cmd } = interaction;
