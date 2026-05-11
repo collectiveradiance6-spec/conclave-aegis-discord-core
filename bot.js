@@ -1777,6 +1777,19 @@ if (!guildCfg) return interaction.editReply('⚠️ Server config not found. Con
       return;
     }
 
+    if (interaction.isButton() && interaction.customId==='giveaway_enter') {
+  const gw = activeGiveaways.get(interaction.message.id);
+  if (!gw) return interaction.reply({ content:'⚠️ Giveaway no longer active.', flags: 64 });
+  if (Date.now()>gw.endTime) return interaction.reply({ content:'⏰ Giveaway has ended.', flags: 64 });
+  if (gw.entries.has(interaction.user.id)) return interaction.reply({ content:'✅ Already entered!', flags: 64 });
+  if (gw.shardCost>0) {
+    try { await deductShards(interaction.user.id, interaction.user.username, gw.shardCost, `Giveaway entry: ${gw.prize}`, 'SYSTEM', 'AEGIS'); }
+    catch (e) { return interaction.reply({ content:`⚠️ Entry requires **${gw.shardCost} 💎**. ${e.message}`, flags: 64 }); }
+  }
+  gw.entries.add(interaction.user.id);
+  return interaction.reply({ content:`🎉 You entered **${gw.prize}**!${gw.shardCost>0?` (−${gw.shardCost} 💎)`:''} Good luck!`, flags: 64 });
+} 
+   
     if (!interaction.isChatInputCommand()) return;
     const { commandName:cmd } = interaction;
     await interaction.deferReply();
@@ -2310,19 +2323,6 @@ if (!guildCfg) return interaction.editReply('⚠️ Server config not found. Con
       setTimeout(()=>drawGiveaway(msg.id,interaction.guildId,bot), duration*60*1000);
       return interaction.editReply(`✅ Giveaway started! Ends <t:${Math.floor(endTime/1000)}:R>.`);
     }
-
-    if (interaction.isButton() && interaction.customId==='giveaway_enter') {
-  const gw = activeGiveaways.get(interaction.message.id);
-  if (!gw) return interaction.reply({ content:'⚠️ Giveaway no longer active.', flags: 64 });
-  if (Date.now()>gw.endTime) return interaction.reply({ content:'⏰ Giveaway has ended.', flags: 64 });
-  if (gw.entries.has(interaction.user.id)) return interaction.reply({ content:'✅ Already entered!', flags: 64 });
-  if (gw.shardCost>0) {
-    try { await deductShards(interaction.user.id, interaction.user.username, gw.shardCost, `Giveaway entry: ${gw.prize}`, 'SYSTEM', 'AEGIS'); }
-    catch (e) { return interaction.reply({ content:`⚠️ Entry requires **${gw.shardCost} 💎**. ${e.message}`, flags: 64 }); }
-  }
-  gw.entries.add(interaction.user.id);
-  return interaction.reply({ content:`🎉 You entered **${gw.prize}**!${gw.shardCost>0?` (−${gw.shardCost} 💎)`:''} Good luck!`, flags: 64 });
-}
    
     if (cmd==='endgiveaway') {
       if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
@@ -2331,7 +2331,7 @@ if (!guildCfg) return interaction.editReply('⚠️ Server config not found. Con
       await drawGiveaway(msgId,interaction.guildId,bot);
       return interaction.editReply('✅ Giveaway ended.');
     }
- 
+
     if (cmd==='vote') {
       if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
       const question=interaction.options.getString('question');
