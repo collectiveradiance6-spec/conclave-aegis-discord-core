@@ -1430,375 +1430,275 @@ const activeVotes = new Map();
 // ══════════════════════════════════════════════════════════════════════
 bot.on(Events.InteractionCreate, async interaction => {
   try {
-
     if (await handleTicketInteraction(interaction, bot)) return;
     if (await handleWatchtowerInteraction(interaction, bot)) return;
   
-    const isTicketInteraction =
-  (interaction.isButton() && (
-    interaction.customId === 'ticket_open' ||
-    interaction.customId?.startsWith('tkt_') ||
-    interaction.customId === 'ticket_claim' ||
-    interaction.customId === 'ticket_close' ||
-    interaction.customId === 'ticket_resolve'
-  )) ||
-  (interaction.isModalSubmit() && interaction.customId?.startsWith('ticket_modal_'));
+    bot.on(Events.InteractionCreate, async interaction => {
+  try {
 
-if (!isTicketInteraction) {
-  if (await handleTriviaCommand(interaction)) return;
-  if (await handleTriviaButton(interaction)) return;
-  if (await handleTriviaModalSubmit(interaction)) return;
-}
- 
+    // ─────────────────────────────
+    // 1. PRIORITY SYSTEMS (always first)
+    // ─────────────────────────────
+    if (await handleTicketInteraction(interaction, bot)) return;
+    if (await handleWatchtowerInteraction(interaction, bot)) return;
+
+    if (await handleTriviaCommand(interaction)) return;
+    if (await handleTriviaButton(interaction)) return;
+    if (await handleTriviaModalSubmit(interaction)) return;
+
+    // ─────────────────────────────
+    // 2. VOTE SYSTEM
+    // ─────────────────────────────
     if (interaction.isButton() && interaction.customId?.startsWith('vote_')) {
-      const [,msgId,optIdx] = interaction.customId.split('_');
+      const [, msgId, optIdx] = interaction.customId.split('_');
       const vote = activeVotes.get(msgId);
-      if (!vote) return interaction.reply({ content:'⚠️ Vote expired.', flags: 64 });
-      if (Date.now()>vote.ends) return interaction.reply({ content:'⏰ Vote has ended.', flags: 64 });
-      for (const [,voters] of vote.votes) voters.delete(interaction.user.id);
-      if (!vote.votes.has(parseInt(optIdx))) vote.votes.set(parseInt(optIdx), new Set());
+
+      if (!vote)
+        return interaction.reply({ content: '⚠️ Vote expired.', flags: 64 });
+
+      if (Date.now() > vote.ends)
+        return interaction.reply({ content: '⏰ Vote has ended.', flags: 64 });
+
+      for (const [, voters] of vote.votes) voters.delete(interaction.user.id);
+
+      if (!vote.votes.has(parseInt(optIdx))) {
+        vote.votes.set(parseInt(optIdx), new Set());
+      }
+
       vote.votes.get(parseInt(optIdx)).add(interaction.user.id);
-      const totalVotes=[...vote.votes.values()].reduce((s,v)=>s+v.size,0);
-      const resultLines=vote.options.map((o,i)=>{ const count=vote.votes.get(i)?.size||0; const pct=totalVotes?Math.round((count/totalVotes)*100):0; const bar='█'.repeat(Math.round(pct/5))+'░'.repeat(20-Math.round(pct/5)); return `**${i+1}.** ${o}\n\`${bar}\` **${pct}%** (${count} votes)`; }).join('\n\n');
-      try { const msg=await interaction.message.fetch(); await msg.edit({ embeds:[base(`🗳️ ${vote.question}`,C.cy).setDescription(resultLines+`\n\n> Total votes: **${totalVotes}** · Ends <t:${Math.floor(vote.ends/1000)}:R>`)] }); }
-      catch {}
-      return interaction.reply({ content:`✅ Voted for **${vote.options[parseInt(optIdx)]}**!`, flags: 64 });
-    }
- 
-    // ── TICKET SYSTEM — TYPE SELECTOR ─────────────────────────────────
-    if (interaction.isButton() && interaction.customId==='ticket_open') {
+
+      const totalVotes = [...vote.votes.values()].reduce((s, v) => s + v.size, 0);
+
+      const resultLines = vote.options.map((o, i) => {
+        const count = vote.votes.get(i)?.size || 0;
+        const pct = totalVotes ? Math.round((count / totalVotes) * 100) : 0;
+        const bar =
+          '█'.repeat(Math.round(pct / 5)) +
+          '░'.repeat(20 - Math.round(pct / 5));
+
+        return `**${i + 1}.** ${o}\n\`${bar}\` **${pct}%** (${count} votes)`;
+      }).join('\n\n');
+
+      try {
+        const msg = await interaction.message.fetch();
+        await msg.edit({
+          embeds: [
+            base(`🗳️ ${vote.question}`, C.cy).setDescription(
+              resultLines +
+                `\n\n> Total votes: **${totalVotes}** · Ends <t:${Math.floor(vote.ends / 1000)}:R>`
+            ),
+          ],
+        });
+      } catch {}
+
       return interaction.reply({
+        content: `✅ Voted for **${vote.options[parseInt(optIdx)]}**!`,
         flags: 64,
-        embeds: [new EmbedBuilder()
-          .setColor(0x00D4FF)
-          .setTitle('🎫 Open a Support Ticket')
-          .setDescription([
-            '**Select the category that matches your request:**',
-            '',
-            '🛡️ **Support** — General server help, questions, issues',
-            '🎁 **Starter Kit** — Request your new player starter kit',
-            '🪙 **ConCoin Shop** — ConCoin purchases, economy issues',
-            '💎 **ClaveShard Shop** — Shard orders, fulfillment issues',
-            '👁️ **Base Watch** — AEGIS tower base protection requests',
-          ].join('\n'))
-          .setFooter({ text: 'TheConclave Dominion · Tickets are private' })
-        ],
-        components: [new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('tkt_support').setLabel('🛡️ Support').setStyle(ButtonStyle.Secondary),
-          new ButtonBuilder().setCustomId('tkt_starterkit').setLabel('🎁 Starter Kit').setStyle(ButtonStyle.Success),
-          new ButtonBuilder().setCustomId('tkt_concoin').setLabel('🪙 ConCoin Shop').setStyle(ButtonStyle.Primary),
-          new ButtonBuilder().setCustomId('tkt_claveshard').setLabel('💎 ClaveShard Shop').setStyle(ButtonStyle.Primary),
-          new ButtonBuilder().setCustomId('tkt_basewatch').setLabel('👁️ Base Watch').setStyle(ButtonStyle.Danger),
-        )],
       });
     }
 
-    // ticket_close handled by ticket-system.js
+    // ─────────────────────────────
+    // 3. TICKET OPEN PANEL
+    // ─────────────────────────────
+    if (interaction.isButton() && interaction.customId === 'ticket_open') {
+      return interaction.reply({
+        flags: 64,
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0x00D4FF)
+            .setTitle('🎫 Open a Support Ticket')
+            .setDescription([
+              '**Select the category that matches your request:**',
+              '',
+              '🛡️ Support — General help / issues',
+              '🎁 Starter Kit — New player kit',
+              '🪙 ConCoin Shop — Economy / purchases',
+              '💎 ClaveShard Shop — Shard orders',
+              '👁️ Base Watch — AEGIS protection',
+            ].join('\n'))
+            .setFooter({ text: 'TheConclave Dominion · Tickets are private' }),
+        ],
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('tkt_support').setLabel('🛡️ Support').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('tkt_starterkit').setLabel('🎁 Starter Kit').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId('tkt_concoin').setLabel('🪙 ConCoin Shop').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('tkt_claveshard').setLabel('💎 ClaveShard Shop').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('tkt_basewatch').setLabel('👁️ Base Watch').setStyle(ButtonStyle.Danger),
+          ),
+        ],
+      });
+    }
 
-
-    // ── TICKET MODALS — tailored form per type ──────────────────────
+    // ─────────────────────────────
+    // 4. TICKET MODAL BUILDER
+    // ─────────────────────────────
     if (interaction.isButton() && interaction.customId.startsWith('tkt_')) {
       const type = interaction.customId.replace('tkt_', '');
 
-      const TICKET_META = {
-        support:    { title: '🛡️ Support Ticket',              emoji: '🛡️' },
-        starterkit: { title: '🎁 Starter Kit Request',          emoji: '🎁' },
-        concoin:    { title: '🪙 ConCoin Shop Ticket',          emoji: '🪙' },
-        claveshard: { title: '📚 ClaveShard Shop Ticket 👀',    emoji: '💎' },
-        basewatch:  { title: '🛡️ AEGIS Base Watch Request 🛡️', emoji: '👁️' },
+      const meta = {
+        support: '🛡️ Support Ticket',
+        starterkit: '🎁 Starter Kit Request',
+        concoin: '🪙 ConCoin Shop Ticket',
+        claveshard: '💎 ClaveShard Shop Ticket',
+        basewatch: '👁️ Base Watch Request',
       };
 
-      const meta = TICKET_META[type] || TICKET_META.support;
       const modal = new ModalBuilder()
         .setCustomId(`ticket_modal_${type}`)
-        .setTitle(meta.title.slice(0, 45));
-
-      const FORMS = {
-        support: [
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('issue').setLabel('What do you need help with?').setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('Describe your issue in as much detail as possible...')),
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('server').setLabel('Which server? (if applicable)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('e.g. Aberration, Scorched Earth, Cyber Nexus...')),
-        ],
-        starterkit: [
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('character').setLabel('Character Name').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Your in-game character name')),
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('server').setLabel('Which Server / Map?').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('e.g. The Island, Scorched Earth...')),
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('platform').setLabel('Platform').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Xbox / PlayStation / PC / Switch')),
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('tribe').setLabel('Tribe Name (or Solo?)').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Your tribe name, or "Solo"')),
-        ],
-        concoin: [
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('issue').setLabel('What is your ConCoin issue?').setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('Describe your purchase, missing coins, or dispute...')),
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('amount').setLabel('ConCoin Amount Involved').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('e.g. 500 ConCoins')),
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('proof').setLabel('Proof / Transaction Reference').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('Screenshot link or transaction ID')),
-        ],
-        claveshard: [
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('tier').setLabel('Tier / Item Selection')
-              .setStyle(TextInputStyle.Short).setRequired(true)
-              .setPlaceholder('T1/T2/T3/T5/T6/T8/T10/T12/T15/T20/T30 or Dino Insurance')
-              .setMinLength(1).setMaxLength(50)
-          ),
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('character').setLabel('Character Name & Server / Map')
-              .setStyle(TextInputStyle.Short).setRequired(true)
-              .setPlaceholder('e.g. SurvivorX on Aberration')
-          ),
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('platform').setLabel('Platform')
-              .setStyle(TextInputStyle.Short).setRequired(true)
-              .setPlaceholder('Xbox / PlayStation / PC / Switch')
-          ),
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('order_details').setLabel('Order Details / Special Requests')
-              .setStyle(TextInputStyle.Paragraph).setRequired(false)
-              .setPlaceholder('Specific dino type, colors, species name, delivery notes, anything extra...')
-          ),
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('payment').setLabel('Payment Method + Confirmation')
-              .setStyle(TextInputStyle.Short).setRequired(false)
-              .setPlaceholder('Cash App / Chime + last 4 digits of transaction or username')
-          ),
-        ],
-        basewatch: [
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('tribe').setLabel('Tribe Name').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Your tribe name')),
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('server').setLabel('Server / Map').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('e.g. Aberration, The Island...')),
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('location').setLabel('Base Location / Coordinates').setStyle(TextInputStyle.Short).setRequired(false).setPlaceholder('e.g. 45.2 / 67.8 or "Red Obelisk area"')),
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('duration').setLabel('How long do you need watch?').setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('e.g. 48 hours, this weekend, 1 week')),
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('reason').setLabel('Reason for request').setStyle(TextInputStyle.Paragraph).setRequired(true).setPlaceholder('Going offline? Travelling? Explain why you need protection...')),
-        ],
-      };
+        .setTitle(meta[type] || meta.support);
 
       modal.addComponents(...(FORMS[type] || FORMS.support));
+
       return interaction.showModal(modal);
     }
 
-    // ── TICKET MODAL SUBMIT — post to admin log via webhook ─────────
+    // ─────────────────────────────
+    // 5. TICKET MODAL SUBMIT (WEBHOOK)
+    // ─────────────────────────────
     if (interaction.isModalSubmit() && interaction.customId.startsWith('ticket_modal_')) {
       await interaction.deferReply({ flags: 64 });
+
       const type = interaction.customId.replace('ticket_modal_', '');
 
-      const TYPE_META = {
-        support:    { label:'Support Ticket',               emoji:'🛡️', color:0x00D4FF },
-        starterkit: { label:'Starter Kit Request',           emoji:'🎁', color:0x35ED7E },
-        concoin:    { label:'ConCoin Shop Ticket',           emoji:'🪙', color:0xFFB800 },
-        claveshard: { label:'📚 ClaveShard Shop Ticket 👀', emoji:'💎', color:0xFF4CD2 },
-        basewatch:  { label:'🛡️ Base Watch Request 🛡️',   emoji:'👁️', color:0x7B2FFF },
-      };
+      let guildCfg = null;
+      if (sb) {
+        try {
+          const { data } = await sb
+            .from('guild_configs')
+            .select('*')
+            .eq('guild_id', interaction.guildId)
+            .single();
+          guildCfg = data;
+        } catch {}
+      }
 
-      // Pull webhook URLs from Supabase guild_configs — fully multi-tenant
-     let guildCfg = null;
-if (sb) {
-  try {
-    const { data, error } = await sb
-      .from('guild_configs')
-      .select('*')
-      .eq('guild_id', interaction.guildId)
-      .single();
-    if (!error) guildCfg = data;
-  } catch {}
-}
-if (!guildCfg) return interaction.editReply('⚠️ Server config not found. Contact an admin.');
+      if (!guildCfg)
+        return interaction.editReply('⚠️ Server config not found.');
 
-      const WEBHOOKS = {
-        support:    guildCfg?.webhook_support    || null,
-        starterkit: guildCfg?.webhook_starterkit || null,
-        concoin:    guildCfg?.webhook_concoin    || null,
-        claveshard: guildCfg?.webhook_claveshard || null,
-        basewatch:  guildCfg?.webhook_basewatch  || null,
-      };
+      const webhookUrl = guildCfg[`webhook_${type}`];
+      if (!webhookUrl)
+        return interaction.editReply('⚠️ Ticket system not configured.');
 
-      const meta       = TYPE_META[type] || TYPE_META.support;
-      const webhookUrl = WEBHOOKS[type];
-      if (!webhookUrl) return interaction.editReply(`⚠️ Ticket system not yet configured for this server. Tell an admin to set up the log channels.`);
+      const allFields = interaction.fields.fields;
 
-      // Build fields from modal inputs
-      const allFields   = interaction.fields.fields;
-      const issue       = allFields.get('issue')?.value || allFields.get('reason')?.value || '—';
       const embedFields = [
-        { name: '👤 User',    value: `${interaction.user} (${interaction.user.username})`, inline: true },
-        { name: '🏷️ Type',   value: meta.label, inline: true },
-        { name: '🕐 Opened', value: `<t:${Math.floor(Date.now()/1000)}:R>`, inline: true },
+        {
+          name: '👤 User',
+          value: `${interaction.user.username}`,
+          inline: true,
+        },
+        {
+          name: '🏷️ Type',
+          value: type,
+          inline: true,
+        },
+        {
+          name: '🕐 Time',
+          value: `<t:${Math.floor(Date.now() / 1000)}:R>`,
+          inline: true,
+        },
       ];
-      const fieldMap = {
-        issue:'📋 Issue', reason:'📋 Reason', server:'🗺️ Server',
-        character:'🦖 Character & Server', platform:'🎮 Platform', tribe:'🏕️ Tribe',
-        order_ref:'🔖 Order Ref', tier:'💎 Tier Selected', order_details:'📋 Order Details',
-        payment:'💳 Payment', amount:'💰 Amount', proof:'📎 Proof',
-        location:'📍 Location', duration:'⏱️ Duration',
-      };
-      for (const [key, label] of Object.entries(fieldMap)) {
-        const val = allFields.get(key)?.value;
-        if (val) embedFields.push({ name: label, value: val.slice(0,500), inline: key!=='issue'&&key!=='reason'&&key!=='order_details' });
-      }
 
-      // Build fields from modal inputs (moved up before try)
-      // Already built above — use existing embedFields
-
-      try {
-        // Post to webhook — no permission issues, no thread complexity
-        const { WebhookClient } = require('discord.js');
-        const webhook = new WebhookClient({ url: webhookUrl });
-
-        const mentionLine = [
-          `<@${interaction.user.id}>`,
-          ROLE_ADMIN_ID  ? `<@&${ROLE_ADMIN_ID}>`  : '',
-          ROLE_HELPER_ID ? `<@&${ROLE_HELPER_ID}>` : '',
-        ].filter(Boolean).join(' ');
-
-        await webhook.send({
-          content: mentionLine,
-          embeds: [{
-            color:  meta.color,
-            title:  `${meta.emoji} ${meta.label}`,
-            fields: embedFields,
-            footer: { text: 'TheConclave Dominion · AEGIS Ticket System' },
-            timestamp: new Date().toISOString(),
-          }],
-          username:   'AEGIS Tickets',
-          avatarURL:  'https://theconclavedominion.com/THECONCLAVE.png',
-          allowedMentions: { users: [interaction.user.id], roles: [ROLE_ADMIN_ID, ROLE_HELPER_ID].filter(Boolean) },
+      for (const [k, v] of allFields) {
+        embedFields.push({
+          name: k,
+          value: v.value.slice(0, 500),
+          inline: true,
         });
-
-        webhook.destroy();
-
-        // Log to Supabase
-        if (sb && sbOk()) {
-          sb.from('aegis_tickets').insert({
-            guild_id:   interaction.guildId,
-            channel_id: type + '_webhook',
-            user_id:    interaction.user.id,
-            user_tag:   interaction.user.username,
-            type, issue: issue.slice(0,500), status: 'open',
-            created_at: new Date().toISOString(),
-          }).catch(() => {});
-        }
-
-        return interaction.editReply({ content: `✅ Your ${meta.label} has been submitted. Staff will respond in <#${
-          { support: LOG_SUPPORT, starterkit: LOG_STARTERKIT, concoin: LOG_CONCOIN, claveshard: LOG_CLAVESHARD, basewatch: LOG_BASEWATCH }[type]
-        }>.` });
-      } catch (e) {
-        console.error('[Tickets] Webhook error:', e.message);
-        return interaction.editReply('Failed to submit ticket: ' + e.message);
       }
-    }
 
-    // ── TICKET CLAIM ──────────────────────────────────────────────────
-    if (interaction.isButton() && interaction.customId==='ticket_claim') {
-      if (!isMod(interaction.member)) return interaction.reply({ content:'⛔ Staff only.', flags: 64 });
-      await interaction.reply({ content: `✋ **${interaction.user}** has claimed this ticket.\nOnly they will handle it from here.` });
-      if (sb && sbOk()) {
-        sb.from('aegis_tickets').update({ claimed_by: interaction.user.username, status: 'claimed' })
-          .eq('channel_id', interaction.channelId).catch(() => {});
-      }
-      return;
-    }
+      const webhook = new WebhookClient({ url: webhookUrl });
 
-    // ── TICKET CLOSE / RESOLVE — save transcript ──────────────────────
-    if (interaction.isButton() && ['ticket_close','ticket_resolve'].includes(interaction.customId)) {
-      if (!isMod(interaction.member)) return interaction.reply({ content:'⛔ Staff only.', flags: 64 });
-
-      const isResolve = interaction.customId === 'ticket_resolve';
-      await interaction.reply({
-        embeds: [new EmbedBuilder()
-          .setColor(isResolve ? 0x35ED7E : 0xFF4444)
-          .setTitle(isResolve ? '✅ Ticket Resolved' : '🔒 Ticket Closed')
-          .setDescription(`${isResolve ? 'Resolved' : 'Closed'} by ${interaction.user}\nSaving transcript... thread will archive shortly.`)
-          .setTimestamp()],
+      await webhook.send({
+        content: `<@${interaction.user.id}>`,
+        embeds: [
+          {
+            title: `📩 Ticket - ${type}`,
+            color: 0x00d4ff,
+            fields: embedFields,
+            timestamp: new Date().toISOString(),
+          },
+        ],
       });
 
-      // Update Supabase
-      if (sb && sbOk()) {
-        sb.from('aegis_tickets').update({
-          status: 'closed', closed_by: interaction.user.username,
-          closed_at: new Date().toISOString(),
-        }).eq('channel_id', interaction.channelId).catch(() => {});
-      }
+      webhook.destroy();
 
-      // Generate transcript — fetch last 200 messages
-      try {
-        const ch = interaction.channel;
-        const messages = await ch.messages.fetch({ limit: 100 });
-        const sorted   = [...messages.values()].reverse();
+      return interaction.editReply('✅ Ticket submitted.');
+    }
 
-        // Build text transcript
-        const lines = sorted.map(m => {
-          const time = new Date(m.createdTimestamp).toLocaleString('en-US',{dateStyle:'short',timeStyle:'short'});
-          const content = m.content || (m.embeds[0]?.title ? `[Embed: ${m.embeds[0].title}]` : '[attachment/embed]');
-          return `[${time}] ${m.author.username}: ${content}`;
-        }).join('\n');
+    // ─────────────────────────────
+    // 6. CLAIM / CLOSE / RESOLVE
+    // ─────────────────────────────
+    if (interaction.isButton() && interaction.customId === 'ticket_claim') {
+      if (!isMod(interaction.member))
+        return interaction.reply({ content: '⛔ Staff only.', flags: 64 });
 
-        const transcriptText = [
-          `═══════════════════════════════════════════`,
-          `TICKET TRANSCRIPT — TheConclave Dominion`,
-          `Thread: ${ch.name}`,
-          `Closed by: ${interaction.user.username}`,
-          `Date: ${new Date().toLocaleString('en-US',{dateStyle:'full',timeStyle:'short'})}`,
-          `═══════════════════════════════════════════`,
-          '',
-          lines,
-          '',
-          `═══════════════════════════════════════════`,
-          `END OF TRANSCRIPT`,
-        ].join('\n');
+      return interaction.reply({
+        content: `✋ Claimed by ${interaction.user}`,
+      });
+    }
 
-        // Post to transcript channel
-        const transcriptCh = interaction.guild.channels.cache.get(TRANSCRIPT_CHANNEL);
-        if (transcriptCh) {
-          const { AttachmentBuilder } = require('discord.js');
-          const buf = Buffer.from(transcriptText, 'utf8');
-          const attachment = new AttachmentBuilder(buf, { name: `transcript-${ch.name}-${Date.now()}.txt` });
+    if (
+      interaction.isButton() &&
+      ['ticket_close', 'ticket_resolve'].includes(interaction.customId)
+    ) {
+      if (!isMod(interaction.member))
+        return interaction.reply({ content: '⛔ Staff only.', flags: 64 });
 
-          await transcriptCh.send({
-            embeds: [new EmbedBuilder()
-              .setColor(isResolve ? 0x35ED7E : 0xFF4444)
-              .setTitle(`📋 Transcript — ${ch.name}`)
-              .addFields(
-                { name: '🏷️ Status',    value: isResolve ? '✅ Resolved' : '🔒 Closed', inline: true },
-                { name: '👤 Closed by', value: interaction.user.username, inline: true },
-                { name: '📅 Date',      value: `<t:${Math.floor(Date.now()/1000)}:F>`, inline: true },
-              )
-              .setFooter({ text: 'TheConclave Dominion · AEGIS Ticket System' })
-              .setTimestamp()],
-            files: [attachment],
-          }).catch(() => {});
-        }
-      } catch (transcriptErr) {
-        console.warn('[Tickets] Transcript error:', transcriptErr.message);
-      }
+      return interaction.reply({
+        content: `🔒 Ticket processed by ${interaction.user}`,
+      });
+    }
 
-      // Archive the thread instead of deleting
-      setTimeout(async () => {
-        try {
-          if (interaction.channel.isThread()) {
-            await interaction.channel.setArchived(true);
-          } else {
-            await interaction.channel.delete();
-          }
-        } catch {}
-      }, 8000);
+    // ─────────────────────────────
+    // 7. GIVEAWAY
+    // ─────────────────────────────
+    if (interaction.isButton() && interaction.customId === 'giveaway_enter') {
+      const gw = activeGiveaways.get(interaction.message.id);
+      if (!gw)
+        return interaction.reply({ content: '⚠️ Expired.', flags: 64 });
+
+      if (gw.entries.has(interaction.user.id))
+        return interaction.reply({ content: 'Already entered!', flags: 64 });
+
+      gw.entries.add(interaction.user.id);
+
+      return interaction.reply({ content: `🎉 Entered ${gw.prize}!`, flags: 64 });
+    }
+
+    // ─────────────────────────────
+    // 8. SLASH COMMANDS LAST
+    // ─────────────────────────────
+    if (!interaction.isChatInputCommand()) return;
+
+    const cmd = interaction.commandName;
+    await interaction.deferReply();
+
+    if (cmd === 'watchtower') {
+      if (!isAdmin(interaction.member))
+        return interaction.editReply('❌ Admin only.');
+
+      await sendWatchtowerPanel(interaction.channel);
+      return interaction.editReply('✅ Posted.');
+    }
+
+    if (cmd === 'origin') {
+      if (!isAdmin(interaction.member))
+        return interaction.editReply('⛔ Admin only.');
+
+      await sendOriginStory(
+        interaction.channel,
+        (interaction.options.getInteger('delay') || 4) * 1000
+      );
+
       return;
     }
 
-    if (interaction.isButton() && interaction.customId==='giveaway_enter') {
-  const gw = activeGiveaways.get(interaction.message.id);
-  if (!gw) return interaction.reply({ content:'⚠️ Giveaway no longer active.', flags: 64 });
-  if (Date.now()>gw.endTime) return interaction.reply({ content:'⏰ Giveaway has ended.', flags: 64 });
-  if (gw.entries.has(interaction.user.id)) return interaction.reply({ content:'✅ Already entered!', flags: 64 });
-  if (gw.shardCost>0) {
-    try { await deductShards(interaction.user.id, interaction.user.username, gw.shardCost, `Giveaway entry: ${gw.prize}`, 'SYSTEM', 'AEGIS'); }
-    catch (e) { return interaction.reply({ content:`⚠️ Entry requires **${gw.shardCost} 💎**. ${e.message}`, flags: 64 }); }
+  } catch (err) {
+    console.error(err);
   }
-  gw.entries.add(interaction.user.id);
-  return interaction.reply({ content:`🎉 You entered **${gw.prize}**!${gw.shardCost>0?` (−${gw.shardCost} 💎)`:''} Good luck!`, flags: 64 });
-} 
-   
-    if (!interaction.isChatInputCommand()) return;
-    const { commandName:cmd } = interaction;
-    await interaction.deferReply();
- 
-    if (cmd==='watchtower') {
-      if (!isAdmin(interaction.member)) return interaction.editReply('❌ Admin only.');
-      await sendWatchtowerPanel(interaction.channel);
-      return interaction.editReply({ content:'✅ Watchtower panel posted.', flags: 64 });
-    }
+});
    
      if (cmd === 'origin') {
   if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
