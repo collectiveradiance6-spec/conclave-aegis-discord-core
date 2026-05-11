@@ -1283,23 +1283,22 @@ const activeVotes = new Map();
 // ══════════════════════════════════════════════════════════════════════
 bot.on(Events.InteractionCreate, async interaction => {
   try {
-    if (await handleWatchtowerInteraction(interaction, bot)) return;
+    const isTicketInteraction =
+  (interaction.isButton() && (
+    interaction.customId === 'ticket_open' ||
+    interaction.customId?.startsWith('tkt_') ||
+    interaction.customId === 'ticket_claim' ||
+    interaction.customId === 'ticket_close' ||
+    interaction.customId === 'ticket_resolve'
+  )) ||
+  (interaction.isModalSubmit() && interaction.customId?.startsWith('ticket_modal_'));
+
+if (!isTicketInteraction) {
+  if (await handleWatchtowerInteraction(interaction, bot)) return;
   if (await handleTriviaCommand(interaction)) return;
-if (await handleTriviaButton(interaction)) return;
-if (!interaction.customId?.startsWith('ticket_modal_') && await handleTriviaModalSubmit(interaction)) return;
- 
-    if (interaction.isButton() && interaction.customId==='giveaway_enter') {
-      const gw = activeGiveaways.get(interaction.message.id);
-      if (!gw) return interaction.reply({ content:'⚠️ Giveaway no longer active.', flags: 64 });
-      if (Date.now()>gw.endTime) return interaction.reply({ content:'⏰ Giveaway has ended.', flags: 64 });
-      if (gw.entries.has(interaction.user.id)) return interaction.reply({ content:'✅ Already entered!', flags: 64 });
-      if (gw.shardCost>0) {
-        try { await deductShards(interaction.user.id, interaction.user.username, gw.shardCost, `Giveaway entry: ${gw.prize}`, 'SYSTEM', 'AEGIS'); }
-        catch (e) { return interaction.reply({ content:`⚠️ Entry requires **${gw.shardCost} 💎** in your wallet. ${e.message}`, flags: 64 }); }
-      }
-      gw.entries.add(interaction.user.id);
-      return interaction.reply({ content:`🎉 You entered the **${gw.prize}** giveaway!${gw.shardCost>0?` (−${gw.shardCost} 💎)`:''} Good luck!`, flags: 64 });
-    }
+  if (await handleTriviaButton(interaction)) return;
+  if (await handleTriviaModalSubmit(interaction)) return;
+}
  
     if (interaction.isButton() && interaction.customId?.startsWith('vote_')) {
       const [,msgId,optIdx] = interaction.customId.split('_');
