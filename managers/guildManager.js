@@ -7,10 +7,7 @@
 // Configs are cached in memory and refreshed every 5 minutes.
 // ============================================================
 
-// Top of guildManager.js — replace the import with this:
-const _db = require('../knowledge_db');
-console.log('[GuildManager] knowledge_db exports:', Object.keys(_db));
-const supabase = _db.supabase || _db.sb || _db.client || _db.db || _db.default || _db;
+const { supabase } = require('../knowledge_db');
 
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
