@@ -30,7 +30,6 @@
 require('dotenv').config();
  
 const { sendWatchtowerPanel, handleWatchtowerInteraction } = require('./watchtower-system');
-const { handleTicketInteraction } = require('./ticket-system');
 const { startNitradoMonitor } = require('./src/monitors/nitradoMonitor');
 const http = require('http');
 const axios = require('axios');
@@ -1231,7 +1230,6 @@ const activeVotes = new Map();
 // ══════════════════════════════════════════════════════════════════════
 bot.on(Events.InteractionCreate, async interaction => {
   try {
-    if (await handleTicketInteraction(interaction, bot)) return;
     if (await handleWatchtowerInteraction(interaction, bot)) return;
   if (await handleTriviaCommand(interaction)) return;
 if (await handleTriviaButton(interaction)) return;
@@ -1285,7 +1283,12 @@ if (await handleTriviaModalSubmit(interaction)) return;
         return interaction.editReply({ content:`✅ Ticket created: ${ch}` });
       } catch (e) { return interaction.editReply(`⚠️ Error: ${e.message}`); }
     }
-    // ticket_close handled by ticket-system.js
+    if (interaction.isButton() && interaction.customId==='ticket_close') {
+      if (!isMod(interaction.member)) return interaction.reply({ content:'⛔ Staff only.', ephemeral:true });
+      await interaction.reply('🔒 Closing ticket in 5 seconds...');
+      setTimeout(()=>interaction.channel.delete().catch(()=>{}), 5000);
+      return;
+    }
 
     if (!interaction.isChatInputCommand()) return;
     const { commandName:cmd } = interaction;
