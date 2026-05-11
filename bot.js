@@ -2378,9 +2378,8 @@ if (await handleTriviaModalSubmit(interaction)) return;
       }
 
       const field = `webhook_${ticketType}`;
-      const { error } = await supabase
-        .from('guild_configs')
-        .upsert({ guild_id: interaction.guildId, [field]: webhookUrl }, { onConflict: 'guild_id' });
+      const success = await guildManager.updateField(interaction.guildId, field, webhookUrl);
+if (!success) return interaction.editReply(`⚠️ Failed to save webhook. Check logs.`);
 
       if (error) return interaction.editReply(`⚠️ Failed to save: ${error.message}`);
 
