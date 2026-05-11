@@ -7,7 +7,12 @@
 // Configs are cached in memory and refreshed every 5 minutes.
 // ============================================================
 
-const { supabase } = require('../knowledge_db');
+const { createClient } = require('@supabase/supabase-js');
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY,
+  { auth: { persistSession: false } }
+);
 
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
