@@ -33,7 +33,6 @@ const { sendWatchtowerPanel, handleWatchtowerInteraction } = require('./watchtow
 
 
 const { handleTicketInteraction } = require('./ticket-system');
-const { startNitradoMonitor } = require('./src/monitors/nitradoMonitor');
 
 const { startNitradoMonitor } = require('./monitors/nitradoMonitor');
 const guildManager = require('./managers/guildManager');
