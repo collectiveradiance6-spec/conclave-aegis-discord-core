@@ -1149,7 +1149,7 @@ const TRIVIA_QUESTIONS = [
   handleTriviaCommand,
   handleTriviaButton,
   handleTriviaModalSubmit,
-} = require('./trivia_fix')(TRIVIA_QUESTIONS));
+} = require('./trivia_fix')(TRIVIA_QUESTIONS, { addConcoinBooty }));
 
 // activeTrivias was the old chat-message trivia path — superseded by trivia_fix modals.
 // Kept as an empty map so the MessageCreate handler below compiles without changes.
@@ -1269,6 +1269,7 @@ const ALL_COMMANDS = [
   new SlashCommandBuilder().setName('tip').setDescription('💡 Random ARK survival tip'),
   new SlashCommandBuilder().setName('dino').setDescription('🦕 ARK dino lookup').addStringOption(o=>o.setName('name').setDescription('Dino name').setRequired(true)),
   new SlashCommandBuilder().setName('trivia').setDescription('🎯 Start an ARK trivia question — win 15,000 ConCoins!'),
+  new SlashCommandBuilder().setName('deposit-concoins').setDescription('💰 Deposit your ConCoin trivia winnings to UnbelievaBoat'),
   new SlashCommandBuilder().setName('concoin-booty').setDescription('🪙 Check your ConCoin trivia booty balance')
     .addUserOption(o=>o.setName('user').setDescription('Check another user (admin only)').setRequired(false)),
   new SlashCommandBuilder().setName('concoin-leaderboard').setDescription('🏆 Top ConCoin trivia earners'),
@@ -1969,6 +1970,33 @@ const activeVotes = new Map();
     // ════════════════════════════════════════════════════════════════
     // CONCOIN BOOTY
     // ════════════════════════════════════════════════════════════════
+    if (cmd==='deposit-concoins') {
+      const booty = await getConcoinBooty(interaction.user.id);
+      if (!booty || booty.pending_grant <= 0) {
+        return interaction.editReply({ embeds:[base('🪙 Nothing to Deposit',C.cy).setDescription(`You have no pending ConCoin booty.\n\nWin trivia with \`/trivia\` to earn **15,000 ConCoins** per correct answer!`)] });
+      }
+      const amount = booty.pending_grant;
+      let ubResult = null, ubError = null;
+      try { ubResult = await grantToUnbelievaBoat(interaction.guildId, interaction.user.id, amount); }
+      catch (e) { ubError = e.message; }
+      if (ubResult) {
+        await clearPendingBooty(interaction.user.id, amount, interaction.user.username);
+        try { } catch {} // DM suppressed — user is already seeing the reply
+        return interaction.editReply({ embeds:[base('✅ ConCoins Deposited!',C.gr)
+          .setDescription(`**${amount.toLocaleString()} ConCoins** sent to your UnbelievaBoat wallet!`)
+          .addFields(
+            { name:'💰 Deposited',    value:`**${amount.toLocaleString()} ConCoins**`, inline:true },
+            { name:'💳 UB Balance',   value:`${ubResult?.cash?.toLocaleString?.() ?? '?'}`,      inline:true },
+            { name:'📊 Total Earned', value:`${(booty.total_earned||0).toLocaleString()}`,        inline:true },
+          ).setFooter({...FT, text:'Use /trivia to keep earning · AEGIS ConCoin System'})] });
+      } else {
+        return interaction.editReply({ embeds:[base('❌ Deposit Failed',C.rd)
+          .setDescription(`Could not connect to UnbelievaBoat. Your **${amount.toLocaleString()} ConCoins** are safe — try again shortly.`)
+          .addFields({ name:'❌ Error', value:`\`${ubError || 'Unknown error'}\``, inline:false })
+          .setFooter({...FT, text:'If this persists, ask an admin to run /grant-concoins'})] });
+      }
+    }
+
     if (cmd==='concoin-booty') {
       const target=interaction.options.getUser('user');
       if (target&&target.id!==interaction.user.id&&!isAdmin(interaction.member)) return interaction.editReply('⛔ Admins only for checking other players.');
@@ -2050,7 +2078,7 @@ const activeVotes = new Map();
         {name:'🧠 AI',       value:'`/aegis` `/ask` `/forget` `/ai-cost` `/aegis-persona` `/summarize` `/compare` `/boss-guide` `/base-tips`',inline:false},
         {name:'💎 Economy',  value:'`/wallet` `/weekly` `/streaks` `/leaderboard` `/give` `/clvsd grant|deduct|check|set|reset|top|stats|usage|bulk-grant|audit|digest`',inline:false},
         {name:'🛍️ Shop',     value:'`/order` (w/ auto-deduct) `/fulfill` `/shard` `/shop`',inline:false},
-        {name:'🪙 ConCoins', value:'`/trivia` (win 15,000 ConCoins!) `/concoin-booty` `/concoin-leaderboard` `/grant-concoins` `/grant-concoins-manual`',inline:false},
+        {name:'🪙 ConCoins', value:'`/trivia` (win 15,000 ConCoins!) `/concoin-booty` `/deposit-concoins` `/concoin-leaderboard` `/grant-concoins` `/grant-concoins-manual`',inline:false},
         {name:'🗺️ Servers',  value:'`/servers` `/map` `/monitor` `/crossplay` `/transfer-guide`',inline:false},
         {name:'ℹ️ Info',     value:'`/info` `/rules` `/council` `/rates` `/mods` `/wipe` `/set-wipe` `/tip` `/dino` `/patreon`',inline:false},
         {name:'🤝 Community',value:'`/profile` `/rank` `/rep` `/trade` `/coords` `/report` `/tribe register|lookup|my`',inline:false},

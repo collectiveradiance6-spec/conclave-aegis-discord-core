@@ -18,7 +18,7 @@
  *   go through dbFire() which wraps in Promise.resolve() first.
  */
 
-module.exports = function triviaFactory(questionBank) {
+module.exports = function triviaFactory(questionBank, { addConcoinBooty } = {}) {
 
 const {
   ModalBuilder, TextInputBuilder, TextInputStyle,
@@ -262,6 +262,22 @@ async function handleTriviaModalSubmit(interaction) {
     console.error('[TRIVIA] UB award error:', e.message);
   }
 
+  // ── ALWAYS store booty regardless of UB outcome ──────────────────
+  // addConcoinBooty is injected from bot.js — tracks pending payouts in Supabase
+  let bootyData = null;
+  if (typeof addConcoinBooty === 'function') {
+    try {
+      bootyData = await addConcoinBooty(
+        interaction.user.id,
+        interaction.user.username,
+        session.reward,
+        'Trivia Win'
+      );
+    } catch (e) {
+      console.error('[TRIVIA] addConcoinBooty error:', e.message);
+    }
+  }
+
   dbFire(
     supabase.from('trivia_logs').insert({
       session_id:    session.sessionId,
@@ -270,7 +286,7 @@ async function handleTriviaModalSubmit(interaction) {
       username:      interaction.user.username,
       submitted,
       is_correct:    true,
-      coins_awarded: ubSuccess ? session.reward : 0,
+      coins_awarded: session.reward,
       ub_success:    ubSuccess,
       ub_error:      ubError,
     }),
@@ -287,10 +303,14 @@ async function handleTriviaModalSubmit(interaction) {
     'session-close'
   );
 
+  const pending = (bootyData?.pending_grant ?? session.reward).toLocaleString();
+  const totalEarned = (bootyData?.total_earned ?? session.reward).toLocaleString();
+  const wins = bootyData?.trivia_wins ?? 1;
+
   await interaction.editReply({
     content: ubSuccess
-      ? `✅ **Correct. The vault is yours.**\n\`+${session.reward.toLocaleString()} ConCoins\` added to your Booty Collection.`
-      : `✅ **Correct.** Ask staff to run \`/grant-concoins\` if coins don't appear.`,
+      ? `✅ **Correct. The vault is yours.**\n\`+${session.reward.toLocaleString()} ConCoins\` added to your Booty Collection.\n> 💰 Pending payout: **${pending}** · Total earned: **${totalEarned}** · Wins: **${wins}**\n-# Use \`/concoin-booty\` to check · Use \`/deposit-concoins\` to send to your wallet`
+      : `✅ **Correct. The vault is yours.**\n\`+${session.reward.toLocaleString()} ConCoins\` banked in your Booty Collection.\n> 💰 Pending payout: **${pending}** · Total earned: **${totalEarned}** · Wins: **${wins}**\n-# Use \`/concoin-booty\` to check · Use \`/deposit-concoins\` to send to your wallet`,
   });
 
   const ch = interaction.client.channels.cache.get(channelId);
