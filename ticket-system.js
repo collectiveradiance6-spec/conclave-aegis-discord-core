@@ -17,22 +17,62 @@ const TRANSCRIPT_CHANNEL = process.env.TRANSCRIPT_CHANNEL || '150311146079073504
 const ROLE_ADMIN_ID      = process.env.ROLE_ADMIN_ID      || null;
 const ROLE_HELPER_ID     = process.env.ROLE_HELPER_ID     || null;
 
-// Log / admin channels — one per type (already in the correct category)
-const LOG_CHANNELS = {
-  support:    process.env.LOG_SUPPORT    || '1503110133540978769',
-  starterkit: process.env.LOG_STARTERKIT || '1503109898093727906',
-  concoin:    process.env.LOG_CONCOIN    || '1503109720456691742',
-  claveshard: process.env.LOG_CLAVESHARD || '1503109559022256251',
-  basewatch:  process.env.LOG_BASEWATCH  || '1503109371910029415',
+// ── Multi-server log channel config ──────────────────────────────────
+// Set ONE env var in Render: TICKET_LOG_CHANNELS
+// Value is a JSON object where each key maps to a single channel ID
+// OR an array of channel IDs (one per server):
+//
+//   TICKET_LOG_CHANNELS = {
+//     "support":    ["111111111111111111", "222222222222222222"],
+//     "starterkit": ["333333333333333333", "444444444444444444"],
+//     "concoin":    ["555555555555555555", "666666666666666666"],
+//     "claveshard": ["777777777777777777", "888888888888888888"],
+//     "basewatch":  ["999999999999999999", "101010101010101010"]
+//   }
+//
+// A single ID (string) also works if you only have one server.
+// Fallback hardcoded IDs are used if the env var is missing.
+// ─────────────────────────────────────────────────────────────────────
+const _RAW_LOG_CHANNELS = (() => {
+  const raw = process.env.TICKET_LOG_CHANNELS;
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    console.error('[Tickets] TICKET_LOG_CHANNELS is not valid JSON:', e.message);
+    return null;
+  }
+})();
+
+// Normalise: each type resolves to an array of channel IDs
+const _FALLBACK_LOG = {
+  support:    ['1503110133540978769'],
+  starterkit: ['1503109898093727906'],
+  concoin:    ['1503109720456691742'],
+  claveshard: ['1503109559022256251'],
+  basewatch:  ['1503109371910029415'],
 };
 
-// Optional per-type category overrides (rarely needed — auto-resolves from log channel)
+function getLogChannelIds(type) {
+  const raw = _RAW_LOG_CHANNELS?.[type] ?? _FALLBACK_LOG[type];
+  if (!raw) return [];
+  return Array.isArray(raw) ? raw : [raw];
+}
+
+// Optional per-type category overrides — also supports JSON array (first valid wins)
+// TICKET_CATEGORY_IDS = { "support": "123...", "starterkit": "456..." }
+const _RAW_CATEGORIES = (() => {
+  const raw = process.env.TICKET_CATEGORY_IDS;
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+})();
+
 const CATEGORY_IDS = {
-  support:    process.env.TICKET_CATEGORY_SUPPORT    || null,
-  starterkit: process.env.TICKET_CATEGORY_STARTERKIT || null,
-  concoin:    process.env.TICKET_CATEGORY_CONCOIN    || null,
-  claveshard: process.env.TICKET_CATEGORY_CLAVESHARD || null,
-  basewatch:  process.env.TICKET_CATEGORY_BASEWATCH  || null,
+  support:    _RAW_CATEGORIES?.support    || process.env.TICKET_CATEGORY_SUPPORT    || null,
+  starterkit: _RAW_CATEGORIES?.starterkit || process.env.TICKET_CATEGORY_STARTERKIT || null,
+  concoin:    _RAW_CATEGORIES?.concoin    || process.env.TICKET_CATEGORY_CONCOIN    || null,
+  claveshard: _RAW_CATEGORIES?.claveshard || process.env.TICKET_CATEGORY_CLAVESHARD || null,
+  basewatch:  _RAW_CATEGORIES?.basewatch  || process.env.TICKET_CATEGORY_BASEWATCH  || null,
 };
 
 // ── Type metadata ────────────────────────────────────────────────────
@@ -54,114 +94,181 @@ const STATUS = {
 };
 
 // ── Modal forms ──────────────────────────────────────────────────────
+// Each type gets up to 5 fields (Discord modal max).
+// Fields are ordered by priority so the most critical info comes first.
 const FORMS = {
+
+  // ── 🛡️ General Support ───────────────────────────────────────────
+  // Mirrors Image 2: character+tribe, server/map, platform, issue, still happening?
   support: [
     new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('issue')
-        .setLabel('What do you need help with?')
-        .setStyle(TextInputStyle.Paragraph).setRequired(true)
-        .setPlaceholder('Describe your issue in as much detail as possible...')
+      new TextInputBuilder().setCustomId('character')
+        .setLabel('Character Name + Tribe (or Solo)')
+        .setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('e.g. ArkRaider + TheDominion  |  or "Solo"')
     ),
     new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('server')
-        .setLabel('Which server? (if applicable)')
-        .setStyle(TextInputStyle.Short).setRequired(false)
-        .setPlaceholder('e.g. Aberration, Scorched Earth, Cyber Nexus...')
+        .setLabel('Which Server / Map?')
+        .setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('Island, Volcano, Extinction, Center, Lost Colony, Astraeos…')
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('platform')
+        .setLabel('Platform')
+        .setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('PC / Xbox / PlayStation / Cloud')
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('issue')
+        .setLabel('Describe the issue in detail')
+        .setStyle(TextInputStyle.Paragraph).setRequired(true)
+        .setPlaceholder('What happened and when? Be as specific as possible.')
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('still_happening')
+        .setLabel('Is this still happening right now?')
+        .setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('Yes / No — attach screenshots or video if you have them.')
     ),
   ],
+
+  // ── 🎁 Starter Kit ───────────────────────────────────────────────
+  // Mirrors Image 3: in-game name, platform, dino choices, delivery info, extra details
   starterkit: [
     new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('character')
-        .setLabel('Character Name').setStyle(TextInputStyle.Short).setRequired(true)
-        .setPlaceholder('Your in-game character name')
-    ),
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('server')
-        .setLabel('Which Server / Map?').setStyle(TextInputStyle.Short).setRequired(true)
-        .setPlaceholder('e.g. The Island, Scorched Earth...')
+        .setLabel('In-Game Name')
+        .setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('What is your in-game character name?')
     ),
     new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('platform')
-        .setLabel('Platform').setStyle(TextInputStyle.Short).setRequired(true)
-        .setPlaceholder('Xbox / PlayStation / PC / Switch')
+        .setLabel('Platform')
+        .setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('Xbox / PlayStation / PC / Cloud')
     ),
     new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('tribe')
-        .setLabel('Tribe Name (or Solo?)').setStyle(TextInputStyle.Short).setRequired(false)
-        .setPlaceholder('Your tribe name, or "Solo"')
+      new TextInputBuilder().setCustomId('dino_choices')
+        .setLabel('Starter Dino Choices')
+        .setStyle(TextInputStyle.Paragraph).setRequired(true)
+        .setPlaceholder('List your 2 starter dinos, 1 level 500 dino choice, and your shiny choice (Argy or PT).')
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('delivery_info')
+        .setLabel('Delivery Info')
+        .setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('Preferred Map + choose a 4-digit Safe-PIN for delivery.')
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('extra_details')
+        .setLabel('Extra Details')
+        .setStyle(TextInputStyle.Paragraph).setRequired(false)
+        .setPlaceholder('List any preferred colors, gender, or other notes staff should know.')
     ),
   ],
+
+  // ── 🪙 ConCoin Shop ──────────────────────────────────────────────
   concoin: [
     new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('character')
+        .setLabel('Character Name + Server / Map')
+        .setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('e.g. ArkRaider on Aberration')
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('platform')
+        .setLabel('Platform')
+        .setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('PC / Xbox / PlayStation / Cloud')
+    ),
+    new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('issue')
-        .setLabel('What is your ConCoin issue?').setStyle(TextInputStyle.Paragraph).setRequired(true)
-        .setPlaceholder('Describe your purchase, missing coins, or dispute...')
+        .setLabel('What is your ConCoin Shop request/issue?')
+        .setStyle(TextInputStyle.Paragraph).setRequired(true)
+        .setPlaceholder('Describe your purchase, item request, missing coins, or dispute in detail…')
     ),
     new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('amount')
-        .setLabel('ConCoin Amount Involved').setStyle(TextInputStyle.Short).setRequired(false)
-        .setPlaceholder('e.g. 500 ConCoins')
+        .setLabel('ConCoin Amount Involved')
+        .setStyle(TextInputStyle.Short).setRequired(false)
+        .setPlaceholder('e.g. 5,000 ConCoins')
     ),
     new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('proof')
-        .setLabel('Proof / Transaction Reference').setStyle(TextInputStyle.Short).setRequired(false)
-        .setPlaceholder('Screenshot link or transaction ID')
+        .setLabel('Proof / Transaction Reference (if any)')
+        .setStyle(TextInputStyle.Short).setRequired(false)
+        .setPlaceholder('Screenshot link, transaction ID, or /concoin-booty balance')
     ),
   ],
+
+  // ── 💎 ClaveShard Shop ───────────────────────────────────────────
   claveshard: [
     new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('tier')
-        .setLabel('Tier / Item Selection').setStyle(TextInputStyle.Short).setRequired(true)
-        .setPlaceholder('T1/T2/T3/T5/T6/T8/T10/T12/T15/T20/T30 or Dino Insurance')
-        .setMinLength(1).setMaxLength(50)
+        .setLabel('Tier / Item Selection')
+        .setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('T1 / T2 / T3 / T5 / T6 / T8 / T10 / T12 / T15 / T20 / T30 / Dino Insurance')
+        .setMinLength(1).setMaxLength(60)
     ),
     new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('character')
-        .setLabel('Character Name & Server / Map').setStyle(TextInputStyle.Short).setRequired(true)
-        .setPlaceholder('e.g. SurvivorX on Aberration')
+        .setLabel('Character Name + Server / Map + Platform')
+        .setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('e.g. SurvivorX on Aberration — PC')
     ),
     new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('platform')
-        .setLabel('Platform').setStyle(TextInputStyle.Short).setRequired(true)
-        .setPlaceholder('Xbox / PlayStation / PC / Switch')
+      new TextInputBuilder().setCustomId('dino_choices')
+        .setLabel('Dino Choices / Order Details')
+        .setStyle(TextInputStyle.Paragraph).setRequired(true)
+        .setPlaceholder('Species, preferred colors, gender, mutations, any special requests…')
     ),
     new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId('order_details')
-        .setLabel('Order Details / Special Requests')
-        .setStyle(TextInputStyle.Paragraph).setRequired(false)
-        .setPlaceholder('Specific dino type, colors, species name, delivery notes...')
+      new TextInputBuilder().setCustomId('delivery_info')
+        .setLabel('Delivery Info')
+        .setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('Preferred delivery map + 4-digit Safe-PIN')
     ),
     new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('payment')
-        .setLabel('Payment Method + Confirmation').setStyle(TextInputStyle.Short).setRequired(false)
-        .setPlaceholder('Cash App / Chime + last 4 digits or username')
+        .setLabel('Payment Method + Confirmation')
+        .setStyle(TextInputStyle.Short).setRequired(false)
+        .setPlaceholder('Cash App / Chime — username or last 4 digits of transaction')
     ),
   ],
+
+  // ── 👁️ Aegis Base Watch ──────────────────────────────────────────
+  // Mirrors Image 4 exactly
   basewatch: [
     new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('tribe')
-        .setLabel('Tribe Name').setStyle(TextInputStyle.Short).setRequired(true)
+        .setLabel('Tribe Name')
+        .setStyle(TextInputStyle.Short).setRequired(true)
         .setPlaceholder('Your tribe name')
     ),
     new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('server')
-        .setLabel('Server / Map').setStyle(TextInputStyle.Short).setRequired(true)
-        .setPlaceholder('e.g. Aberration, The Island...')
+        .setLabel('Server / Map')
+        .setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('e.g. Aberration, The Island…')
     ),
     new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('location')
-        .setLabel('Base Location / Coordinates').setStyle(TextInputStyle.Short).setRequired(false)
-        .setPlaceholder('e.g. 45.2 / 67.8 or "Red Obelisk area"')
+        .setLabel('Base Location / Coordinates')
+        .setStyle(TextInputStyle.Short).setRequired(false)
+        .setPlaceholder('e.g. 45.2 / 67.8  or  "Red Obelisk area"')
     ),
     new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('duration')
-        .setLabel('How long do you need watch?').setStyle(TextInputStyle.Short).setRequired(true)
+        .setLabel('How long do you need watch?')
+        .setStyle(TextInputStyle.Short).setRequired(true)
         .setPlaceholder('e.g. 48 hours, this weekend, 1 week')
     ),
     new ActionRowBuilder().addComponents(
       new TextInputBuilder().setCustomId('reason')
-        .setLabel('Reason for request').setStyle(TextInputStyle.Paragraph).setRequired(true)
-        .setPlaceholder('Going offline? Travelling? Explain why you need protection...')
+        .setLabel('Reason for request')
+        .setStyle(TextInputStyle.Paragraph).setRequired(true)
+        .setPlaceholder('Going offline? Travelling? Explain why you need protection…')
     ),
   ],
 };
@@ -202,15 +309,36 @@ function buildTicketEmbed({ interaction, type, ticketId, statusKey = 'open', fie
 function buildFields(interaction) {
   const allFields = interaction.fields.fields;
   const FIELD_MAP = {
-    issue: '📋 Issue / Request', reason: '📋 Reason', server: '🗺️ Server / Map',
-    character: '🦖 Character', platform: '🎮 Platform', tribe: '🏕️ Tribe',
-    tier: '💎 Tier Selected', order_details: '📋 Order Details', payment: '💳 Payment',
-    amount: '💰 Amount', proof: '📎 Proof', location: '📍 Base Location', duration: '⏱️ Watch Duration',
+    // keys shared across types
+    character:       '🦖 Character / IGN',
+    platform:        '🎮 Platform',
+    server:          '🗺️ Server / Map',
+    tribe:           '🏕️ Tribe',
+    // support
+    issue:           '📋 Issue / Request',
+    still_happening: '🔴 Still Happening?',
+    // starterkit
+    dino_choices:    '🦕 Starter Dino Choices',
+    delivery_info:   '📦 Delivery Info',
+    extra_details:   '📝 Extra Details',
+    // claveshard
+    tier:            '💎 Tier Selected',
+    payment:         '💳 Payment',
+    // concoin
+    amount:          '💰 Amount',
+    proof:           '📎 Proof / Reference',
+    // basewatch
+    location:        '📍 Base Location',
+    duration:        '⏱️ Watch Duration',
+    reason:          '📋 Reason',
+    // legacy key
+    order_details:   '📋 Order Details',
   };
+  const MULTILINE = new Set(['issue','reason','dino_choices','extra_details','order_details']);
   const out = [];
   for (const [key, label] of Object.entries(FIELD_MAP)) {
     const val = allFields.get(key)?.value;
-    if (val) out.push({ name: label, value: val.slice(0,500), inline: !['issue','reason','order_details'].includes(key) });
+    if (val) out.push({ name: label, value: val.slice(0,500), inline: !MULTILINE.has(key) });
   }
   return out;
 }
@@ -236,21 +364,36 @@ async function resolveCategory(guild, type) {
     try {
       const cat = await guild.channels.fetch(envId);
       if (cat?.type === ChannelType.GuildCategory) return cat.id;
-    } catch {}
+    } catch (e) {
+      console.warn(`[Tickets] TICKET_CATEGORY_${type.toUpperCase()} fetch failed: ${e.message}`);
+    }
   }
 
-  // 2. Auto-resolve from log channel's parent (GET-SUPPORT, STARTER-KIT-SUPPORT, etc.)
-  const logChId = LOG_CHANNELS[type];
-  if (isValidId(logChId)) {
+  // 2. Auto-resolve from log channel's parent — try all configured IDs
+  const logChIds = getLogChannelIds(type);
+  if (!logChIds.length) {
+    console.warn(`[Tickets] No log channel IDs configured for type "${type}" — ticket will be uncategorized`);
+    return null;
+  }
+
+  for (const logChId of logChIds) {
+    if (!isValidId(logChId)) {
+      console.warn(`[Tickets] Invalid snowflake in log channels for "${type}": "${logChId}"`);
+      continue;
+    }
     try {
-      // Try cache first, then fetch
       let logCh = guild.channels.cache.get(logChId);
       if (!logCh) logCh = await guild.channels.fetch(logChId).catch(() => null);
-      if (logCh?.parentId) return logCh.parentId;
-    } catch {}
+      if (logCh?.parentId) {
+        console.log(`[Tickets] category for "${type}" resolved to ${logCh.parentId} via log channel ${logChId}`);
+        return logCh.parentId;
+      }
+    } catch (e) {
+      console.warn(`[Tickets] resolveCategory(${type}) failed on ${logChId}: ${e.message}`);
+    }
   }
 
-  // 3. No category — channel goes uncategorized
+  console.warn(`[Tickets] No parent category found for type "${type}" — ticket will be uncategorized`);
   return null;
 }
 
@@ -416,9 +559,18 @@ async function handleTicketInteraction(interaction, client) {
       components: [buildStaffRow(false)],
     });
 
-    // Compact summary to admin log channel
-    const logCh = await client.channels.fetch(LOG_CHANNELS[type]).catch(() => null);
-    if (logCh) {
+    // Compact summary → post to ALL configured admin log channels for this type
+    const logChIds = getLogChannelIds(type);
+    if (!logChIds.length) {
+      console.warn(`[Tickets] No log channels configured for type "${type}" — skipping admin log post`);
+    }
+    for (const logChId of logChIds) {
+      if (!isValidId(logChId)) continue;
+      const logCh = await client.channels.fetch(logChId).catch(e => {
+        console.warn(`[Tickets] Cannot fetch log channel ${logChId} for type "${type}": ${e.message}`);
+        return null;
+      });
+      if (!logCh) continue;
       await logCh.send({
         content: staffPing || undefined,
         embeds: [new EmbedBuilder()
@@ -432,7 +584,7 @@ async function handleTicketInteraction(interaction, client) {
           ].filter(Boolean).join('\n'))
           .setFooter({text:'TheConclave · AEGIS Ticket System v2'}).setTimestamp()
         ],
-      }).catch(() => {});
+      }).catch(e => console.warn(`[Tickets] Failed to post to log channel ${logChId}: ${e.message}`));
     }
 
     return interaction.editReply({

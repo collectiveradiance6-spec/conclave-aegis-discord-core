@@ -359,11 +359,23 @@ function pickQuestion() {
   return { question: 'Which map on TheConclave is PvP?', answer: 'aberration', hint: 'Underground biomes.', reward: 15000 };
 }
 
+// ═════════════════════════════════════════════════════════════════════
+// isCorrectAnswer — full fuzzy matching engine
+//
+// Layers (in order, first match wins):
+//   1. Exact normalized match
+//   2. Synonym expansion  (e.g. "center" == "the center")
+//   3. Per-token Levenshtein distance  (spelling tolerance scales with word length)
+//   4. Token coverage ratio (≥ 75 % of key tokens matched fuzzily)
+//   5. Substring containment fallback
+// ═════════════════════════════════════════════════════════════════════
 function isCorrectAnswer(submitted, canonical) {
+
+  // ── 0. Normalize ──────────────────────────────────────────────────
   const normalize = s => s
     .toLowerCase()
     .replace(/[*•\-_`]/g, ' ')
-    .replace(/\n|\r/g, ' ')
+    .replace(/[\n\r]/g, ' ')
     .replace(/[^a-z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -371,32 +383,149 @@ function isCorrectAnswer(submitted, canonical) {
   const ns = normalize(submitted);
   const nc = normalize(canonical);
 
+  // ── 1. Exact match ────────────────────────────────────────────────
   if (ns === nc) return true;
 
-  const STOP = new Set(['the','a','an','and','or','of','to','with','by',
-    'for','in','on','at','is','it','its','that','this','be','are','was',
-    'you','your','does','do','what','which','how','when','where','who']);
+  // ── 2. Synonym / alias map ────────────────────────────────────────
+  // Map of canonical forms → all accepted aliases.
+  // Keys are already-normalized. Add more as ARK lore demands.
+  const SYNONYMS = {
+    'aberration':         ['ab', 'aber'],
+    'the island':         ['island'],
+    'scorched earth':     ['scorched', 'se'],
+    'the center':         ['center', 'centre'],
+    'ragnarok':           ['rag'],
+    'extinction':         ['ext'],
+    'genesis':            ['gen'],
+    'genesis part 1':     ['genesis 1', 'gen 1', 'gen1'],
+    'genesis part 2':     ['genesis 2', 'gen 2', 'gen2'],
+    'lost island':        ['lost isle'],
+    'fjordur':            ['fjord'],
+    'crystal isles':      ['crystal isle', 'ci'],
+    'valguero':           ['val'],
+    'ark survival evolved': ['ark', 'ase'],
+    'ark survival ascended': ['asa'],
+    'argentavis':         ['argy', 'argent', 'arg'],
+    'pteranodon':         ['ptera', 'pt', 'ptero'],
+    'rex':                ['t rex', 't-rex', 'tyrannosaurus', 'tyrannosaurus rex'],
+    'megalosaurus':       ['mega'],
+    'ankylosaurus':       ['anky'],
+    'doedicurus':         ['doed'],
+    'castoroides':        ['beaver'],
+    'quetzalcoatlus':     ['quetz', 'quetzal'],
+    'giganotosaurus':     ['giga'],
+    'wyvern':             ['wyvs', 'wyv'],
+    'rock elemental':     ['rock golem', 'golem'],
+    'ovis':               ['sheep'],
+    'iguanodon':          ['iguana', 'iggy'],
+    'therizinosaurus':    ['theri', 'theriz'],
+    'deinonychus':        ['deino'],
+    'shadowmane':         ['shadowmanes', 'shadow'],
+    'noglin':             ['noglins'],
+    'managarmr':          ['mana', 'managarr'],
+    'snow owl':           ['owl'],
+    'gacha':              ['gacha crystal'],
+    'velonasaur':         ['velo'],
+    'reaper':             ['reaper king', 'reaper queen'],
+    'carcharodontosaurus': ['carcha', 'carch'],
+    'desmodus':           ['bat'],
+    'fjordhawk':          ['hawk'],
+    'andrewsarchus':      ['andrews'],
+    'amargasaurus':       ['amarga'],
+    'rhyniognatha':       ['rhynio'],
+    'pyromane':           ['pyro'],
+    'conclave':           ['the conclave'],
+    'pvp':                ['player vs player', 'player versus player'],
+    'pve':                ['player vs environment', 'player versus environment'],
+    'true':               ['yes', 'yeah', 'yep', 'correct'],
+    'false':              ['no', 'nope', 'wrong', 'incorrect'],
+  };
 
-  const keyTokens = s => s.split(' ')
-    .filter(t => t.length >= 3 && !STOP.has(t))
-    .map(t => t.replace(/s$/, ''));
+  const expandSynonyms = s => {
+    // Check if s is an alias for any canonical key; return canonical if so
+    for (const [canon, aliases] of Object.entries(SYNONYMS)) {
+      if (s === canon) return canon;
+      if (aliases.includes(s)) return canon;
+    }
+    return s;
+  };
 
-  const canonTokens = [...new Set(keyTokens(nc))];
-  const subWords    = new Set(keyTokens(ns));
+  // Expand both sides
+  const nsExpanded = expandSynonyms(ns);
+  const ncExpanded = expandSynonyms(nc);
+  if (nsExpanded === ncExpanded) return true;
+  if (nsExpanded === nc || ncExpanded === ns) return true;
 
-  if (canonTokens.length === 0) return ns.includes(nc) || nc.includes(ns);
+  // ── 3. Levenshtein distance helper ───────────────────────────────
+  // Iterative, O(n*m) — safe for short words.
+  function levenshtein(a, b) {
+    const m = a.length, n = b.length;
+    if (m === 0) return n;
+    if (n === 0) return m;
+    const dp = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
+    for (let j = 0; j <= n; j++) dp[0][j] = j;
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        dp[i][j] = a[i-1] === b[j-1]
+          ? dp[i-1][j-1]
+          : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+      }
+    }
+    return dp[m][n];
+  }
 
-  const matched = canonTokens.filter(t =>
-    subWords.has(t) ||
-    [...subWords].some(w => w.startsWith(t) || t.startsWith(w))
+  // Tolerance: 1 typo per 4 chars, capped at 3, 0 for ≤3-char words
+  const typoTolerance = len => {
+    if (len <= 3) return 0;
+    if (len <= 6) return 1;
+    if (len <= 9) return 2;
+    return 3;
+  };
+
+  function fuzzyTokenMatch(a, b) {
+    if (a === b) return true;
+    const tol = Math.min(typoTolerance(a.length), typoTolerance(b.length));
+    return tol > 0 && levenshtein(a, b) <= tol;
+  }
+
+  // ── 4. Token-level fuzzy coverage ────────────────────────────────
+  const STOP = new Set([
+    'the','a','an','and','or','of','to','with','by','for','in','on',
+    'at','is','it','its','that','this','be','are','was','you','your',
+    'does','do','what','which','how','when','where','who','from','as',
+  ]);
+
+  // Strip trailing -s/-es (primitive stem), skip stop words, min 3 chars
+  const stem = t => t.replace(/ies$/, 'y').replace(/(?<=[a-z]{3})es$/, '').replace(/(?<=[a-z]{3})s$/, '');
+
+  const keyTokens = s => [...new Set(
+    s.split(' ')
+      .filter(t => t.length >= 2 && !STOP.has(t))
+      .map(stem)
+  )];
+
+  const canonTokens = keyTokens(ncExpanded);
+  const subTokens   = keyTokens(nsExpanded);
+
+  if (canonTokens.length === 0) {
+    return ns.includes(nc) || nc.includes(ns);
+  }
+
+  // Count how many canonical tokens are fuzzily matched by any submitted token
+  const matched = canonTokens.filter(ct =>
+    subTokens.some(st => fuzzyTokenMatch(ct, st))
   ).length;
 
   const ratio = matched / canonTokens.length;
 
+  // Single/double-keyword answers: require full match
   if (canonTokens.length <= 2) return ratio === 1.0;
+
+  // Multi-keyword: 75 % coverage passes
   if (ratio >= 0.75) return true;
 
-  return ns.includes(nc) || nc.includes(ns);
+  // ── 5. Substring containment fallback ────────────────────────────
+  return nsExpanded.includes(ncExpanded) || ncExpanded.includes(nsExpanded);
 }
 
 function generateHint(answer) {
