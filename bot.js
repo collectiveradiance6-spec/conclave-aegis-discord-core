@@ -1620,7 +1620,18 @@ const activeVotes = new Map();
     // ─────────────────────────────
     // 8. Giveaway
     // ─────────────────────────────
-    if (interaction.isButton() && interaction.customId === 'giveaway_enter') return;
+    if (interaction.isButton() && interaction.customId === 'giveaway_enter') {
+      const gw = activeGiveaways.get(interaction.message.id);
+      if (!gw) return interaction.reply({ content: '⚠️ This giveaway has ended.', flags: 64 });
+      if (Date.now() > gw.endTime) return interaction.reply({ content: '⏰ This giveaway has already ended.', flags: 64 });
+      if (gw.entries.has(interaction.user.id)) return interaction.reply({ content: '✅ You are already entered!', flags: 64 });
+      if (gw.shardCost > 0) {
+        try { await deductShards(interaction.user.id, interaction.user.username, gw.shardCost, `Giveaway entry`, 'SYSTEM', 'AEGIS Giveaway'); }
+        catch (e) { return interaction.reply({ content: `⚠️ Entry failed: ${e.message}`, flags: 64 }); }
+      }
+      gw.entries.add(interaction.user.id);
+      return interaction.reply({ content: `🎉 You're entered! **${gw.entries.size}** total entries.`, flags: 64 });
+    }
 
     // ─────────────────────────────
     // 9. Slash commands LAST
@@ -1630,20 +1641,20 @@ const activeVotes = new Map();
     const { commandName: cmd } = interaction;
     await interaction.deferReply();
 
-    if (cmd === 'watchtower') return;
-    if (cmd === 'origin') return;
+    if (cmd === 'watchtower') {
+      if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
+      await sendWatchtowerPanel(interaction.channel);
+      return interaction.editReply('✅ Watchtower panel posted.');
+    }
 
-  } catch (err) {
-    console.error(err);
-  }
-});
-     if (cmd === 'origin') {
-  if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
-  const secs = (interaction.options.getInteger('delay') || 4) * 1000;
-  await interaction.editReply('🌌 Broadcasting origin story...');
-  await sendOriginStory(interaction.channel, secs);
-  return;
-}
+    if (cmd === 'origin') {
+      if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
+      const secs = (interaction.options.getInteger('delay') || 4) * 1000;
+      await interaction.editReply('🌌 Broadcasting origin story...');
+      await sendOriginStory(interaction.channel, secs);
+      return;
+    }
+
     // ════════════════════════════════════════════════════════════════
     // ECONOMY
     // ════════════════════════════════════════════════════════════════
