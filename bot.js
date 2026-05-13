@@ -111,7 +111,15 @@ const bot = new Client({
 // ══════════════════════════════════════════════════════════════════════
 // PERMISSION HELPERS
 // ══════════════════════════════════════════════════════════════════════
-const isOwner = m => m?.roles?.cache?.has(ROLE_OWNER_ID) || m?.permissions?.has(PermissionFlagsBits.Administrator);
+// Comma-separated Discord user IDs who have admin access regardless of roles
+// e.g. PRIVILEGED_USER_IDS=123456789012345678,987654321098765432
+const PRIVILEGED_USER_IDS = new Set(
+  (process.env.PRIVILEGED_USER_IDS || '').split(',').map(s => s.trim()).filter(Boolean)
+);
+
+const isPrivileged = m => m?.id && PRIVILEGED_USER_IDS.has(m.id)
+  || m?.user?.id && PRIVILEGED_USER_IDS.has(m.user.id);
+const isOwner = m => isPrivileged(m) || m?.roles?.cache?.has(ROLE_OWNER_ID) || m?.permissions?.has(PermissionFlagsBits.Administrator);
 const isAdmin = m => isOwner(m) || m?.roles?.cache?.has(ROLE_ADMIN_ID);
 const isMod   = m => isAdmin(m) || m?.roles?.cache?.has(ROLE_HELPER_ID) || m?.permissions?.has(PermissionFlagsBits.ModerateMembers);
  

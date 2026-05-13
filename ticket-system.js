@@ -55,42 +55,138 @@ async function getStaffRoles(guildId) {
 }
 
 const FORMS = {
+
+  // ── 🛡️ General Support ─────────────────────────────────────────────
   support: [
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('issue').setLabel('What do you need help with?').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000).setPlaceholder('Describe your issue in detail...')),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('platform').setLabel('Platform (Xbox / PS / PC)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(20)),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('character')
+        .setLabel('Character Name + Tribe (or Solo)').setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('e.g. ArkRaider + TheDominion  |  or "Solo"')),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('server')
+        .setLabel('Which Server / Map?').setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('Island, Volcano, Extinction, Center, Lost Colony, Astraeos…')),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('platform')
+        .setLabel('Platform').setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('PC / Xbox / PlayStation / Cloud')),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('issue')
+        .setLabel('Describe the issue in detail').setStyle(TextInputStyle.Paragraph).setRequired(true)
+        .setPlaceholder('What happened and when? Be as specific as possible.')),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('still_happening')
+        .setLabel('Is this still happening right now?').setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('Yes / No — attach screenshots or video if you have them.')),
   ],
+
+  // ── 🎁 Starter Kit ──────────────────────────────────────────────────
   starterkit: [
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('character').setLabel('Character Name (in-game)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80)),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('server').setLabel('Which server / map?').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80).setPlaceholder('e.g. The Island, Extinction...')),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('platform').setLabel('Platform (Xbox / PS / PC)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(20)),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('character')
+        .setLabel('In-Game Name').setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('What is your in-game character name?')),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('platform')
+        .setLabel('Platform').setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('Xbox / PlayStation / PC / Cloud')),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('dino_choices')
+        .setLabel('Starter Dino Choices').setStyle(TextInputStyle.Paragraph).setRequired(true)
+        .setPlaceholder('List your 2 starter dinos, 1 level 500 dino choice, and your shiny choice (Argy or PT).')),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('delivery_info')
+        .setLabel('Delivery Info').setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('Preferred Map + choose a 4-digit Safe-PIN for delivery.')),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('extra_details')
+        .setLabel('Extra Details').setStyle(TextInputStyle.Paragraph).setRequired(false)
+        .setPlaceholder('List any preferred colors, gender, or other notes staff should know.')),
   ],
+
+  // ── 🪙 ConCoin Shop ─────────────────────────────────────────────────
   concoin: [
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('issue').setLabel('Describe your ConCoin issue').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(800).setPlaceholder('Missing coins, trade dispute, purchase issue...')),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('amount').setLabel('Amount involved (if applicable)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(30)),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('character')
+        .setLabel('Character Name + Server / Map').setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('e.g. ArkRaider on Aberration')),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('platform')
+        .setLabel('Platform').setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('PC / Xbox / PlayStation / Cloud')),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('issue')
+        .setLabel('What is your ConCoin Shop request/issue?').setStyle(TextInputStyle.Paragraph).setRequired(true)
+        .setPlaceholder('Describe your purchase, item request, missing coins, or dispute in detail…')),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('amount')
+        .setLabel('ConCoin Amount Involved').setStyle(TextInputStyle.Short).setRequired(false)
+        .setPlaceholder('e.g. 5,000 ConCoins')),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('proof')
+        .setLabel('Proof / Transaction Reference (if any)').setStyle(TextInputStyle.Short).setRequired(false)
+        .setPlaceholder('Screenshot link, transaction ID, or /concoin-booty balance')),
   ],
+
+  // ── 💎 ClaveShard Shop ──────────────────────────────────────────────
   claveshard: [
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('tier').setLabel('Tier (e.g. T1, T5, T15, Insurance)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(30)),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('server').setLabel('Which server / map?').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80)),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('platform').setLabel('Platform (Xbox / PS / PC)').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(20)),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('notes').setLabel('Special requests / dino name').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(500)),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('tier')
+        .setLabel('Tier / Item Selection').setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('T1 / T2 / T3 / T5 / T6 / T8 / T10 / T12 / T15 / T20 / T30 / Dino Insurance')
+        .setMinLength(1).setMaxLength(60)),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('character')
+        .setLabel('Character Name + Server / Map + Platform').setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('e.g. SurvivorX on Aberration — PC')),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('dino_choices')
+        .setLabel('Dino Choices / Order Details').setStyle(TextInputStyle.Paragraph).setRequired(true)
+        .setPlaceholder('Species, preferred colors, gender, mutations, any special requests…')),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('delivery_info')
+        .setLabel('Delivery Info').setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('Preferred delivery map + 4-digit Safe-PIN')),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('payment')
+        .setLabel('Payment Method + Confirmation').setStyle(TextInputStyle.Short).setRequired(false)
+        .setPlaceholder('Cash App / Chime — username or last 4 digits of transaction')),
   ],
+
+  // ── 👁️ Aegis Base Watch ─────────────────────────────────────────────
   basewatch: [
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('tribe').setLabel('Tribe Name').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80)),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('server').setLabel('Server / Map').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80)),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('coords').setLabel('Base coordinates or description').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(200)),
-    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('duration').setLabel('How long offline?').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(80).setPlaceholder('e.g. 3 days, this weekend...')),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('tribe')
+        .setLabel('Tribe Name').setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('Your tribe name')),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('server')
+        .setLabel('Server / Map').setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('e.g. Aberration, The Island…')),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('location')
+        .setLabel('Base Location / Coordinates').setStyle(TextInputStyle.Short).setRequired(false)
+        .setPlaceholder('e.g. 45.2 / 67.8  or  "Red Obelisk area"')),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('duration')
+        .setLabel('How long do you need watch?').setStyle(TextInputStyle.Short).setRequired(true)
+        .setPlaceholder('e.g. 48 hours, this weekend, 1 week')),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder().setCustomId('reason')
+        .setLabel('Reason for request').setStyle(TextInputStyle.Paragraph).setRequired(true)
+        .setPlaceholder('Going offline? Travelling? Explain why you need protection…')),
   ],
 };
 
 const isValidId = id => typeof id === 'string' && /^\d{17,20}$/.test(id.trim());
 const genTicketId = type => `${type.slice(0,4).toUpperCase()}-${Date.now().toString(36).toUpperCase()}`;
 
-function isStaff(member) {
+function isStaff(member, roles = {}) {
   if (!member) return false;
   if (member.permissions?.has(PermissionFlagsBits.ManageMessages)) return true;
-  const roles = member.roles?.cache;
-  if (ENV_ROLE_ADMIN  && roles?.has(ENV_ROLE_ADMIN))  return true;
-  if (ENV_ROLE_HELPER && roles?.has(ENV_ROLE_HELPER)) return true;
+  const cache = member.roles?.cache;
+  if (roles.adminId  && cache?.has(roles.adminId))  return true;
+  if (roles.helperId && cache?.has(roles.helperId)) return true;
   return false;
 }
 
@@ -219,8 +315,15 @@ async function handleTicketInteraction(interaction, client) {
       { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles] },
       { id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels, PermissionFlagsBits.ManageMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.AttachFiles] },
     ];
-    if (isValidId(adminId))  perms.push({ id: adminId,  allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageMessages] });
-    if (isValidId(helperId)) perms.push({ id: helperId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+    const guildRoleCache = interaction.guild.roles.cache;
+    if (isValidId(adminId)  && guildRoleCache.has(adminId))
+      perms.push({ id: adminId,  allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageMessages] });
+    else if (isValidId(adminId))
+      console.warn(`[Tickets] role_admin_id ${adminId} not in guild ${guildId} — skipping overwrite`);
+    if (isValidId(helperId) && guildRoleCache.has(helperId))
+      perms.push({ id: helperId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+    else if (isValidId(helperId))
+      console.warn(`[Tickets] role_helper_id ${helperId} not in guild ${guildId} — skipping overwrite`);
 
     let ticketCh;
     try {
@@ -267,7 +370,11 @@ async function handleTicketInteraction(interaction, client) {
   if (interaction.isButton() && interaction.customId.startsWith('tkt_action_')) {
     const action  = interaction.customId.replace('tkt_action_', '');
     const guildId = interaction.guildId;
-    if (!isStaff(interaction.member)) { await interaction.reply({ content: '⛔ Staff only.', flags: 64 }); return true; }
+    const { adminId: sAdminId, helperId: sHelperId } = await getStaffRoles(interaction.guildId);
+    if (!isStaff(interaction.member, { adminId: sAdminId, helperId: sHelperId })) {
+      await interaction.reply({ content: '⛔ Staff only.', flags: 64 });
+      return true;
+    }
 
     if (action === 'claim')    { await updateStatus(interaction,'claimed');   await interaction.reply({ content: `✋ **${interaction.user}** claimed this ticket.` }); return true; }
     if (action === 'progress') { await updateStatus(interaction,'progress');  await interaction.reply({ content: `🔵 **${interaction.user}** marked as **In Progress**.` }); return true; }
