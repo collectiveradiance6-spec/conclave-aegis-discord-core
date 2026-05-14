@@ -3,7 +3,7 @@ services:
     name: conclave-aegis-bot
     runtime: node
     buildCommand: npm install
-    startCommand: node bot.js
+    startCommand: node index.js
     plan: starter
     envVars:
       # ── Static config ──────────────────────────────────────────────
