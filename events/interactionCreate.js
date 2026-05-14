@@ -5,6 +5,7 @@
 
 const { Events } = require('discord.js');
 const setupAegis = require('../commands/setup/setupAegis');
+const { handleEmbedgisButton, handleEmbedgisSelect } = require('../embedgis');
 const { handleTicketInteraction } = require('../ticket-system');
 const { handleWatchtowerInteraction } = require('../watchtower-system');
 
@@ -56,6 +57,13 @@ module.exports = {
     }
   },
 };
+
+async function handleSubChecklist(interaction) {
+  // Sub tier checklist button handler — handled inline in subscription command
+  const subCmd = require('../commands/admin/subscriptions.js').find?.(c=>c.data?.name==='sub-checklist') ||
+                 require('../commands/admin/subscriptions.js');
+  if (subCmd?.handleChecklistButton) return subCmd.handleChecklistButton(interaction);
+}
 
 async function handleGiveawayEntry(interaction) {
   const giveawayId = interaction.customId.replace('giveaway_enter_','');

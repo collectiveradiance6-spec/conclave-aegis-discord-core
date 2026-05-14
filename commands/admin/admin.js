@@ -167,10 +167,13 @@ const help = {
     return interaction.editReply({ embeds:[base('📖 AEGIS v13 Command Reference',C.pl).addFields(
       {name:'🤖 AI',       value:'`/aegis` `/forget` `/ai-cost` `/aegis-persona` `/summarize` `/compare` `/boss-guide` `/base-tips` `/dino`',inline:false},
       {name:'💎 Economy',  value:'`/wallet` `/weekly` `/streaks` `/leaderboard` `/give` `/shard` `/shop` `/order` `/fulfill` `/clvsd`',inline:false},
-      {name:'🗺️ ARK',      value:'`/servers` `/map` `/monitor` `/rates` `/mods` `/wipe` `/set-wipe` `/info` `/rules` `/council` `/tip` `/transfer-guide` `/crossplay` `/patreon` `/coords`',inline:false},
+      {name:'🗺️ ARK',      value:'`/servers` `/map` `/monitor` `/rates` `/mods` `/wipe` `/set-wipe` `/info` `/rules` `/council` `/tip` `/crossplay` `/coords` `/transfer-guide`',inline:false},
       {name:'🎯 Fun',      value:'`/trivia` `/coinflip` `/roll` `/poll` `/rep` `/trade` `/concoin-booty` `/concoin-leaderboard` `/deposit-concoins`',inline:false},
       {name:'🔨 Mod',      value:'`/warn` `/warn-history` `/warn-clear` `/ban` `/timeout` `/purge` `/lock` `/slowmode` `/role` `/modlog` `/report`',inline:false},
-      {name:'⚙️ Admin',    value:'`/announce` `/event` `/giveaway` `/endgiveaway` `/vote` `/know` `/setup-aegis`',inline:false},
+      {name:'🎫 Support',  value:'`/ticket` `/panel-support` `/panel-starterkit` `/panel-concoin` `/panel-claveshard` `/panel-basewatch` `/watchtower` `/setup-tickets`',inline:false},
+      {name:'📡 Broadcast',value:'`/embedgis` `/announce` `/event` `/origin`',inline:false},
+      {name:'👑 Subs',     value:'`/sub-tiers` `/sub-info` `/sub-check` `/sub-status` `/sub-fulfill`',inline:false},
+      {name:'⚙️ Admin',    value:'`/giveaway` `/endgiveaway` `/vote` `/know` `/setup-aegis`',inline:false},
       {name:'🔧 Utility',  value:'`/ping` `/help` `/calc` `/whois` `/serverinfo` `/profile` `/rank` `/tribe` `/remind`',inline:false},
     ).setFooter({...FT,text:'AEGIS v13.0 Sovereign Platform Edition'})] });
   },

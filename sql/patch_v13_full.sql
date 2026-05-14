@@ -212,7 +212,7 @@ do $$ declare t text; begin
     'guild_configs','aegis_wallets','aegis_wallet_ledger','aegis_shop_orders',
     'aegis_knowledge','aegis_mod_log','aegis_warnings','aegis_giveaways',
     'aegis_giveaways_entries','aegis_tickets','aegis_ai_usage',
-    'aegis_concoin_booty','aegis_tribes','aegis_wipe_schedule'
+    'aegis_concoin_booty','aegis_tribes','aegis_wipe_schedule','aegis_sub_checklist'
   ] loop
     begin
       execute format('alter table %I enable row level security', t);
