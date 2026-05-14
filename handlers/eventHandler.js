@@ -19,10 +19,13 @@ function load(client) {
         console.warn(`[EventHandler] Skipping ${file} — missing name or execute`);
         continue;
       }
+      // In discord.js v14, ClientReady fires as 'ready'. Use 'ready' so handler fires.
+      // Our ready.js uses 'clientReady' directly — map it back to 'ready' for v14 compat.
+      const evName = event.name === 'clientReady' ? 'ready' : event.name;
       if (event.once) {
-        client.once(event.name, (...args) => event.execute(...args, client));
+        client.once(evName, (...args) => event.execute(...args, client));
       } else {
-        client.on(event.name, (...args) => event.execute(...args, client));
+        client.on(evName, (...args) => event.execute(...args, client));
       }
       console.log(`[EventHandler] ✅ Loaded event: ${event.name}`);
     } catch (err) {

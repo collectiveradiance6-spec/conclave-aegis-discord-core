@@ -6,6 +6,13 @@
 'use strict';
 require('dotenv').config();
 
+// Suppress discord.js v14 clientReady deprecation warning (v15 migration noise)
+const _warn = process.emitWarning.bind(process);
+process.emitWarning = (msg, ...args) => {
+  if (typeof msg === 'string' && msg.includes('clientReady')) return;
+  _warn(msg, ...args);
+};
+
 const { Client, GatewayIntentBits, Collection } = require('discord.js');
 const commandHandler = require('./handlers/commandHandler');
 const eventHandler   = require('./handlers/eventHandler');
