@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>AEGIS — Sovereign Discord Intelligence</title>
+<meta name="description" content="AEGIS is a full-featured Discord bot with AI, ClaveShard economy, server monitoring, trivia, moderation, and real-time launchpad. Add it to your server free.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Cinzel+Decorative:wght@700&family=Exo+2:wght@300;400;600;700&family=Share+Tech+Mono&family=Unbounded:wght@300;600;900&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+:root{
+  --void:#030208;--bg2:#070615;--p:#7B2FFF;--pk:#FF4CD2;--el:#00D4FF;--gold:#FFB800;--gr:#35ED7E;
+  --b:rgba(255,255,255,.08);--b2:rgba(255,255,255,.14);
+  --fm:'Share Tech Mono',monospace;--fb:'Exo 2',sans-serif;--fh:'Cinzel',serif;--fd:'Cinzel Decorative',serif;--fw:'Unbounded',sans-serif;
+  --px:clamp(1rem,5vw,5rem);--max:1200px;--r:10px;--rl:16px;--rxl:22px;
+  --eox:cubic-bezier(.16,1,.3,1);
+}
+html{scroll-behavior:smooth;}
+body{background:var(--void);color:#fff;font-family:var(--fb);line-height:1.6;overflow-x:hidden;}
+
+/* ── CURSOR ── */
+.cur-dot{position:fixed;width:6px;height:6px;border-radius:50%;background:var(--el);box-shadow:0 0 12px var(--el);pointer-events:none;z-index:9999;transform:translate(-50%,-50%);transition:transform .08s;}
+.cur-ring{position:fixed;width:32px;height:32px;border-radius:50%;border:1px solid rgba(0,212,255,.4);pointer-events:none;z-index:9998;transform:translate(-50%,-50%);transition:left .14s var(--eox),top .14s var(--eox);}
+
+/* ── PRISM BG ── */
+#prism{position:fixed;inset:0;z-index:0;pointer-events:none;}
+#prism::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse 60% 50% at 15% 25%,rgba(123,47,255,.14),transparent 60%),radial-gradient(ellipse 50% 40% at 85% 75%,rgba(0,212,255,.08),transparent 60%);animation:pshift 20s ease-in-out infinite alternate;}
+@keyframes pshift{0%{transform:translate(0,0)}100%{transform:translate(-3%,2%)}}
+#prism::after{content:'';position:absolute;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(255,255,255,.005) 2px,rgba(255,255,255,.005) 4px);}
+
+/* ── SPEC ── */
+@keyframes spec{to{background-position:300% 0}}
+.spec-txt{background:linear-gradient(90deg,#FF4CD2,#A855F7,#5865F2,#00D4FF,#35ED7E,#FF4CD2);background-size:300%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;animation:spec 5s linear infinite;}
+.spec-border{position:relative;}
+.spec-border::before{content:'';position:absolute;inset:-1px;border-radius:inherit;background:linear-gradient(135deg,#FF4CD2,#7B2FFF,#00D4FF);z-index:-1;animation:spec 4s linear infinite;}
+.spec-border::after{content:'';position:absolute;inset:1px;border-radius:calc(inherit - 1px);background:var(--void);z-index:-1;}
+
+/* ── NAV ── */
+nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:.8rem var(--px);display:flex;align-items:center;gap:1rem;background:rgba(3,2,10,.92);border-bottom:1px solid var(--b);backdrop-filter:blur(24px);}
+.nav-logo{font-family:var(--fd);font-size:.75rem;letter-spacing:.1em;display:flex;align-items:center;gap:.55rem;}
+.nav-logo img{width:32px;height:32px;border-radius:50%;filter:drop-shadow(0 0 10px rgba(123,47,255,.7));}
+.nav-links{display:flex;gap:1.8rem;margin-left:auto;list-style:none;}
+.nav-links a{font-family:var(--fm);font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.45);text-decoration:none;transition:.2s;}
+.nav-links a:hover{color:var(--el);}
+.btn-add{display:inline-flex;align-items:center;gap:.5rem;padding:.45rem 1.1rem;background:linear-gradient(135deg,var(--p),var(--pk));border-radius:8px;color:#fff;font-family:var(--fm);font-size:.6rem;letter-spacing:.1em;text-decoration:none;transition:.2s;box-shadow:0 2px 14px rgba(123,47,255,.3);border:none;cursor:pointer;}
+.btn-add:hover{transform:translateY(-1px);box-shadow:0 5px 24px rgba(123,47,255,.5);}
+.btn-ghost{display:inline-flex;align-items:center;gap:.5rem;padding:.45rem 1.1rem;background:rgba(255,255,255,.05);border:1px solid var(--b2);border-radius:8px;color:rgba(255,255,255,.7);font-family:var(--fm);font-size:.6rem;letter-spacing:.1em;text-decoration:none;transition:.2s;}
+.btn-ghost:hover{background:rgba(255,255,255,.1);color:#fff;}
+
+/* ── HERO ── */
+#hero{min-height:100vh;display:flex;align-items:center;justify-content:center;text-align:center;padding:calc(70px + 5rem) var(--px) 5rem;position:relative;overflow:hidden;}
+.hero-glow{position:absolute;inset:0;background:radial-gradient(ellipse 65% 55% at 50% 40%,rgba(123,47,255,.2),transparent 65%);}
+.hero-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(123,47,255,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(123,47,255,.04) 1px,transparent 1px);background-size:55px 55px;mask-image:radial-gradient(ellipse at 50% 50%,black 25%,transparent 70%);-webkit-mask-image:radial-gradient(ellipse at 50% 50%,black 25%,transparent 70%);}
+.hero-badge{display:inline-flex;align-items:center;gap:.55rem;padding:.32rem .9rem;border-radius:100px;background:rgba(123,47,255,.1);border:1px solid rgba(123,47,255,.3);font-family:var(--fm);font-size:.54rem;letter-spacing:.18em;text-transform:uppercase;color:rgba(200,180,255,.7);margin-bottom:1.4rem;}
+.hero-badge .dot{width:6px;height:6px;border-radius:50%;background:var(--p);box-shadow:0 0 8px var(--p);animation:pulse 2s ease infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.hero-c{position:relative;z-index:2;max-width:820px;}
+h1.hero-title{font-family:var(--fd);font-size:clamp(2.8rem,9vw,7rem);font-weight:700;line-height:.92;letter-spacing:-.02em;margin-bottom:1.2rem;filter:drop-shadow(0 0 60px rgba(123,47,255,.4));animation:fadeUp .9s var(--eox) .2s both;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
+.hero-sub{font-family:var(--fb);font-size:clamp(.9rem,1.8vw,1.12rem);color:rgba(255,255,255,.5);max-width:580px;margin:0 auto 2.5rem;line-height:1.85;font-weight:300;animation:fadeUp .9s var(--eox) .38s both;}
+.hero-ctas{display:flex;flex-wrap:wrap;gap:.85rem;justify-content:center;animation:fadeUp .9s var(--eox) .52s both;}
+.btn-hero{display:inline-flex;align-items:center;gap:.6rem;padding:.88rem 2.2rem;background:linear-gradient(135deg,var(--p),var(--pk));border-radius:12px;color:#fff;font-family:var(--fh);font-size:.78rem;font-weight:700;letter-spacing:.1em;text-decoration:none;transition:.22s;box-shadow:0 4px 24px rgba(123,47,255,.4);}
+.btn-hero:hover{transform:translateY(-2px);box-shadow:0 8px 36px rgba(123,47,255,.6);}
+.hero-stats{display:flex;flex-wrap:wrap;gap:2.5rem;justify-content:center;margin-top:3.5rem;animation:fadeUp .9s var(--eox) .66s both;}
+.hs-item{text-align:center;}
+.hs-num{font-family:var(--fw);font-size:clamp(1.6rem,4vw,2.8rem);font-weight:900;line-height:1;}
+.hs-lbl{font-family:var(--fm);font-size:.52rem;letter-spacing:.14em;color:rgba(255,255,255,.3);text-transform:uppercase;margin-top:.25rem;}
+
+/* ── SCROLL BAND ── */
+.sb{overflow:hidden;white-space:nowrap;border-top:1px solid var(--b);border-bottom:1px solid var(--b);background:rgba(255,255,255,.01);padding:.1rem 0;}
+.sb-t{display:inline-flex;animation:mq 22s linear infinite;}
+.sb-i{font-family:var(--fw);font-size:clamp(2rem,5vw,6rem);font-weight:900;letter-spacing:-.04em;padding:0 1rem;color:transparent;-webkit-text-stroke:1px rgba(255,255,255,.055);white-space:nowrap;line-height:1;}
+.sb-i.lit{-webkit-text-stroke-color:rgba(123,47,255,.18);}
+@keyframes mq{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+
+/* ── SECTIONS ── */
+.sec{padding:5rem var(--px);position:relative;z-index:5;}
+.sec-inner{max-width:var(--max);margin:0 auto;}
+.eyebrow{font-family:var(--fm);font-size:.54rem;letter-spacing:.25em;text-transform:uppercase;color:rgba(123,47,255,.65);margin-bottom:.8rem;display:flex;align-items:center;gap:.6rem;}
+.eyebrow::before{content:'';width:20px;height:1px;background:rgba(123,47,255,.4);}
+h2.sec-t{font-family:var(--fh);font-size:clamp(1.8rem,4vw,3rem);color:#fff;font-weight:700;margin-bottom:.8rem;}
+.sec-sub{font-family:var(--fb);font-size:.95rem;color:rgba(255,255,255,.44);line-height:1.8;font-weight:300;max-width:560px;}
+
+/* ── FEATURE CARDS ── */
+.feat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1.3rem;margin-top:2.8rem;}
+.feat-card{background:rgba(255,255,255,.026);border:1px solid var(--b);border-radius:var(--rxl);padding:1.8rem;transition:all .35s var(--eox);position:relative;overflow:hidden;}
+.feat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;opacity:0;transition:opacity .3s;}
+.feat-card:hover{border-color:rgba(123,47,255,.3);transform:translateY(-4px);box-shadow:0 18px 55px rgba(0,0,0,.4);}
+.feat-card:hover::before{opacity:.65;}
+.feat-card.c-p::before{background:linear-gradient(90deg,transparent,var(--p),transparent);}
+.feat-card.c-e::before{background:linear-gradient(90deg,transparent,var(--el),transparent);}
+.feat-card.c-g::before{background:linear-gradient(90deg,transparent,var(--gold),transparent);}
+.feat-card.c-pk::before{background:linear-gradient(90deg,transparent,var(--pk),transparent);}
+.feat-icon{font-size:2rem;margin-bottom:.9rem;}
+.feat-title{font-family:var(--fh);font-size:1.1rem;font-weight:600;color:#fff;margin-bottom:.4rem;}
+.feat-desc{font-family:var(--fb);font-size:.84rem;color:rgba(255,255,255,.44);line-height:1.72;font-weight:300;}
+
+/* ── COMMAND LIST ── */
+.cmd-cats{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1.1rem;margin-top:2.5rem;}
+.cmd-cat{background:rgba(255,255,255,.025);border:1px solid var(--b);border-radius:var(--rl);padding:1.3rem 1.5rem;transition:.2s;}
+.cmd-cat:hover{border-color:rgba(123,47,255,.25);}
+.cc-hdr{display:flex;align-items:center;gap:.5rem;margin-bottom:.75rem;}
+.cc-icon{font-size:1.1rem;}
+.cc-name{font-family:var(--fm);font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.6);}
+.cc-count{margin-left:auto;font-family:var(--fm);font-size:.5rem;padding:.08rem .42rem;background:rgba(123,47,255,.1);border:1px solid rgba(123,47,255,.2);border-radius:100px;color:rgba(200,180,255,.6);}
+.cc-cmds{display:flex;flex-wrap:wrap;gap:.3rem;}
+.cc-cmd{font-family:var(--fm);font-size:.52rem;padding:.12rem .4rem;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:5px;color:rgba(255,255,255,.45);}
+
+/* ── LIVE DASHBOARD PREVIEW ── */
+#dashboard{background:rgba(0,0,0,.35);border-top:1px solid var(--b);border-bottom:1px solid var(--b);}
+.dash-wrap{max-width:var(--max);margin:0 auto;padding:4rem var(--px);display:grid;grid-template-columns:1fr 1.4fr;gap:3.5rem;align-items:center;}
+.dash-preview{background:rgba(6,6,20,.98);border:1px solid var(--b2);border-radius:18px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.7);}
+.dash-topbar{background:rgba(0,0,0,.5);border-bottom:1px solid var(--b);padding:.65rem 1rem;display:flex;align-items:center;gap:.5rem;}
+.dash-tb-dot{width:10px;height:10px;border-radius:50%;}
+.dash-tb-url{flex:1;background:rgba(255,255,255,.05);border-radius:5px;padding:.22rem .6rem;font-family:var(--fm);font-size:.52rem;color:rgba(255,255,255,.3);text-align:center;}
+.dash-body{padding:1.2rem;}
+.dash-stat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:.6rem;margin-bottom:1rem;}
+.ds-card{background:rgba(255,255,255,.04);border:1px solid var(--b);border-radius:8px;padding:.7rem;text-align:center;}
+.ds-num{font-family:var(--fw);font-size:1.1rem;font-weight:700;line-height:1;}
+.ds-lbl{font-family:var(--fm);font-size:.42rem;color:rgba(255,255,255,.3);margin-top:.18rem;text-transform:uppercase;letter-spacing:.1em;}
+.dash-feed{background:rgba(0,0,0,.3);border:1px solid var(--b);border-radius:8px;padding:.7rem;font-family:var(--fm);font-size:.54rem;}
+.df-hdr{color:rgba(255,255,255,.3);font-size:.46rem;letter-spacing:.12em;text-transform:uppercase;margin-bottom:.5rem;}
+.df-item{display:flex;align-items:center;gap:.45rem;padding:.22rem 0;border-bottom:1px solid rgba(255,255,255,.04);color:rgba(255,255,255,.5);}
+.df-item:last-child{border-bottom:none;}
+.df-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0;}
+.df-ts{margin-left:auto;font-size:.44rem;color:rgba(255,255,255,.2);}
+.ws-badge{display:inline-flex;align-items:center;gap:.35rem;padding:.15rem .5rem;border-radius:100px;font-size:.44rem;border:1px solid;margin-left:auto;}
+.ws-live{border-color:rgba(53,237,126,.3);background:rgba(53,237,126,.07);color:var(--gr);}
+.ws-live::before{content:'';width:5px;height:5px;border-radius:50%;background:var(--gr);box-shadow:0 0 6px var(--gr);animation:pulse 2s infinite;}
+
+/* ── HOW IT WORKS ── */
+.how-steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1.3rem;margin-top:2.5rem;counter-reset:steps;}
+.how-step{background:rgba(255,255,255,.025);border:1px solid var(--b);border-radius:var(--rl);padding:1.6rem;counter-increment:steps;position:relative;}
+.how-step::before{content:counter(steps);position:absolute;top:.9rem;right:1rem;font-family:var(--fw);font-size:2.5rem;font-weight:900;color:rgba(123,47,255,.08);line-height:1;}
+.hs-icon{font-size:1.8rem;margin-bottom:.7rem;}
+.hs-title{font-family:var(--fh);font-size:.95rem;font-weight:600;color:#fff;margin-bottom:.3rem;}
+.hs-desc{font-family:var(--fb);font-size:.82rem;color:rgba(255,255,255,.42);line-height:1.7;font-weight:300;}
+
+/* ── CTA ── */
+#cta{padding:6rem var(--px);text-align:center;position:relative;overflow:hidden;}
+#cta::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse 65% 80% at 50% 50%,rgba(123,47,255,.12),transparent 70%);}
+.cta-inner{position:relative;z-index:2;max-width:640px;margin:0 auto;}
+h2.cta-title{font-family:var(--fd);font-size:clamp(2rem,5vw,3.8rem);color:#fff;margin-bottom:1rem;line-height:1.1;}
+.cta-sub{font-family:var(--fb);font-size:.95rem;color:rgba(255,255,255,.5);line-height:1.8;margin-bottom:2.5rem;}
+.cta-btns{display:flex;flex-wrap:wrap;gap:.85rem;justify-content:center;}
+.platform-row{display:flex;flex-wrap:wrap;gap:.5rem;justify-content:center;margin-top:1.5rem;}
+.pb{display:inline-flex;align-items:center;gap:.4rem;padding:.32rem .8rem;border-radius:100px;font-family:var(--fm);font-size:.56rem;letter-spacing:.08em;border:1px solid;transition:.18s;}
+.pb-discord{background:rgba(88,101,242,.1);border-color:rgba(88,101,242,.3);color:#8b9cf4;}
+.pb-plus{background:rgba(123,47,255,.1);border-color:rgba(123,47,255,.3);color:#c4a0ff;}
+
+/* ── FOOTER ── */
+footer{border-top:1px solid var(--b);padding:2.5rem var(--px);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem;position:relative;z-index:5;}
+.ft-brand{font-family:var(--fm);font-size:.58rem;color:rgba(255,255,255,.25);letter-spacing:.1em;}
+.ft-links{display:flex;gap:1.5rem;}
+.ft-links a{font-family:var(--fm);font-size:.56rem;color:rgba(255,255,255,.25);text-decoration:none;transition:.15s;}
+.ft-links a:hover{color:var(--el);}
+
+/* ── REVEAL ── */
+.reveal{opacity:0;transform:translateY(22px);transition:opacity .75s var(--eox),transform .75s var(--eox);}
+.reveal.visible{opacity:1;transform:none;}
+.reveal-l{opacity:0;transform:translateX(-22px);transition:opacity .75s var(--eox),transform .75s var(--eox);}
+.reveal-l.visible{opacity:1;transform:none;}
+
+@media(max-width:900px){
+  .nav-links{display:none;}
+  .dash-wrap{grid-template-columns:1fr;}
+  .dash-preview{order:-1;}
+  footer{flex-direction:column;text-align:center;}
+}
+</style>
+</head>
+<body>
+<div class="cur-dot" id="cur-dot"></div>
+<div class="cur-ring" id="cur-ring"></div>
+<div id="prism"></div>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-logo">
+    <img src="https://theconclavedominion.com/THECONCLAVE.png" onerror="this.style.display='none'" alt="">
+    <span class="spec-txt">AEGIS</span>
+  </div>
+  <ul class="nav-links">
+    <li><a href="#features">Features</a></li>
+    <li><a href="#commands">Commands</a></li>
+    <li><a href="#dashboard">Dashboard</a></li>
+    <li><a href="#how">Setup</a></li>
+    <li><a href="https://theconclavedominion.com" target="_blank">TheConclave</a></li>
+  </ul>
+  <a href="https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&scope=bot+applications.commands&permissions=8" class="btn-add">
+    + Add to Discord
+  </a>
+</nav>
+
+<!-- HERO -->
+<section id="hero">
+  <div class="hero-glow"></div>
+  <div class="hero-grid"></div>
+  <div class="hero-c">
+    <div class="hero-badge"><span class="dot"></span> Powered by Anthropic · Free to Add</div>
+    <h1 class="hero-title"><span class="spec-txt">AEGIS</span><br>Sovereign Discord<br>Intelligence</h1>
+    <p class="hero-sub">The AI-powered Discord bot built for gaming communities. Economy, moderation, server monitoring, trivia, and live dashboard — all in one sovereign package.</p>
+    <div class="hero-ctas">
+      <a href="https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&scope=bot+applications.commands&permissions=8" class="btn-hero">
+        <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03z"/></svg>
+        Add to Discord
+      </a>
+      <a href="https://discord.gg/theconclave" class="btn-ghost" target="_blank" rel="noopener">See it Live →</a>
+    </div>
+    <div class="hero-stats">
+      <div class="hs-item"><div class="hs-num spec-txt" id="stat-guilds">—</div><div class="hs-lbl">Servers</div></div>
+      <div class="hs-item"><div class="hs-num spec-txt">73+</div><div class="hs-lbl">Commands</div></div>
+      <div class="hs-item"><div class="hs-num spec-txt">24/7</div><div class="hs-lbl">Uptime</div></div>
+      <div class="hs-item"><div class="hs-num spec-txt">Free</div><div class="hs-lbl">To Add</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- SCROLL BAND -->
+<div class="sb"><div class="sb-t">
+  <span class="sb-i">AEGIS</span><span class="sb-i lit">✦</span>
+  <span class="sb-i">SOVEREIGN</span><span class="sb-i lit">✦</span>
+  <span class="sb-i">AI&nbsp;DISCORD&nbsp;BOT</span><span class="sb-i lit">✦</span>
+  <span class="sb-i">ECONOMY</span><span class="sb-i lit">✦</span>
+  <span class="sb-i">MODERATION</span><span class="sb-i lit">✦</span>
+  <span class="sb-i">AEGIS</span><span class="sb-i lit">✦</span>
+  <span class="sb-i">SOVEREIGN</span><span class="sb-i lit">✦</span>
+  <span class="sb-i">AI&nbsp;DISCORD&nbsp;BOT</span><span class="sb-i lit">✦</span>
+  <span class="sb-i">ECONOMY</span><span class="sb-i lit">✦</span>
+  <span class="sb-i">MODERATION</span><span class="sb-i lit">✦</span>
+</div></div>
+
+<!-- FEATURES -->
+<section class="sec" id="features">
+  <div class="sec-inner">
+    <div class="eyebrow reveal">What AEGIS Brings</div>
+    <h2 class="sec-t reveal">Everything your server needs</h2>
+    <p class="sec-sub reveal">Built for gaming communities. Powered by Anthropic AI. Free to add to any Discord server.</p>
+    <div class="feat-grid stagger reveal">
+      <div class="feat-card c-p">
+        <div class="feat-icon">🤖</div>
+        <div class="feat-title">Anthropic AI</div>
+        <p class="feat-desc">Claude Haiku 4.5 as primary, Groq Llama as fallback. Per-channel personas, conversation memory, ARK knowledge base, dino encyclopedia, boss guides, and summarization.</p>
+      </div>
+      <div class="feat-card c-e">
+        <div class="feat-icon">💎</div>
+        <div class="feat-title">ClaveShard Economy</div>
+        <p class="feat-desc">Full wallet/bank system with transfers, leaderboard, weekly claims, admin suite, bulk grants, audit logs, and a T1–T30 shop with auto-deduct checkout.</p>
+      </div>
+      <div class="feat-card c-g">
+        <div class="feat-icon">🖥️</div>
+        <div class="feat-title">Live Server Monitor</div>
+        <p class="feat-desc">Real-time ARK cluster status via Nitrado API. Auto-refreshing status channels, per-map player counts, wipe tracking, and crossplay connection guides.</p>
+      </div>
+      <div class="feat-card c-pk">
+        <div class="feat-icon">🎯</div>
+        <div class="feat-title">Trivia + ConCoins</div>
+        <p class="feat-desc">ARK trivia system with smart keyword matching. Winners earn ConCoins (UnbelievaBoat integration). Leaderboard, booty system, and admin grant tools.</p>
+      </div>
+      <div class="feat-card c-p">
+        <div class="feat-icon">🔨</div>
+        <div class="feat-title">Full Moderation</div>
+        <p class="feat-desc">Warn/warn history/clear, ban, timeout, purge, channel lock, slowmode, role management, mod log, ticket system (support/shop/base watch), and Watchtower panel.</p>
+      </div>
+      <div class="feat-card c-e">
+        <div class="feat-icon">⚙️</div>
+        <div class="feat-title">Per-Guild Setup</div>
+        <p class="feat-desc">/setup-aegis wizard configures your server in 2 minutes. Channel IDs, role IDs, economy settings, feature flags, and branding — all stored per guild in Supabase.</p>
+      </div>
+      <div class="feat-card c-g">
+        <div class="feat-icon">🎉</div>
+        <div class="feat-title">Events & Giveaways</div>
+        <p class="feat-desc">Full giveaway system with ClaveShard entry costs, auto-draw, multi-winner support. Vote system, poll, announcements, and community event panels.</p>
+      </div>
+      <div class="feat-card c-pk">
+        <div class="feat-icon">📡</div>
+        <div class="feat-title">Live Dashboard</div>
+        <p class="feat-desc">Real-time WebSocket feed at aegis.theconclavedominion.com. Live bot stats, guild count, command usage, economy activity, and event feed.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- COMMANDS -->
+<section class="sec" id="commands" style="padding-top:0;">
+  <div class="sec-inner">
+    <div class="eyebrow reveal">73+ Slash Commands</div>
+    <h2 class="sec-t reveal">Every command you need</h2>
+    <div class="cmd-cats stagger reveal">
+      <div class="cmd-cat"><div class="cc-hdr"><span class="cc-icon">🤖</span><span class="cc-name">AI</span><span class="cc-count">9</span></div><div class="cc-cmds"><span class="cc-cmd">/aegis</span><span class="cc-cmd">/forget</span><span class="cc-cmd">/compare</span><span class="cc-cmd">/boss-guide</span><span class="cc-cmd">/base-tips</span><span class="cc-cmd">/dino</span><span class="cc-cmd">/summarize</span><span class="cc-cmd">/aegis-persona</span><span class="cc-cmd">/ai-cost</span></div></div>
+      <div class="cmd-cat"><div class="cc-hdr"><span class="cc-icon">💎</span><span class="cc-name">Economy</span><span class="cc-count">10</span></div><div class="cc-cmds"><span class="cc-cmd">/wallet</span><span class="cc-cmd">/weekly</span><span class="cc-cmd">/leaderboard</span><span class="cc-cmd">/streaks</span><span class="cc-cmd">/give</span><span class="cc-cmd">/shard</span><span class="cc-cmd">/shop</span><span class="cc-cmd">/order</span><span class="cc-cmd">/fulfill</span><span class="cc-cmd">/clvsd</span></div></div>
+      <div class="cmd-cat"><div class="cc-hdr"><span class="cc-icon">🗺️</span><span class="cc-name">ARK</span><span class="cc-count">15</span></div><div class="cc-cmds"><span class="cc-cmd">/servers</span><span class="cc-cmd">/map</span><span class="cc-cmd">/monitor</span><span class="cc-cmd">/rates</span><span class="cc-cmd">/mods</span><span class="cc-cmd">/wipe</span><span class="cc-cmd">/info</span><span class="cc-cmd">/rules</span><span class="cc-cmd">/council</span><span class="cc-cmd">/tip</span><span class="cc-cmd">/crossplay</span><span class="cc-cmd">/coords</span><span class="cc-cmd">/patreon</span><span class="cc-cmd">/transfer-guide</span></div></div>
+      <div class="cmd-cat"><div class="cc-hdr"><span class="cc-icon">🔨</span><span class="cc-name">Moderation</span><span class="cc-count">11</span></div><div class="cc-cmds"><span class="cc-cmd">/warn</span><span class="cc-cmd">/ban</span><span class="cc-cmd">/timeout</span><span class="cc-cmd">/purge</span><span class="cc-cmd">/lock</span><span class="cc-cmd">/slowmode</span><span class="cc-cmd">/role</span><span class="cc-cmd">/modlog</span><span class="cc-cmd">/report</span><span class="cc-cmd">/warn-history</span><span class="cc-cmd">/warn-clear</span></div></div>
+      <div class="cmd-cat"><div class="cc-hdr"><span class="cc-icon">🎯</span><span class="cc-name">Fun</span><span class="cc-count">11</span></div><div class="cc-cmds"><span class="cc-cmd">/trivia</span><span class="cc-cmd">/coinflip</span><span class="cc-cmd">/roll</span><span class="cc-cmd">/poll</span><span class="cc-cmd">/rep</span><span class="cc-cmd">/trade</span><span class="cc-cmd">/concoin-booty</span><span class="cc-cmd">/deposit-concoins</span><span class="cc-cmd">/concoin-leaderboard</span></div></div>
+      <div class="cmd-cat"><div class="cc-hdr"><span class="cc-icon">⚙️</span><span class="cc-name">Admin</span><span class="cc-count">16</span></div><div class="cc-cmds"><span class="cc-cmd">/setup-aegis</span><span class="cc-cmd">/announce</span><span class="cc-cmd">/event</span><span class="cc-cmd">/giveaway</span><span class="cc-cmd">/vote</span><span class="cc-cmd">/know</span><span class="cc-cmd">/setup-tickets</span><span class="cc-cmd">/profile</span><span class="cc-cmd">/rank</span><span class="cc-cmd">/tribe</span></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- LIVE DASHBOARD -->
+<section id="dashboard">
+  <div class="dash-wrap">
+    <div class="reveal-l">
+      <div class="eyebrow">Live Dashboard</div>
+      <h2 class="sec-t">Real-time bot intelligence</h2>
+      <p class="sec-sub" style="margin-bottom:1.5rem;">WebSocket-powered dashboard shows live guild stats, command usage, economy activity, and AI logs — all in real time.</p>
+      <div class="platform-row" style="justify-content:flex-start;">
+        <span class="pb pb-discord">⚡ WebSocket Live</span>
+        <span class="pb pb-plus">📊 Real-time Stats</span>
+        <span class="pb pb-discord">🔒 Admin Only</span>
+      </div>
+    </div>
+    <div class="reveal">
+      <div class="dash-preview spec-border">
+        <div class="dash-topbar">
+          <div class="dash-tb-dot" style="background:#FF5F57"></div>
+          <div class="dash-tb-dot" style="background:#FFBD2E;margin:0 4px;"></div>
+          <div class="dash-tb-dot" style="background:#28C840"></div>
+          <div class="dash-tb-url">aegis.theconclavedominion.com</div>
+          <div class="ws-badge ws-live" id="ws-indicator">Live</div>
+        </div>
+        <div class="dash-body">
+          <div class="dash-stat-row">
+            <div class="ds-card"><div class="ds-num" style="color:var(--p);" id="dash-guilds">—</div><div class="ds-lbl">Guilds</div></div>
+            <div class="ds-card"><div class="ds-num" style="color:var(--el);">73</div><div class="ds-lbl">Commands</div></div>
+            <div class="ds-card"><div class="ds-num" style="color:var(--gr);" id="dash-uptime">—</div><div class="ds-lbl">Uptime</div></div>
+            <div class="ds-card"><div class="ds-num" style="color:var(--gold);">🟢</div><div class="ds-lbl">Status</div></div>
+          </div>
+          <div class="dash-feed">
+            <div class="df-hdr">Live Event Feed</div>
+            <div id="dash-feed">
+              <div class="df-item"><div class="df-dot" style="background:var(--p)"></div>/aegis question asked<div class="df-ts">just now</div></div>
+              <div class="df-item"><div class="df-dot" style="background:var(--gr)"></div>/weekly claimed by Survivor<div class="df-ts">2s ago</div></div>
+              <div class="df-item"><div class="df-dot" style="background:var(--el)"></div>Guild joined: New Server<div class="df-ts">5s ago</div></div>
+              <div class="df-item"><div class="df-dot" style="background:var(--gold)"></div>/trivia answered correctly<div class="df-ts">12s ago</div></div>
+              <div class="df-item"><div class="df-dot" style="background:var(--pk)"></div>/order submitted T10<div class="df-ts">18s ago</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="sec" id="how">
+  <div class="sec-inner">
+    <div class="eyebrow reveal">Setup</div>
+    <h2 class="sec-t reveal">Live in 2 minutes</h2>
+    <div class="how-steps reveal">
+      <div class="how-step"><div class="hs-icon">➕</div><div class="hs-title">Add AEGIS</div><p class="hs-desc">Click "Add to Discord" and authorize AEGIS to your server with standard bot permissions.</p></div>
+      <div class="how-step"><div class="hs-icon">⚙️</div><div class="hs-title">Run /setup-aegis</div><p class="hs-desc">Any admin runs /setup-aegis. A 5-step wizard walks through channels, roles, features, economy, and branding.</p></div>
+      <div class="how-step"><div class="hs-icon">🤖</div><div class="hs-title">AEGIS Goes Live</div><p class="hs-desc">All 73 commands activate for your server with your configuration. AI, economy, moderation — all ready.</p></div>
+      <div class="how-step"><div class="hs-icon">📡</div><div class="hs-title">Dashboard Access</div><p class="hs-desc">Log in to the launchpad dashboard to see live stats, manage settings, and view activity in real time.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section id="cta">
+  <div class="cta-inner">
+    <h2 class="cta-title reveal">Ready to add<br><span class="spec-txt">AEGIS</span>?</h2>
+    <p class="cta-sub reveal">Free to add. No credit card. Works on any server — not just gaming communities.</p>
+    <div class="cta-btns reveal">
+      <a href="https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&scope=bot+applications.commands&permissions=8" class="btn-hero">
+        <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03z"/></svg>
+        Add to Discord
+      </a>
+      <a href="https://discord.gg/theconclave" class="btn-ghost" target="_blank" rel="noopener">Support Server</a>
+    </div>
+    <div class="platform-row reveal" style="margin-top:1.5rem;">
+      <span class="pb pb-plus">🤖 Anthropic AI</span>
+      <span class="pb pb-discord">73+ Commands</span>
+      <span class="pb pb-plus">Free Forever</span>
+      <span class="pb pb-discord">Any Server</span>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="ft-brand">© 2024–2026 TheConclave Dominion · AEGIS v13.0 Sovereign Platform Edition</div>
+  <div class="ft-links">
+    <a href="https://theconclavedominion.com">TheConclave</a>
+    <a href="https://discord.gg/theconclave">Discord</a>
+    <a href="https://theconclavedominion.com/terms">Terms</a>
+    <a href="https://theconclavedominion.com/privacy">Privacy</a>
+  </div>
+</footer>
+
+<script>
+// Cursor
+const dot=document.getElementById('cur-dot'),ring=document.getElementById('cur-ring');
+document.addEventListener('mousemove',e=>{dot.style.left=e.clientX+'px';dot.style.top=e.clientY+'px';ring.style.left=e.clientX+'px';ring.style.top=e.clientY+'px';});
+
+// Reveal on scroll
+const obs=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('visible');obs.unobserve(e.target);}}),{threshold:.1,rootMargin:'0px 0px -40px 0px'});
+document.querySelectorAll('.reveal,.reveal-l').forEach(el=>obs.observe(el));
+
+// Live stats via WebSocket
+const WS_URL = (location.hostname==='localhost'||location.hostname==='127.0.0.1')
+  ? 'ws://localhost:3001/ws'
+  : 'wss://api.theconclavedominion.com/ws';
+
+let ws;
+function connectWS() {
+  ws = new WebSocket(WS_URL);
+  ws.onopen = () => {
+    document.getElementById('ws-indicator').textContent = '🟢 Live';
+    ws.send(JSON.stringify({type:'stats'}));
+  };
+  ws.onmessage = (e) => {
+    const d = JSON.parse(e.data);
+    if (d.type==='hello'||d.type==='stats'||d.type==='heartbeat') {
+      if (d.guilds !== undefined) {
+        document.getElementById('stat-guilds').textContent = d.guilds;
+        document.getElementById('dash-guilds').textContent = d.guilds;
+      }
+      if (d.uptime !== undefined) {
+        const h=Math.floor(d.uptime/3600), m=Math.floor((d.uptime%3600)/60);
+        document.getElementById('dash-uptime').textContent = h>0 ? h+'h' : m+'m';
+      }
+    }
+    if (d.type==='guild_join') addFeedItem(`Guild joined: ${d.guildName||'New Server'}`, 'var(--el)');
+    if (d.type==='command_used') addFeedItem(`/${d.name} used`, 'var(--p)');
+    if (d.type==='economy_action') addFeedItem(`Economy: ${d.action}`, 'var(--gr)');
+  };
+  ws.onclose = () => {
+    document.getElementById('ws-indicator').textContent = '🔴 Offline';
+    setTimeout(connectWS, 4000);
+  };
+  ws.onerror = () => ws.close();
+}
+
+function addFeedItem(text, color) {
+  const feed = document.getElementById('dash-feed');
+  const item = document.createElement('div');
+  item.className='df-item';
+  item.innerHTML=`<div class="df-dot" style="background:${color}"></div>${text}<div class="df-ts">just now</div>`;
+  feed.insertBefore(item, feed.firstChild);
+  while (feed.children.length > 6) feed.removeChild(feed.lastChild);
+}
+
+try { connectWS(); } catch {}
+</script>
+</body>
+</html>
