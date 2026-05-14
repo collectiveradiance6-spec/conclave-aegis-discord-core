@@ -1,0 +1,34 @@
+// ═══════════════════════════════════════════════════════════════════════
+// handlers/eventHandler.js
+// Auto-loads all event files from events/*.js
+// ═══════════════════════════════════════════════════════════════════════
+'use strict';
+
+const fs   = require('fs');
+const path = require('path');
+
+const EVENTS_DIR = path.join(__dirname, '..', 'events');
+
+function load(client) {
+  const files = fs.readdirSync(EVENTS_DIR).filter(f => f.endsWith('.js'));
+
+  for (const file of files) {
+    try {
+      const event = require(path.join(EVENTS_DIR, file));
+      if (!event?.name || !event?.execute) {
+        console.warn(`[EventHandler] Skipping ${file} — missing name or execute`);
+        continue;
+      }
+      if (event.once) {
+        client.once(event.name, (...args) => event.execute(...args, client));
+      } else {
+        client.on(event.name, (...args) => event.execute(...args, client));
+      }
+      console.log(`[EventHandler] ✅ Loaded event: ${event.name}`);
+    } catch (err) {
+      console.error(`[EventHandler] Failed to load ${file}:`, err.message);
+    }
+  }
+}
+
+module.exports = { load };

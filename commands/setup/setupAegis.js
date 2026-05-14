@@ -1,0 +1,269 @@
+// ═══════════════════════════════════════════════════════════════════════
+// commands/setup/setupAegis.js
+// /setup-aegis — Admin-only multi-step guild onboarding wizard
+// Prompts guild admins to configure channels, roles, and features
+// Saves everything to guild_configs via guildManager
+// ═══════════════════════════════════════════════════════════════════════
+'use strict';
+
+const {
+  SlashCommandBuilder, PermissionFlagsBits,
+  ModalBuilder, TextInputBuilder, TextInputStyle,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle,
+  EmbedBuilder, StringSelectMenuBuilder, ChannelType,
+} = require('discord.js');
+const guildManager = require('../../managers/guildManager');
+
+module.exports = {
+  data: new SlashCommandBuilder()
+    .setName('setup-aegis')
+    .setDescription('⚙️ [ADMIN] Configure AEGIS for this server — channels, roles, features')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  // ── Main entry ───────────────────────────────────────────────────
+  async execute(interaction) {
+    const guildId = interaction.guildId;
+    const config  = await guildManager.getConfig(guildId) || {};
+
+    const embed = new EmbedBuilder()
+      .setColor(0x7B2FFF)
+      .setTitle('⚙️ AEGIS Setup Wizard')
+      .setDescription(
+        config.setup_complete
+          ? '✅ **AEGIS is already configured** for this server.\n\nUse the buttons below to reconfigure any section, or run a full reset.'
+          : '**Welcome to AEGIS!** Let\'s get your server set up.\n\nComplete each section to unlock the full feature set.\n\nYou can update any section at any time.'
+      )
+      .addFields(
+        { name: '📡 Channels',     value: config.aegis_channel_id       ? `✅ Set (<#${config.aegis_channel_id}>)` : '⚪ Not configured', inline:true },
+        { name: '👥 Roles',        value: config.admin_role_id           ? '✅ Set' : '⚪ Not configured', inline:true },
+        { name: '⚙️ Features',    value: config.setup_complete          ? '✅ Configured' : '⚪ Pending', inline:true },
+        { name: '🎨 Branding',     value: config.display_name            ? `✅ ${config.display_name}` : '⚪ Default', inline:true },
+        { name: '💎 Economy',      value: config.currency_name           ? `✅ ${config.currency_name}` : '⚪ Default (ClaveShard)', inline:true },
+        { name: '🤖 AI',           value: config.ai_model_preference === 'groq' ? '✅ Groq (free)' : '✅ Anthropic', inline:true },
+      )
+      .setFooter({ text: `Guild: ${interaction.guild.name} · ${interaction.guild.id}` })
+      .setTimestamp();
+
+    const row1 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('aegis_setup_channels').setLabel('📡 Channels').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('aegis_setup_roles').setLabel('👥 Roles').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('aegis_setup_features').setLabel('⚙️ Features').setStyle(ButtonStyle.Primary),
+    );
+    const row2 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('aegis_setup_branding').setLabel('🎨 Branding').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('aegis_setup_economy').setLabel('💎 Economy').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('aegis_setup_complete').setLabel('✅ Finish Setup').setStyle(ButtonStyle.Success),
+    );
+
+    await interaction.reply({ embeds:[embed], components:[row1, row2], ephemeral:true });
+  },
+
+  // ── Handle button interactions ───────────────────────────────────
+  async handleButton(interaction) {
+    const { customId, guildId } = interaction;
+
+    switch (customId) {
+      case 'aegis_setup_channels':
+        return showChannelsModal(interaction);
+      case 'aegis_setup_roles':
+        return showRolesModal(interaction);
+      case 'aegis_setup_branding':
+        return showBrandingModal(interaction);
+      case 'aegis_setup_economy':
+        return showEconomyModal(interaction);
+      case 'aegis_setup_features':
+        return showFeaturesMenu(interaction);
+      case 'aegis_setup_complete':
+        return finishSetup(interaction);
+    }
+
+    // Feature toggles
+    if (customId.startsWith('aegis_toggle_')) {
+      const feature = customId.replace('aegis_toggle_','');
+      const config = await guildManager.getConfig(guildId);
+      const key    = `${feature}_enabled`;
+      const newVal = !config[key];
+      await guildManager.updateField(guildId, key, newVal);
+      return interaction.reply({
+        content: `${newVal?'✅':'❌'} **${feature}** ${newVal?'enabled':'disabled'} for this server.`,
+        ephemeral: true,
+      });
+    }
+  },
+
+  // ── Handle modal submissions ─────────────────────────────────────
+  async handleModal(interaction) {
+    const { customId, guildId } = interaction;
+
+    if (customId === 'aegis_modal_channels') {
+      const patch = {
+        aegis_channel_id:        interaction.fields.getTextInputValue('aegis_channel_id').trim()||null,
+        mod_log_channel_id:      interaction.fields.getTextInputValue('mod_log_channel_id').trim()||null,
+        announcement_channel_id: interaction.fields.getTextInputValue('announcement_channel_id').trim()||null,
+        welcome_channel_id:      interaction.fields.getTextInputValue('welcome_channel_id').trim()||null,
+        ticket_log_channel_id:   interaction.fields.getTextInputValue('ticket_log_channel_id').trim()||null,
+      };
+      await guildManager.update(guildId, patch);
+      return interaction.reply({
+        content: '✅ **Channels saved!**\n\nAEGIS will now use:\n' + Object.entries(patch).filter(([,v])=>v).map(([k,v])=>`• ${k.replace(/_id$/,'').replace(/_/g,' ')}: <#${v}>`).join('\n') || 'No channels set.',
+        ephemeral: true,
+      });
+    }
+
+    if (customId === 'aegis_modal_roles') {
+      const patch = {
+        admin_role_id:  interaction.fields.getTextInputValue('admin_role_id').trim()||null,
+        mod_role_id:    interaction.fields.getTextInputValue('mod_role_id').trim()||null,
+        helper_role_id: interaction.fields.getTextInputValue('helper_role_id').trim()||null,
+        member_role_id: interaction.fields.getTextInputValue('member_role_id').trim()||null,
+        vip_role_id:    interaction.fields.getTextInputValue('vip_role_id').trim()||null,
+      };
+      await guildManager.update(guildId, patch);
+      return interaction.reply({
+        content: '✅ **Roles saved!**\n\nAEGIS will now use these roles for permission checks.',
+        ephemeral: true,
+      });
+    }
+
+    if (customId === 'aegis_modal_branding') {
+      const patch = {
+        display_name:     interaction.fields.getTextInputValue('display_name').trim()||null,
+        server_icon_url:  interaction.fields.getTextInputValue('server_icon_url').trim()||null,
+        server_theme:     interaction.fields.getTextInputValue('server_theme').trim()||'dominion',
+      };
+      await guildManager.update(guildId, patch);
+      return interaction.reply({
+        content: `✅ **Branding saved!**\n• Name: **${patch.display_name||interaction.guild.name}**\n• Theme: **${patch.server_theme}**`,
+        ephemeral: true,
+      });
+    }
+
+    if (customId === 'aegis_modal_economy') {
+      const patch = {
+        currency_name:        interaction.fields.getTextInputValue('currency_name').trim()||'ClaveShard',
+        currency_emoji:       interaction.fields.getTextInputValue('currency_emoji').trim()||'💎',
+        weekly_claim_amount:  parseInt(interaction.fields.getTextInputValue('weekly_claim_amount'))||3,
+        trivia_reward_amount: parseInt(interaction.fields.getTextInputValue('trivia_reward_amount'))||15000,
+      };
+      await guildManager.update(guildId, patch);
+      return interaction.reply({
+        content: `✅ **Economy saved!**\n• Currency: ${patch.currency_emoji} **${patch.currency_name}**\n• Weekly claim: **${patch.weekly_claim_amount}**\n• Trivia reward: **${patch.trivia_reward_amount.toLocaleString()}** ConCoins`,
+        ephemeral: true,
+      });
+    }
+  },
+};
+
+// ── Modal builders ───────────────────────────────────────────────────
+async function showChannelsModal(interaction) {
+  const config = await guildManager.getConfig(interaction.guildId)||{};
+  const modal = new ModalBuilder()
+    .setCustomId('aegis_modal_channels')
+    .setTitle('📡 Channel Configuration');
+  modal.addComponents(
+    row(text('aegis_channel_id',     'AEGIS AI Channel ID',          config.aegis_channel_id||'',        false, 'Paste channel ID — right-click channel → Copy ID')),
+    row(text('mod_log_channel_id',   'Mod Log Channel ID',            config.mod_log_channel_id||'',      false, 'Where moderation actions are logged')),
+    row(text('announcement_channel_id','Announcement Channel ID',     config.announcement_channel_id||'',false, 'Where AEGIS announcements are posted')),
+    row(text('welcome_channel_id',   'Welcome Channel ID',            config.welcome_channel_id||'',      false, 'Where new member welcomes are sent')),
+    row(text('ticket_log_channel_id','Ticket Log Channel ID',         config.ticket_log_channel_id||'',  false, 'Where ticket transcripts are saved')),
+  );
+  return interaction.showModal(modal);
+}
+
+async function showRolesModal(interaction) {
+  const config = await guildManager.getConfig(interaction.guildId)||{};
+  const modal = new ModalBuilder()
+    .setCustomId('aegis_modal_roles')
+    .setTitle('👥 Role Configuration');
+  modal.addComponents(
+    row(text('admin_role_id',  'Admin Role ID',  config.admin_role_id||'',  false, 'Right-click role → Copy ID')),
+    row(text('mod_role_id',    'Mod Role ID',    config.mod_role_id||'',    false, 'Moderator role ID')),
+    row(text('helper_role_id', 'Helper Role ID', config.helper_role_id||'', false, 'Helper/staff role ID')),
+    row(text('member_role_id', 'Member Role ID', config.member_role_id||'', false, 'Base member role ID')),
+    row(text('vip_role_id',    'VIP Role ID',    config.vip_role_id||'',    false, 'VIP/Patreon role ID')),
+  );
+  return interaction.showModal(modal);
+}
+
+async function showBrandingModal(interaction) {
+  const config = await guildManager.getConfig(interaction.guildId)||{};
+  const modal = new ModalBuilder()
+    .setCustomId('aegis_modal_branding')
+    .setTitle('🎨 Server Branding');
+  modal.addComponents(
+    row(text('display_name',    'Server Display Name', config.display_name||interaction.guild.name, false, 'Name shown in AEGIS embeds')),
+    row(text('server_icon_url', 'Server Icon URL',     config.server_icon_url||'',                  false, 'Direct image URL for server icon')),
+    row(text('server_theme',    'Theme (dominion/cyber/custom)', config.server_theme||'dominion',   false, 'dominion | cyber | custom')),
+  );
+  return interaction.showModal(modal);
+}
+
+async function showEconomyModal(interaction) {
+  const config = await guildManager.getConfig(interaction.guildId)||{};
+  const modal = new ModalBuilder()
+    .setCustomId('aegis_modal_economy')
+    .setTitle('💎 Economy Settings');
+  modal.addComponents(
+    row(text('currency_name',        'Currency Name',       config.currency_name||'ClaveShard', false, 'e.g. ClaveShard, Gold, Credits')),
+    row(text('currency_emoji',       'Currency Emoji',      config.currency_emoji||'💎',        false, 'Single emoji for currency display')),
+    row(text('weekly_claim_amount',  'Weekly Claim Amount', String(config.weekly_claim_amount||3), false, 'How many currency per /weekly claim')),
+    row(text('trivia_reward_amount', 'Trivia Reward (ConCoins)', String(config.trivia_reward_amount||15000), false, 'ConCoins won per trivia question')),
+  );
+  return interaction.showModal(modal);
+}
+
+async function showFeaturesMenu(interaction) {
+  const config = await guildManager.getConfig(interaction.guildId)||{};
+  const features = [
+    { id:'economy',     label:'💎 Economy (wallet/bank/shop)',  enabled: config.economy_enabled!==false },
+    { id:'trivia',      label:'🎯 Trivia (ConCoin rewards)',    enabled: config.trivia_enabled!==false  },
+    { id:'automod',     label:'🛡️ AutoMod (link/caps/spam)',   enabled: config.automod_enabled!==false },
+    { id:'tickets',     label:'🎫 Ticket System',               enabled: config.tickets_enabled!==false },
+    { id:'ai',          label:'🤖 AEGIS AI Assistant',          enabled: config.ai_enabled!==false      },
+    { id:'giveaway',    label:'🎉 Giveaways',                   enabled: config.giveaway_enabled!==false},
+    { id:'monitor',     label:'📡 Server Monitor (Nitrado)',    enabled: config.monitor_enabled===true  },
+    { id:'watchtower',  label:'👁 Watchtower Panel',            enabled: config.watchtower_enabled===true},
+  ];
+
+  const rows = [];
+  for (let i = 0; i < features.length; i += 4) {
+    const chunk = features.slice(i, i+4);
+    rows.push(new ActionRowBuilder().addComponents(
+      ...chunk.map(f => new ButtonBuilder()
+        .setCustomId(`aegis_toggle_${f.id}`)
+        .setLabel(`${f.enabled?'✅':'❌'} ${f.label}`)
+        .setStyle(f.enabled ? ButtonStyle.Success : ButtonStyle.Danger)
+      )
+    ));
+  }
+
+  return interaction.reply({
+    content: '**⚙️ Feature Toggles** — click to enable/disable each feature for this server:',
+    components: rows,
+    ephemeral: true,
+  });
+}
+
+async function finishSetup(interaction) {
+  const guildId = interaction.guildId;
+  await guildManager.saveSetup(guildId, {}, interaction.user.id);
+
+  const embed = new EmbedBuilder()
+    .setColor(0x35ED7E)
+    .setTitle('✅ AEGIS Setup Complete!')
+    .setDescription(`**${interaction.guild.name}** is now fully configured.\n\nAEGIS is active and ready. All features will use the configuration you set.\n\nRun \`/setup-aegis\` anytime to update settings.`)
+    .addFields(
+      { name: '📖 Get Started', value: 'Try `/aegis`, `/wallet`, `/trivia`, `/help`', inline:false },
+      { name: '🔗 Dashboard', value: 'https://aegis.theconclavedominion.com', inline:false },
+    )
+    .setFooter({ text: `Configured by ${interaction.user.username}` })
+    .setTimestamp();
+
+  return interaction.reply({ embeds:[embed], ephemeral:true });
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────
+const text = (id, label, value='', required=false, placeholder='') =>
+  new TextInputBuilder().setCustomId(id).setLabel(label).setValue(value).setRequired(required)
+    .setStyle(TextInputStyle.Short).setPlaceholder(placeholder||label);
+const row = (component) => new ActionRowBuilder().addComponents(component);

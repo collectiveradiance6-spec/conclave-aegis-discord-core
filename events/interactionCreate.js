@@ -1,94 +1,70 @@
-// ============================================================
-// src/events/interactionCreate.js
-// AEGIS v10 — Multi-Guild Interaction Router
-// ============================================================
-// Replaces any existing interactionCreate.js.
-// Loads the guild config first, then routes to the appropriate
-// command handler with the config injected as context.
-// ============================================================
+// ═══════════════════════════════════════════════════════════════════════
+// events/interactionCreate.js — Routes all Discord interactions
+// ═══════════════════════════════════════════════════════════════════════
+'use strict';
 
-const guildManager = require('../managers/guildManager');
+const { Events } = require('discord.js');
+const setupAegis = require('../commands/setup/setupAegis');
+const { handleTicketInteraction } = require('../ticket-system');
+const { handleWatchtowerInteraction } = require('../watchtower-system');
+
+const rates = new Map();
+function checkRate(uid,ms=5000){const l=rates.get(uid)||0,n=Date.now();if(n-l<ms)return Math.ceil((ms-(n-l))/1000);rates.set(uid,n);return 0;}
+setInterval(()=>{const cut=Date.now()-120_000;for(const [k,v] of rates)if(v<cut)rates.delete(k);},5*60_000);
 
 module.exports = {
-  name: 'interactionCreate',
+  name: Events.InteractionCreate,
+  once: false,
   async execute(interaction, client) {
-    if (!interaction.guildId) return;
-
-    // ── Load this guild's config ────────────────────────────
-    const guildConfig = await guildManager.getConfig(interaction.guildId);
-
-    if (!guildConfig) {
-      // Guild not in guild_configs — not a managed guild, ignore
-      return;
-    }
-
-    // ── Route slash commands ────────────────────────────────
-    if (interaction.isChatInputCommand()) {
-      const command = client.commands.get(interaction.commandName);
-      if (!command) return;
-
-      // Check feature flags before executing
-      const featureMap = {
-        // command name prefix → feature flag field
-        'balance': 'economy',
-        'pay':     'economy',
-        'shop':    'economy',
-        'give':    'economy',
-        'ticket':  'tickets',
-        'giveaway':'giveaways',
-        'ask':     'ai',
-        'ban':     'moderation',
-        'kick':    'moderation',
-        'warn':    'moderation',
-        'mute':    'moderation',
-      };
-
-      const cmdBase = interaction.commandName.split('-')[0];
-      const requiredFeature = featureMap[cmdBase];
-
-      if (requiredFeature && !guildConfig[`${requiredFeature}_enabled`]) {
-        return interaction.reply({
-          content: `⚠️ That feature is not enabled on **${guildConfig.display_name}**.`,
-          ephemeral: true
-        });
+    try {
+      if (interaction.isChatInputCommand()) {
+        const cmd = client.commands.get(interaction.commandName);
+        if (!cmd) return interaction.reply({content:'⚠️ Unknown command.',ephemeral:true});
+        const member = interaction.member;
+        const isAdmin = member?.permissions?.has('ManageMessages')||member?.permissions?.has('Administrator');
+        if (!isAdmin) {
+          const wait = checkRate(interaction.user.id);
+          if (wait>0) return interaction.reply({content:`⏳ Wait **${wait}s** before another command.`,ephemeral:true});
+        }
+        return cmd.execute(interaction, client);
       }
-
+      if (interaction.isButton()) {
+        const id = interaction.customId;
+        if (id.startsWith('aegis_setup_')||id.startsWith('aegis_toggle_')) return setupAegis.handleButton(interaction);
+        if (id.startsWith('ticket_')||id.startsWith('close_ticket')||id.startsWith('claim_ticket')) return handleTicketInteraction(interaction);
+        if (id.startsWith('watchtower_')||id.startsWith('wt_')) return handleWatchtowerInteraction(interaction);
+        if (id.startsWith('giveaway_enter_')) return handleGiveawayEntry(interaction);
+        return;
+      }
+      if (interaction.isModalSubmit()) {
+        const id = interaction.customId;
+        if (id.startsWith('aegis_modal_')) return setupAegis.handleModal(interaction);
+        if (id.startsWith('ticket_')) return handleTicketInteraction(interaction);
+        return;
+      }
+      if (interaction.isStringSelectMenu()) {
+        if (interaction.customId.startsWith('ticket_')) return handleTicketInteraction(interaction);
+        return;
+      }
+    } catch(err) {
+      console.error('[InteractionCreate]',err.message);
+      const msg='⚠️ An error occurred. Please try again.';
       try {
-        // Inject guildConfig so commands don't need to re-fetch it
-        await command.execute(interaction, client, guildConfig);
-      } catch (err) {
-        console.error(`[InteractionCreate] Command error in ${interaction.guildId}:`, err);
-        const errMsg = { content: '⚠️ An error occurred. Please try again.', ephemeral: true };
-        if (interaction.replied || interaction.deferred) {
-          await interaction.followUp(errMsg).catch(() => {});
-        } else {
-          await interaction.reply(errMsg).catch(() => {});
-        }
-      }
+        if (interaction.replied||interaction.deferred) await interaction.followUp({content:msg,ephemeral:true});
+        else await interaction.reply({content:msg,ephemeral:true});
+      } catch {}
     }
-
-    // ── Route button / select menu interactions ─────────────
-    if (interaction.isButton() || interaction.isStringSelectMenu()) {
-      const handler = client.components?.get(interaction.customId.split(':')[0]);
-      if (handler) {
-        try {
-          await handler.execute(interaction, client, guildConfig);
-        } catch (err) {
-          console.error('[InteractionCreate] Component error:', err);
-        }
-      }
-    }
-
-    // ── Route modals ─────────────────────────────────────────
-    if (interaction.isModalSubmit()) {
-      const modal = client.modals?.get(interaction.customId.split(':')[0]);
-      if (modal) {
-        try {
-          await modal.execute(interaction, client, guildConfig);
-        } catch (err) {
-          console.error('[InteractionCreate] Modal error:', err);
-        }
-      }
-    }
-  }
+  },
 };
+
+async function handleGiveawayEntry(interaction) {
+  const giveawayId = interaction.customId.replace('giveaway_enter_','');
+  const {sb,sbOk} = require('../services/supabase');
+  if (!sb||!sbOk()) return interaction.reply({content:'⚠️ Database unavailable.',ephemeral:true});
+  const userId = interaction.user.id;
+  const {data:existing} = await sb.from('aegis_giveaways_entries').select('id').eq('giveaway_id',giveawayId).eq('user_id',userId).single().catch(()=>({data:null}));
+  if (existing) return interaction.reply({content:'✅ Already entered!',ephemeral:true});
+  await sb.from('aegis_giveaways_entries').insert({giveaway_id:giveawayId,user_id:userId,user_tag:interaction.user.tag,entered_at:new Date().toISOString()}).catch(()=>{});
+  const {count} = await sb.from('aegis_giveaways_entries').select('*',{count:'exact',head:true}).eq('giveaway_id',giveawayId);
+  return interaction.reply({content:`🎉 You're in! **${count||'?'}** entries so far.`,ephemeral:true});
+}
