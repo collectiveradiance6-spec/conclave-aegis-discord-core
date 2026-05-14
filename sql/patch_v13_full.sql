@@ -1,3 +1,21 @@
+-- ═══════════════════════════════════════════════════════════════════════
+-- AEGIS v13 — FULL PATCH (fixed)
+-- Drops any conflicting views before creating tables
+-- ═══════════════════════════════════════════════════════════════════════
+
+create extension if not exists "uuid-ossp";
+
+-- Drop any objects that exist as views but need to be tables
+drop view if exists aegis_warnings cascade;
+drop view if exists aegis_giveaways cascade;
+drop view if exists aegis_giveaways_entries cascade;
+drop view if exists aegis_tickets cascade;
+drop view if exists aegis_tribes cascade;
+drop view if exists aegis_wipe_schedule cascade;
+drop view if exists aegis_knowledge cascade;
+drop view if exists aegis_ai_usage cascade;
+drop view if exists aegis_concoin_booty cascade;
+
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- AEGIS v13 — FULL PATCH (run this, nothing else)
@@ -5,8 +23,6 @@
 -- Creates new tables with IF NOT EXISTS
 -- Safe to run multiple times
 -- ═══════════════════════════════════════════════════════════════════════
-
-create extension if not exists "uuid-ossp";
 
 -- guild_configs
 alter table if exists guild_configs add column if not exists display_name              text;
