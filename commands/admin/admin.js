@@ -276,19 +276,6 @@ const remind = {
   },
 };
 
-// ── SETUP TICKETS ────────────────────────────────────────────────────
-const setupTickets = {
-  data: new SlashCommandBuilder().setName('setup-tickets').setDescription('[Admin] 🎫 Post ticket panel in current channel')
-    .addStringOption(o=>o.setName('type').setDescription('Panel type').setRequired(true).addChoices({name:'Support',value:'support'},{name:'Starter Kit',value:'starterkit'},{name:'ClaveShard Shop',value:'claveshard'},{name:'Base Watch',value:'basewatch'})),
-  async execute(interaction) {
-    if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
-    const type=interaction.options.getString('type');
-    const configs = {
-      support:    { color:0x00D4FF, title:'TheConclave Support',     btnId:'tkt_support',    btnLabel:'🛡️ Open Support Ticket',  btnStyle:ButtonStyle.Primary },
-      starterkit: { color:0x35ED7E, title:'Starter Kit Request',     btnId:'tkt_starterkit', btnLabel:'🎁 Request Starter Kit',   btnStyle:ButtonStyle.Success },
-      claveshard: { color:0xFF4CD2, title:'📚 ClaveShard Shop 👀',   btnId:'tkt_claveshard', btnLabel:'📚 Open Shop Ticket 👀',  btnStyle:ButtonStyle.Primary },
-      basewatch:  { color:0x7B2FFF, title:'🛡️ AEGIS Base Watch 🛡️', btnId:'tkt_basewatch',  btnLabel:'🛡️ Request Base Watch',  btnStyle:ButtonStyle.Danger  },
-    };
     const cfg=configs[type];
     const row=new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(cfg.btnId).setLabel(cfg.btnLabel).setStyle(cfg.btnStyle));
     await interaction.channel.send({ embeds:[base(cfg.title,cfg.color).setDescription('Click the button below to open a private ticket with the Council.')], components:[row] });
@@ -296,4 +283,4 @@ const setupTickets = {
   },
 };
 
-module.exports = [announce,event,giveaway,endgiveaway,vote,know,ping,help,calc,whois,serverinfo,profile,rank,tribe,remind,setupTickets];
+module.exports = [announce,event,giveaway,endgiveaway,vote,know,ping,help,calc,whois,serverinfo,profile,rank,tribe,remind];
