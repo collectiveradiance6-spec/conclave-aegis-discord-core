@@ -288,7 +288,7 @@ const origin = {
 
 // ── EMBEDGIS (DBE v2.1 — full broadcast engine) ───────────────────────
 const embedgis = {
-  data: EMBEDGIS_COMMAND,
+  data: EMBEDGIS_COMMAND,  // name = 'embedgis' defined in embedgis.js
   async execute(interaction) {
     // The embedgis module handles full state machine internally
     // interactionCreate.js must also wire handleEmbedgisButton + handleEmbedgisSelect

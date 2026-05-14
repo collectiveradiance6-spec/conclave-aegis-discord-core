@@ -7,10 +7,14 @@
 
 const { createClient } = require('@supabase/supabase-js');
 
+const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY,
-  { auth: { persistSession: false } }
+  SB_KEY,
+  {
+    auth: { autoRefreshToken:false, persistSession:false, detectSessionInUrl:false },
+    global: { headers: { Authorization: `Bearer ${SB_KEY}` } },
+  }
 );
 
 const CACHE_TTL = 5 * 60 * 1000;
@@ -55,12 +59,28 @@ class GuildManager {
 
   async provision(guildId, guildName) {
     try {
+      // Upsert row — if exists, update updated_at; if new, create full row
       const { data, error } = await supabase.from('guild_configs')
-        .upsert({guild_id:guildId,display_name:guildName||guildId,setup_complete:false,
-          created_at:new Date().toISOString(),updated_at:new Date().toISOString(),...DEFAULT_CONFIG},
-          {onConflict:'guild_id',ignoreDuplicates:true})
-        .select().single();
+        .upsert({
+          guild_id:guildId,
+          display_name:guildName||guildId,
+          setup_complete:false,
+          created_at:new Date().toISOString(),
+          updated_at:new Date().toISOString(),
+          ...DEFAULT_CONFIG,
+        }, { onConflict:'guild_id' })
+        .select()
+        .maybeSingle();
       if (error) throw error;
+      // maybeSingle returns null if no row (shouldn't happen after upsert but handle gracefully)
+      if (!data) {
+        const { data:fetched } = await supabase.from('guild_configs').select('*').eq('guild_id',guildId).maybeSingle();
+        if (fetched) {
+          const config={...DEFAULT_CONFIG,...fetched};
+          this._cache.set(guildId,{config,fetchedAt:Date.now()}); return config;
+        }
+        return {...DEFAULT_CONFIG,guild_id:guildId};
+      }
       const config={...DEFAULT_CONFIG,...data};
       this._cache.set(guildId,{config,fetchedAt:Date.now()});
       console.log(`[GuildManager] ✅ Provisioned: ${guildId} (${guildName})`); return config;
@@ -77,7 +97,7 @@ class GuildManager {
   async update(guildId,patch) {
     try {
       const { data, error } = await supabase.from('guild_configs')
-        .update({...patch,updated_at:new Date().toISOString()}).eq('guild_id',guildId).select().single();
+        .update({...patch,updated_at:new Date().toISOString()}).eq('guild_id',guildId).select().maybeSingle();
       if (error) throw error;
       const config={...DEFAULT_CONFIG,...data};
       this._cache.set(guildId,{config,fetchedAt:Date.now()}); return config;
