@@ -5,16 +5,23 @@
 
 create extension if not exists "uuid-ossp";
 
--- Drop any objects that exist as views but need to be tables
-drop view if exists aegis_warnings cascade;
-drop view if exists aegis_giveaways cascade;
-drop view if exists aegis_giveaways_entries cascade;
-drop view if exists aegis_tickets cascade;
-drop view if exists aegis_tribes cascade;
-drop view if exists aegis_wipe_schedule cascade;
-drop view if exists aegis_knowledge cascade;
-drop view if exists aegis_ai_usage cascade;
-drop view if exists aegis_concoin_booty cascade;
+-- Drop conflicting views (only if they ARE views — skips tables)
+do $$ declare r record; begin
+  for r in
+    select table_name, table_type
+    from information_schema.tables
+    where table_schema = 'public'
+      and table_name in (
+        'aegis_warnings','aegis_giveaways','aegis_giveaways_entries',
+        'aegis_tickets','aegis_tribes','aegis_wipe_schedule',
+        'aegis_knowledge','aegis_ai_usage','aegis_concoin_booty'
+      )
+      and table_type = 'VIEW'
+  loop
+    execute format('drop view if exists %I cascade', r.table_name);
+    raise notice 'Dropped view: %', r.table_name;
+  end loop;
+end $$;
 
 
 -- ═══════════════════════════════════════════════════════════════════════
