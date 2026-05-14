@@ -25,13 +25,17 @@ function load(client) {
 
     for (const file of files) {
       try {
-        const cmd = require(path.join(catPath, file));
-        if (!cmd?.data?.name || !cmd?.execute) {
-          console.warn(`[CommandHandler] Skipping ${file} — missing data.name or execute`);
-          continue;
+        const mod = require(path.join(catPath, file));
+        // Support both single export and array export
+        const cmds = Array.isArray(mod) ? mod : [mod];
+        for (const cmd of cmds) {
+          if (!cmd?.data?.name || !cmd?.execute) {
+            console.warn(`[CommandHandler] Skipping entry in ${file} — missing data.name or execute`);
+            continue;
+          }
+          client.commands.set(cmd.data.name, cmd);
+          loaded.push(cmd.data.name);
         }
-        client.commands.set(cmd.data.name, cmd);
-        loaded.push(cmd.data.name);
       } catch (err) {
         console.error(`[CommandHandler] Failed to load ${file}:`, err.message);
       }
