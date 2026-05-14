@@ -276,11 +276,4 @@ const remind = {
   },
 };
 
-    const cfg=configs[type];
-    const row=new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(cfg.btnId).setLabel(cfg.btnLabel).setStyle(cfg.btnStyle));
-    await interaction.channel.send({ embeds:[base(cfg.title,cfg.color).setDescription('Click the button below to open a private ticket with the Council.')], components:[row] });
-    return interaction.editReply('✅ Ticket panel posted.');
-  },
-};
-
 module.exports = [announce,event,giveaway,endgiveaway,vote,know,ping,help,calc,whois,serverinfo,profile,rank,tribe,remind];
