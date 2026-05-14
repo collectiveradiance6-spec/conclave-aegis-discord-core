@@ -34,22 +34,24 @@ module.exports = {
           : '**Welcome to AEGIS!** Let\'s get your server set up.\n\nComplete each section to unlock the full feature set.\n\nYou can update any section at any time.'
       )
       .addFields(
-        { name: '📡 Channels',     value: config.aegis_channel_id       ? `✅ Set (<#${config.aegis_channel_id}>)` : '⚪ Not configured', inline:true },
-        { name: '👥 Roles',        value: config.admin_role_id           ? '✅ Set' : '⚪ Not configured', inline:true },
-        { name: '⚙️ Features',    value: config.setup_complete          ? '✅ Configured' : '⚪ Pending', inline:true },
-        { name: '🎨 Branding',     value: config.display_name            ? `✅ ${config.display_name}` : '⚪ Default', inline:true },
-        { name: '💎 Economy',      value: config.currency_name           ? `✅ ${config.currency_name}` : '⚪ Default (ClaveShard)', inline:true },
-        { name: '🤖 AI',           value: config.ai_model_preference === 'groq' ? '✅ Groq (free)' : '✅ Anthropic', inline:true },
+        { name: '📡 Core Channels',   value: config.aegis_channel_id ? `✅ Set` : '⚪ Not set', inline:true },
+        { name: '🎫 Panel Channels',   value: config.panel_support_channel_id ? '✅ Set' : '⚪ Not set', inline:true },
+        { name: '📋 Ticket Logs',      value: config.ticket_log_support ? '✅ Set' : '⚪ Not set', inline:true },
+        { name: '👥 Roles',            value: config.admin_role_id ? '✅ Set' : '⚪ Not set', inline:true },
+        { name: '⚙️ Features',        value: config.setup_complete ? '✅ Done' : '⚪ Pending', inline:true },
+        { name: '💎 Economy',          value: config.currency_name ? `✅ ${config.currency_name}` : '⚪ Default', inline:true },
       )
       .setFooter({ text: `Guild: ${interaction.guild.name} · ${interaction.guild.id}` })
       .setTimestamp();
 
     const row1 = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('aegis_setup_channels').setLabel('📡 Channels').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('aegis_setup_channels').setLabel('📡 Core Channels').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('aegis_setup_panels').setLabel('🎫 Panel Channels').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('aegis_setup_ticketlogs').setLabel('📋 Ticket Logs').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('aegis_setup_roles').setLabel('👥 Roles').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('aegis_setup_features').setLabel('⚙️ Features').setStyle(ButtonStyle.Primary),
     );
     const row2 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('aegis_setup_features').setLabel('⚙️ Features').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('aegis_setup_branding').setLabel('🎨 Branding').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('aegis_setup_economy').setLabel('💎 Economy').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('aegis_setup_complete').setLabel('✅ Finish Setup').setStyle(ButtonStyle.Success),
@@ -65,6 +67,10 @@ module.exports = {
     switch (customId) {
       case 'aegis_setup_channels':
         return showChannelsModal(interaction);
+      case 'aegis_setup_panels':
+        return showPanelChannelsModal(interaction);
+      case 'aegis_setup_ticketlogs':
+        return showTicketLogsModal(interaction);
       case 'aegis_setup_roles':
         return showRolesModal(interaction);
       case 'aegis_setup_branding':
@@ -101,7 +107,7 @@ module.exports = {
         mod_log_channel_id:      interaction.fields.getTextInputValue('mod_log_channel_id').trim()||null,
         announcement_channel_id: interaction.fields.getTextInputValue('announcement_channel_id').trim()||null,
         welcome_channel_id:      interaction.fields.getTextInputValue('welcome_channel_id').trim()||null,
-        ticket_log_channel_id:   interaction.fields.getTextInputValue('ticket_log_channel_id').trim()||null,
+        transcript_channel:      interaction.fields.getTextInputValue('transcript_channel').trim()||null,
       };
       await guildManager.update(guildId, patch);
       return interaction.reply({
@@ -138,6 +144,40 @@ module.exports = {
       });
     }
 
+    if (customId === 'aegis_modal_panels') {
+      const patch = {
+        panel_support_channel_id:    interaction.fields.getTextInputValue('panel_support_ch').trim()||null,
+        panel_starterkit_channel_id: interaction.fields.getTextInputValue('panel_starterkit_ch').trim()||null,
+        panel_concoin_channel_id:    interaction.fields.getTextInputValue('panel_concoin_ch').trim()||null,
+        panel_claveshard_channel_id: interaction.fields.getTextInputValue('panel_claveshard_ch').trim()||null,
+        panel_basewatch_channel_id:  interaction.fields.getTextInputValue('panel_basewatch_ch').trim()||null,
+      };
+      await guildManager.update(guildId, patch);
+      const set = Object.values(patch).filter(Boolean).length;
+      return interaction.reply({
+        content: `✅ **Panel Channels saved!** (${set}/5 set)
+${Object.entries(patch).filter(([,v])=>v).map(([k,v])=>`• ${k.replace('panel_','').replace('_channel_id','')}: <#${v}>`).join('\n')||'None set.'}`,
+        ephemeral: true,
+      });
+    }
+
+    if (customId === 'aegis_modal_ticketlogs') {
+      const patch = {
+        ticket_log_support:    interaction.fields.getTextInputValue('log_support').trim()||null,
+        ticket_log_starterkit: interaction.fields.getTextInputValue('log_starterkit').trim()||null,
+        ticket_log_concoin:    interaction.fields.getTextInputValue('log_concoin').trim()||null,
+        ticket_log_claveshard: interaction.fields.getTextInputValue('log_claveshard').trim()||null,
+        ticket_log_basewatch:  interaction.fields.getTextInputValue('log_basewatch').trim()||null,
+      };
+      await guildManager.update(guildId, patch);
+      const set = Object.values(patch).filter(Boolean).length;
+      return interaction.reply({
+        content: `✅ **Ticket Log Channels saved!** (${set}/5 set)
+${Object.entries(patch).filter(([,v])=>v).map(([k,v])=>`• ${k.replace('ticket_log_','')}: <#${v}>`).join('\n')||'None set.'}`,
+        ephemeral: true,
+      });
+    }
+
     if (customId === 'aegis_modal_economy') {
       const patch = {
         currency_name:        interaction.fields.getTextInputValue('currency_name').trim()||'ClaveShard',
@@ -155,17 +195,47 @@ module.exports = {
 };
 
 // ── Modal builders ───────────────────────────────────────────────────
+async function showPanelChannelsModal(interaction) {
+  const config = await guildManager.getConfig(interaction.guildId)||{};
+  const modal = new ModalBuilder()
+    .setCustomId('aegis_modal_panels')
+    .setTitle('🎫 Panel Post Channels');
+  modal.addComponents(
+    row(text('panel_support_ch',    '🛡️ Support Panel Channel ID',    config.panel_support_channel_id||'',    false, 'Channel where the Support panel button is posted')),
+    row(text('panel_starterkit_ch', '🎁 Starter Kit Panel Channel ID', config.panel_starterkit_channel_id||'', false, 'Channel where the Starter Kit panel is posted')),
+    row(text('panel_concoin_ch',    '🪙 ConCoin Panel Channel ID',     config.panel_concoin_channel_id||'',    false, 'Channel where the ConCoin panel is posted')),
+    row(text('panel_claveshard_ch', '💎 ClaveShard Panel Channel ID',  config.panel_claveshard_channel_id||'', false, 'Channel where the ClaveShard panel is posted')),
+    row(text('panel_basewatch_ch',  '👁️ Base Watch Panel Channel ID', config.panel_basewatch_channel_id||'',  false, 'Channel where the Base Watch panel is posted')),
+  );
+  return interaction.showModal(modal);
+}
+
+async function showTicketLogsModal(interaction) {
+  const config = await guildManager.getConfig(interaction.guildId)||{};
+  const modal = new ModalBuilder()
+    .setCustomId('aegis_modal_ticketlogs')
+    .setTitle('📋 Ticket Log Channels');
+  modal.addComponents(
+    row(text('log_support',    '🛡️ Support Ticket Log Channel ID',    config.ticket_log_support||'',    false, 'Where support ticket notifications are logged')),
+    row(text('log_starterkit', '🎁 Starter Kit Log Channel ID',       config.ticket_log_starterkit||'', false, 'Where starter kit ticket logs go')),
+    row(text('log_concoin',    '🪙 ConCoin Log Channel ID',           config.ticket_log_concoin||'',    false, 'Where ConCoin ticket logs go')),
+    row(text('log_claveshard', '💎 ClaveShard Log Channel ID',        config.ticket_log_claveshard||'', false, 'Where ClaveShard order logs go')),
+    row(text('log_basewatch',  '👁️ Base Watch Log Channel ID',       config.ticket_log_basewatch||'',  false, 'Where base watch request logs go')),
+  );
+  return interaction.showModal(modal);
+}
+
 async function showChannelsModal(interaction) {
   const config = await guildManager.getConfig(interaction.guildId)||{};
   const modal = new ModalBuilder()
     .setCustomId('aegis_modal_channels')
     .setTitle('📡 Channel Configuration');
   modal.addComponents(
-    row(text('aegis_channel_id',     'AEGIS AI Channel ID',          config.aegis_channel_id||'',        false, 'Paste channel ID — right-click channel → Copy ID')),
-    row(text('mod_log_channel_id',   'Mod Log Channel ID',            config.mod_log_channel_id||'',      false, 'Where moderation actions are logged')),
-    row(text('announcement_channel_id','Announcement Channel ID',     config.announcement_channel_id||'',false, 'Where AEGIS announcements are posted')),
-    row(text('welcome_channel_id',   'Welcome Channel ID',            config.welcome_channel_id||'',      false, 'Where new member welcomes are sent')),
-    row(text('ticket_log_channel_id','Ticket Log Channel ID',         config.ticket_log_channel_id||'',  false, 'Where ticket transcripts are saved')),
+    row(text('aegis_channel_id',       'AEGIS AI Channel ID',        config.aegis_channel_id||'',         false, 'Right-click channel → Copy ID')),
+    row(text('mod_log_channel_id',     'Mod Log Channel ID',          config.mod_log_channel_id||'',       false, 'Where moderation actions are logged')),
+    row(text('announcement_channel_id','Announcement Channel ID',     config.announcement_channel_id||'',  false, 'Where AEGIS announcements are posted')),
+    row(text('welcome_channel_id',     'Welcome Channel ID',          config.welcome_channel_id||'',       false, 'Where new member welcomes are sent')),
+    row(text('transcript_channel',     'Transcript Archive Channel',  config.transcript_channel||'',       false, 'Where ticket transcripts/archives are saved')),
   );
   return interaction.showModal(modal);
 }

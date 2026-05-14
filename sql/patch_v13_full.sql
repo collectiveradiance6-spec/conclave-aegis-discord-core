@@ -69,6 +69,23 @@ alter table if exists guild_configs add column if not exists setup_at           
 alter table if exists guild_configs add column if not exists created_at                timestamptz default now();
 alter table if exists guild_configs add column if not exists updated_at                timestamptz default now();
 create index if not exists idx_gc_setup on guild_configs(setup_complete);
+-- Panel post channels (where each ticket panel button is posted)
+alter table if exists guild_configs add column if not exists panel_support_channel_id    text;
+alter table if exists guild_configs add column if not exists panel_starterkit_channel_id text;
+alter table if exists guild_configs add column if not exists panel_concoin_channel_id    text;
+alter table if exists guild_configs add column if not exists panel_claveshard_channel_id text;
+alter table if exists guild_configs add column if not exists panel_basewatch_channel_id  text;
+
+-- Per-category ticket log channels (replaces single ticket_log_channel_id)
+alter table if exists guild_configs add column if not exists ticket_log_support    text;
+alter table if exists guild_configs add column if not exists ticket_log_starterkit text;
+alter table if exists guild_configs add column if not exists ticket_log_concoin    text;
+alter table if exists guild_configs add column if not exists ticket_log_claveshard text;
+alter table if exists guild_configs add column if not exists ticket_log_basewatch  text;
+
+-- Transcript archive channel (replaces generic ticket_log_channel_id)
+alter table if exists guild_configs add column if not exists transcript_channel text;
+
 
 -- aegis_wallets
 alter table if exists aegis_wallets add column if not exists discord_tag      text;

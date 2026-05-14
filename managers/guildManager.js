@@ -20,6 +20,13 @@ const supabase = createClient(
 const CACHE_TTL = 5 * 60 * 1000;
 
 const DEFAULT_CONFIG = {
+  // Panel post channels (where each support panel button is displayed)
+  panel_support_channel_id:null,panel_starterkit_channel_id:null,
+  panel_concoin_channel_id:null,panel_claveshard_channel_id:null,panel_basewatch_channel_id:null,
+  // Ticket log channels (one per category — where ticket notifications are sent)
+  ticket_log_support:null,ticket_log_starterkit:null,
+  ticket_log_concoin:null,ticket_log_claveshard:null,ticket_log_basewatch:null,
+  // Core channels
   aegis_channel_id:null,mod_log_channel_id:null,announcement_channel_id:null,
   welcome_channel_id:null,ticket_log_channel_id:null,economy_log_channel_id:null,
   monitor_channel_id:null,transcript_channel_id:null,
