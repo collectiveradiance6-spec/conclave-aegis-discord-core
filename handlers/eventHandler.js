@@ -22,10 +22,17 @@ function load(client) {
       // In discord.js v14, ClientReady fires as 'ready'. Use 'ready' so handler fires.
       // Our ready.js uses 'clientReady' directly — map it back to 'ready' for v14 compat.
       const evName = event.name === 'clientReady' ? 'ready' : event.name;
+      const handler = async (...args) => {
+        try {
+          await event.execute(...args, client);
+        } catch(err) {
+          console.error(`[Event:${event.name}]`, err.message);
+        }
+      };
       if (event.once) {
-        client.once(evName, (...args) => event.execute(...args, client));
+        client.once(evName, handler);
       } else {
-        client.on(evName, (...args) => event.execute(...args, client));
+        client.on(evName, handler);
       }
       console.log(`[EventHandler] ✅ Loaded event: ${event.name}`);
     } catch (err) {

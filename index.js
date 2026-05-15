@@ -81,15 +81,23 @@ client.login(process.env.DISCORD_BOT_TOKEN)
   .catch(err => { console.error('❌ Login failed:', err.message); process.exit(1); });
 
 // ── Graceful shutdown ────────────────────────────────────────────────
-const shutdown = (sig) => {
-  console.log(`\n[AEGIS] ${sig} received — shutting down gracefully`);
-  client.destroy();
-  server.close(() => process.exit(0));
-  setTimeout(() => process.exit(0), 5000);
+const shutdown = async (sig) => {
+  console.log(`\n[AEGIS] ${sig} received — draining interactions (5s)...`);
+  // Give in-flight interactions time to complete before closing
+  await new Promise(r => setTimeout(r, 3000));
+  console.log('[AEGIS] Shutting down gracefully.');
+  try { client.destroy(); } catch {}
+  try { server.close(); } catch {}
+  setTimeout(() => process.exit(0), 2000);
 };
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT',  () => shutdown('SIGINT'));
-process.on('uncaughtException',  err => console.error('[UNCAUGHT]', err.message));
-process.on('unhandledRejection', err => console.error('[UNHANDLED]', err?.message || err));
+// Catch-all for uncaught errors — log but don't crash
+process.on('uncaughtException', (err) => {
+  console.error('[UNCAUGHT EXCEPTION]', err.message);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[UNHANDLED REJECTION]', reason?.message || reason);
+});
 
 module.exports = client;

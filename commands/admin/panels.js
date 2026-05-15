@@ -5,7 +5,7 @@
 
 const {
   SlashCommandBuilder, EmbedBuilder, ActionRowBuilder,
-  ButtonBuilder, ButtonStyle, StringSelectMenuBuilder,
+  ButtonBuilder, ButtonStyle,
   PermissionFlagsBits,
 } = require('discord.js');
 const { isAdmin, base, C, FT } = require('../../config/constants');

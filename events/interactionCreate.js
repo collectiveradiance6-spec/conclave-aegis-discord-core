@@ -40,15 +40,15 @@ module.exports = {
       }
       if (interaction.isButton()) {
         const id = interaction.customId;
-        if (id.startsWith('aegis_setup_')||id.startsWith('aegis_toggle_')) return setupAegis.handleButton(interaction);
+        if (id.startsWith('aegis_setup_')||id.startsWith('aegis_toggle_')) return await setupAegis.handleButton(interaction);
         if (id.startsWith('ticket_')||id.startsWith('close_ticket')||id.startsWith('claim_ticket')) return handleTicketInteraction(interaction);
-        if (id.startsWith('watchtower_')||id.startsWith('wt_')) return handleWatchtowerInteraction(interaction);
-        if (id.startsWith('giveaway_enter_')) return handleGiveawayEntry(interaction);
+        if (id.startsWith('watchtower_')||id.startsWith('wt_')) return await handleWatchtowerInteraction(interaction);
+        if (id.startsWith('giveaway_enter_')) return await handleGiveawayEntry(interaction);
         return;
       }
       if (interaction.isModalSubmit()) {
         const id = interaction.customId;
-        if (id.startsWith('aegis_modal_')) return setupAegis.handleModal(interaction);
+        if (id.startsWith('aegis_modal_')) return await setupAegis.handleModal(interaction);
         if (id.startsWith('ticket_')) return handleTicketInteraction(interaction);
         return;
       }
