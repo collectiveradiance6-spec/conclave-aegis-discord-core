@@ -20,6 +20,9 @@ const supabase = createClient(
 const CACHE_TTL = 5 * 60 * 1000;
 
 const DEFAULT_CONFIG = {
+  // Ticket category IDs (Discord category folders where ticket channels are created)
+  ticket_category_support:null,ticket_category_starterkit:null,
+  ticket_category_concoin:null,ticket_category_claveshard:null,ticket_category_basewatch:null,
   // Panel post channels (where each support panel button is displayed)
   panel_support_channel_id:null,panel_starterkit_channel_id:null,
   panel_concoin_channel_id:null,panel_claveshard_channel_id:null,panel_basewatch_channel_id:null,

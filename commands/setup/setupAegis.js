@@ -46,14 +46,17 @@ module.exports = {
 
     const row1 = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('aegis_setup_channels').setLabel('📡 Core Channels').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('aegis_setup_ticketcats').setLabel('🗂️ Ticket Categories').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('aegis_setup_panels').setLabel('🎫 Panel Channels').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('aegis_setup_ticketlogs').setLabel('📋 Ticket Logs').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('aegis_setup_roles').setLabel('👥 Roles').setStyle(ButtonStyle.Primary),
     );
-    const row2 = new ActionRowBuilder().addComponents(
+    const row1b = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('aegis_setup_roles').setLabel('👥 Roles').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('aegis_setup_features').setLabel('⚙️ Features').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('aegis_setup_branding').setLabel('🎨 Branding').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('aegis_setup_economy').setLabel('💎 Economy').setStyle(ButtonStyle.Secondary),
+    );
+    const row2 = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('aegis_setup_complete').setLabel('✅ Finish Setup').setStyle(ButtonStyle.Success),
     );
 
@@ -67,6 +70,8 @@ module.exports = {
     switch (customId) {
       case 'aegis_setup_channels':
         return showChannelsModal(interaction);
+      case 'aegis_setup_ticketcats':
+        return showTicketCatsModal(interaction);
       case 'aegis_setup_panels':
         return showPanelChannelsModal(interaction);
       case 'aegis_setup_ticketlogs':
@@ -157,6 +162,22 @@ module.exports = {
       return interaction.reply({
         content: `✅ **Panel Channels saved!** (${set}/5 set)
 ${Object.entries(patch).filter(([,v])=>v).map(([k,v])=>`• ${k.replace('panel_','').replace('_channel_id','')}: <#${v}>`).join('\n')||'None set.'}`,
+        flags: 64,
+      });
+    }
+
+    if (customId === 'aegis_modal_ticketcats') {
+      const patch = {
+        ticket_category_support:    interaction.fields.getTextInputValue('cat_support').trim()||null,
+        ticket_category_starterkit: interaction.fields.getTextInputValue('cat_starterkit').trim()||null,
+        ticket_category_concoin:    interaction.fields.getTextInputValue('cat_concoin').trim()||null,
+        ticket_category_claveshard: interaction.fields.getTextInputValue('cat_claveshard').trim()||null,
+        ticket_category_basewatch:  interaction.fields.getTextInputValue('cat_basewatch').trim()||null,
+      };
+      await guildManager.update(guildId, patch);
+      const set = Object.values(patch).filter(Boolean).length;
+      return interaction.reply({
+        content: `✅ **Ticket Categories saved!** (${set}/5 set)\n${Object.entries(patch).filter(([,v])=>v).map(([k,v])=>`• ${k.replace('ticket_category_','')}: <#${v}>`).join('\n')||'None set.'}\n\n> 💡 Tickets will now be created **inside** the configured category as private channels.`,
         flags: 64,
       });
     }
