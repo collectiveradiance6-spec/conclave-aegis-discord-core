@@ -3,85 +3,127 @@
 // ═══════════════════════════════════════════════════════════════════════
 'use strict';
 
-const { Events } = require('discord.js');
-const setupAegis = require('../commands/setup/setupAegis');
+const setupAegis  = require('../commands/setup/setupAegis');
 const { handleEmbedgisButton, handleEmbedgisSelect } = require('../embedgis');
-const { handleTicketInteraction } = require('../ticket-system');
+const { handleTicketInteraction }  = require('../ticket-system');
 const { handleWatchtowerInteraction } = require('../watchtower-system');
 
 const rates = new Map();
-function checkRate(uid,ms=5000){const l=rates.get(uid)||0,n=Date.now();if(n-l<ms)return Math.ceil((ms-(n-l))/1000);rates.set(uid,n);return 0;}
-setInterval(()=>{const cut=Date.now()-120_000;for(const [k,v] of rates)if(v<cut)rates.delete(k);},5*60_000);
+function checkRate(uid, ms=4000) {
+  const l=rates.get(uid)||0, n=Date.now();
+  if (n-l<ms) return Math.ceil((ms-(n-l))/1000);
+  rates.set(uid,n); return 0;
+}
+setInterval(()=>{ const cut=Date.now()-120_000; for(const [k,v] of rates) if(v<cut) rates.delete(k); }, 5*60_000);
 
 module.exports = {
-  name: Events.InteractionCreate,
+  name: 'interactionCreate',
   once: false,
   async execute(interaction, client) {
     try {
+
       if (interaction.isChatInputCommand()) {
         const cmd = client.commands.get(interaction.commandName);
-        if (!cmd) return interaction.reply({content:'⚠️ Unknown command.',flags:64});
-        const member = interaction.member;
-        const isAdmin = member?.permissions?.has('ManageMessages')||member?.permissions?.has('Administrator');
+        if (!cmd) return interaction.reply({ content:'⚠️ Unknown command.', flags:64 });
+
+        const isAdmin = interaction.member?.permissions?.has('Administrator') ||
+                        interaction.member?.permissions?.has('ManageMessages');
         if (!isAdmin) {
           const wait = checkRate(interaction.user.id);
-          if (wait>0) return interaction.reply({content:`⏳ Wait **${wait}s** before another command.`,flags:64});
+          if (wait > 0) return interaction.reply({ content:`⏳ Wait **${wait}s**.`, flags:64 });
         }
+
+        if (!interaction.deferred && !interaction.replied) {
+          try {
+            await interaction.deferReply();
+          } catch (e) {
+            console.error(`[${interaction.commandName}] deferReply failed:`, e.message);
+            return;
+          }
+        }
+
         try {
           return await cmd.execute(interaction, client);
-        } catch(cmdErr) {
-          console.error(`[/${interaction.commandName}]`, cmdErr.message);
-          const errMsg = `⚠️ Command error: ${cmdErr.message?.slice(0,100)||'Unknown error'}`;
+        } catch (e) {
+          console.error(`[/${interaction.commandName}]`, e.message);
           try {
-            if (interaction.deferred || interaction.replied) await interaction.editReply(errMsg);
-            else await interaction.reply({ content: errMsg, flags: 64 });
+            const m = '⚠️ ' + (e.message?.slice(0,120)||'Error');
+            if (interaction.deferred||interaction.replied) await interaction.editReply(m);
+            else await interaction.reply({ content:m, flags:64 });
           } catch {}
         }
-      }
-      if (interaction.isButton()) {
-        const id = interaction.customId;
-        if (id.startsWith('aegis_setup_')||id.startsWith('aegis_toggle_')) return await setupAegis.handleButton(interaction);
-        if (id.startsWith('ticket_')||id.startsWith('close_ticket')||id.startsWith('claim_ticket')) return handleTicketInteraction(interaction);
-        if (id.startsWith('watchtower_')||id.startsWith('wt_')) return await handleWatchtowerInteraction(interaction);
-        if (id.startsWith('giveaway_enter_')) return await handleGiveawayEntry(interaction);
         return;
       }
+
+      if (interaction.isButton()) {
+        const id = interaction.customId;
+        if (id.startsWith('aegis_setup_')||id.startsWith('aegis_toggle_'))
+          return await setupAegis.handleButton(interaction);
+        if (id==='ticket_open'||id.startsWith('tkt_')||id.startsWith('close_ticket')||id.startsWith('claim_ticket'))
+          return await handleTicketInteraction(interaction, client);
+        if (id.startsWith('watchtower_')||id.startsWith('wt_'))
+          return await handleWatchtowerInteraction(interaction);
+        if (id.startsWith('emg_')||id.startsWith('embedgis_'))
+          return await handleEmbedgisButton(interaction);
+        if (id.startsWith('giveaway_enter_'))
+          return await handleGiveawayEntry(interaction);
+        if (id.startsWith('sub_check_'))
+          return await handleSubChecklist(interaction);
+        return;
+      }
+
       if (interaction.isModalSubmit()) {
         const id = interaction.customId;
         if (id.startsWith('aegis_modal_')) return await setupAegis.handleModal(interaction);
-        if (id.startsWith('ticket_')) return handleTicketInteraction(interaction);
+        if (id.startsWith('ticket_modal_')||id.startsWith('ticket_'))
+          return await handleTicketInteraction(interaction, client);
         return;
       }
-      if (interaction.isStringSelectMenu()) {
-        if (interaction.customId.startsWith('ticket_')) return handleTicketInteraction(interaction);
+
+      if (interaction.isStringSelectMenu()||interaction.isChannelSelectMenu()) {
+        const id = interaction.customId;
+        if (id.startsWith('ticket_')||id.startsWith('tkt_'))
+          return await handleTicketInteraction(interaction, client);
+        if (id.startsWith('emg_')||id.startsWith('embedgis_'))
+          return await handleEmbedgisSelect(interaction);
         return;
       }
-    } catch(err) {
-      console.error('[InteractionCreate]',err.message);
-      const msg='⚠️ An error occurred. Please try again.';
+
+    } catch (err) {
+      console.error('[InteractionCreate]', err.message);
       try {
-        if (interaction.replied||interaction.deferred) await interaction.followUp({content:msg,flags:64});
-        else await interaction.reply({content:msg,flags:64});
+        const m = '⚠️ An error occurred. Please try again.';
+        if (interaction.replied||interaction.deferred) await interaction.followUp({ content:m, flags:64 });
+        else await interaction.reply({ content:m, flags:64 });
       } catch {}
     }
   },
 };
 
-async function handleSubChecklist(interaction) {
-  // Sub tier checklist button handler — handled inline in subscription command
-  const subCmd = require('../commands/admin/subscriptions.js').find?.(c=>c.data?.name==='sub-checklist') ||
-                 require('../commands/admin/subscriptions.js');
-  if (subCmd?.handleChecklistButton) return subCmd.handleChecklistButton(interaction);
-}
-
 async function handleGiveawayEntry(interaction) {
   const giveawayId = interaction.customId.replace('giveaway_enter_','');
-  const {sb,sbOk} = require('../services/supabase');
-  if (!sb||!sbOk()) return interaction.reply({content:'⚠️ Database unavailable.',flags:64});
+  const { sb, sbOk } = require('../services/supabase');
+  if (!sb||!sbOk()) return interaction.reply({ content:'⚠️ Database unavailable.', flags:64 });
   const userId = interaction.user.id;
-  const {data:existing} = await sb.from('aegis_giveaways_entries').select('id').eq('giveaway_id',giveawayId).eq('user_id',userId).single().catch(()=>({data:null}));
-  if (existing) return interaction.reply({content:'✅ Already entered!',flags:64});
-  await sb.from('aegis_giveaways_entries').insert({giveaway_id:giveawayId,user_id:userId,user_tag:interaction.user.tag,entered_at:new Date().toISOString()}).catch(()=>{});
-  const {count} = await sb.from('aegis_giveaways_entries').select('*',{count:'exact',head:true}).eq('giveaway_id',giveawayId);
-  return interaction.reply({content:`🎉 You're in! **${count||'?'}** entries so far.`,flags:64});
+  const { data:existing } = await sb.from('aegis_giveaways_entries').select('id')
+    .eq('giveaway_id',giveawayId).eq('user_id',userId).single().catch(()=>({data:null}));
+  if (existing) return interaction.reply({ content:'✅ Already entered!', flags:64 });
+  await sb.from('aegis_giveaways_entries').insert({
+    giveaway_id:giveawayId, user_id:userId, user_tag:interaction.user.username,
+    entered_at:new Date().toISOString()
+  }).catch(()=>{});
+  const { count } = await sb.from('aegis_giveaways_entries')
+    .select('*',{count:'exact',head:true}).eq('giveaway_id',giveawayId);
+  return interaction.reply({ content:`🎉 You're in! **${count||'?'}** entries so far.`, flags:64 });
+}
+
+async function handleSubChecklist(interaction) {
+  try {
+    const subs = require('../commands/admin/subscriptions.js');
+    const h = Array.isArray(subs) ? subs.find(c=>c?.handleChecklistButton) : subs;
+    if (h?.handleChecklistButton) return await h.handleChecklistButton(interaction);
+  } catch(e) {
+    console.error('[SubChecklist]', e.message);
+    return interaction.reply({ content:'⚠️ Checklist error.', flags:64 });
+  }
 }
