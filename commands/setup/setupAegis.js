@@ -60,7 +60,7 @@ module.exports = {
       new ButtonBuilder().setCustomId('aegis_setup_complete').setLabel('✅ Finish Setup').setStyle(ButtonStyle.Success),
     );
 
-    await interaction.reply({ embeds:[embed], components:[row1, row2], flags:64 });
+    await interaction.editReply({ embeds:[embed], components:[row1, row2] });
   },
 
   // ── Handle button interactions ───────────────────────────────────
