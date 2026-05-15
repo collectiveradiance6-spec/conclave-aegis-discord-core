@@ -57,7 +57,7 @@ module.exports = {
       new ButtonBuilder().setCustomId('aegis_setup_complete').setLabel('✅ Finish Setup').setStyle(ButtonStyle.Success),
     );
 
-    await interaction.reply({ embeds:[embed], components:[row1, row2], ephemeral:true });
+    await interaction.reply({ embeds:[embed], components:[row1, row2], flags:64 });
   },
 
   // ── Handle button interactions ───────────────────────────────────
@@ -92,7 +92,7 @@ module.exports = {
       await guildManager.updateField(guildId, key, newVal);
       return interaction.reply({
         content: `${newVal?'✅':'❌'} **${feature}** ${newVal?'enabled':'disabled'} for this server.`,
-        ephemeral: true,
+        flags: 64,
       });
     }
   },
@@ -112,7 +112,7 @@ module.exports = {
       await guildManager.update(guildId, patch);
       return interaction.reply({
         content: '✅ **Channels saved!**\n\nAEGIS will now use:\n' + Object.entries(patch).filter(([,v])=>v).map(([k,v])=>`• ${k.replace(/_id$/,'').replace(/_/g,' ')}: <#${v}>`).join('\n') || 'No channels set.',
-        ephemeral: true,
+        flags: 64,
       });
     }
 
@@ -127,7 +127,7 @@ module.exports = {
       await guildManager.update(guildId, patch);
       return interaction.reply({
         content: '✅ **Roles saved!**\n\nAEGIS will now use these roles for permission checks.',
-        ephemeral: true,
+        flags: 64,
       });
     }
 
@@ -140,7 +140,7 @@ module.exports = {
       await guildManager.update(guildId, patch);
       return interaction.reply({
         content: `✅ **Branding saved!**\n• Name: **${patch.display_name||interaction.guild.name}**\n• Theme: **${patch.server_theme}**`,
-        ephemeral: true,
+        flags: 64,
       });
     }
 
@@ -157,7 +157,7 @@ module.exports = {
       return interaction.reply({
         content: `✅ **Panel Channels saved!** (${set}/5 set)
 ${Object.entries(patch).filter(([,v])=>v).map(([k,v])=>`• ${k.replace('panel_','').replace('_channel_id','')}: <#${v}>`).join('\n')||'None set.'}`,
-        ephemeral: true,
+        flags: 64,
       });
     }
 
@@ -174,7 +174,7 @@ ${Object.entries(patch).filter(([,v])=>v).map(([k,v])=>`• ${k.replace('panel_'
       return interaction.reply({
         content: `✅ **Ticket Log Channels saved!** (${set}/5 set)
 ${Object.entries(patch).filter(([,v])=>v).map(([k,v])=>`• ${k.replace('ticket_log_','')}: <#${v}>`).join('\n')||'None set.'}`,
-        ephemeral: true,
+        flags: 64,
       });
     }
 
@@ -188,7 +188,7 @@ ${Object.entries(patch).filter(([,v])=>v).map(([k,v])=>`• ${k.replace('ticket_
       await guildManager.update(guildId, patch);
       return interaction.reply({
         content: `✅ **Economy saved!**\n• Currency: ${patch.currency_emoji} **${patch.currency_name}**\n• Weekly claim: **${patch.weekly_claim_amount}**\n• Trivia reward: **${patch.trivia_reward_amount.toLocaleString()}** ConCoins`,
-        ephemeral: true,
+        flags: 64,
       });
     }
   },
@@ -310,7 +310,7 @@ async function showFeaturesMenu(interaction) {
   return interaction.reply({
     content: '**⚙️ Feature Toggles** — click to enable/disable each feature for this server:',
     components: rows,
-    ephemeral: true,
+    flags: 64,
   });
 }
 
@@ -329,7 +329,7 @@ async function finishSetup(interaction) {
     .setFooter({ text: `Configured by ${interaction.user.username}` })
     .setTimestamp();
 
-  return interaction.reply({ embeds:[embed], ephemeral:true });
+  return interaction.reply({ embeds:[embed], flags:64 });
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────

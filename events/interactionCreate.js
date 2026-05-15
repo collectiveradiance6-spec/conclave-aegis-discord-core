@@ -20,14 +20,23 @@ module.exports = {
     try {
       if (interaction.isChatInputCommand()) {
         const cmd = client.commands.get(interaction.commandName);
-        if (!cmd) return interaction.reply({content:'⚠️ Unknown command.',ephemeral:true});
+        if (!cmd) return interaction.reply({content:'⚠️ Unknown command.',flags:64});
         const member = interaction.member;
         const isAdmin = member?.permissions?.has('ManageMessages')||member?.permissions?.has('Administrator');
         if (!isAdmin) {
           const wait = checkRate(interaction.user.id);
-          if (wait>0) return interaction.reply({content:`⏳ Wait **${wait}s** before another command.`,ephemeral:true});
+          if (wait>0) return interaction.reply({content:`⏳ Wait **${wait}s** before another command.`,flags:64});
         }
-        return cmd.execute(interaction, client);
+        try {
+          return await cmd.execute(interaction, client);
+        } catch(cmdErr) {
+          console.error(`[/${interaction.commandName}]`, cmdErr.message);
+          const errMsg = `⚠️ Command error: ${cmdErr.message?.slice(0,100)||'Unknown error'}`;
+          try {
+            if (interaction.deferred || interaction.replied) await interaction.editReply(errMsg);
+            else await interaction.reply({ content: errMsg, flags: 64 });
+          } catch {}
+        }
       }
       if (interaction.isButton()) {
         const id = interaction.customId;
@@ -51,8 +60,8 @@ module.exports = {
       console.error('[InteractionCreate]',err.message);
       const msg='⚠️ An error occurred. Please try again.';
       try {
-        if (interaction.replied||interaction.deferred) await interaction.followUp({content:msg,ephemeral:true});
-        else await interaction.reply({content:msg,ephemeral:true});
+        if (interaction.replied||interaction.deferred) await interaction.followUp({content:msg,flags:64});
+        else await interaction.reply({content:msg,flags:64});
       } catch {}
     }
   },
@@ -68,11 +77,11 @@ async function handleSubChecklist(interaction) {
 async function handleGiveawayEntry(interaction) {
   const giveawayId = interaction.customId.replace('giveaway_enter_','');
   const {sb,sbOk} = require('../services/supabase');
-  if (!sb||!sbOk()) return interaction.reply({content:'⚠️ Database unavailable.',ephemeral:true});
+  if (!sb||!sbOk()) return interaction.reply({content:'⚠️ Database unavailable.',flags:64});
   const userId = interaction.user.id;
   const {data:existing} = await sb.from('aegis_giveaways_entries').select('id').eq('giveaway_id',giveawayId).eq('user_id',userId).single().catch(()=>({data:null}));
-  if (existing) return interaction.reply({content:'✅ Already entered!',ephemeral:true});
+  if (existing) return interaction.reply({content:'✅ Already entered!',flags:64});
   await sb.from('aegis_giveaways_entries').insert({giveaway_id:giveawayId,user_id:userId,user_tag:interaction.user.tag,entered_at:new Date().toISOString()}).catch(()=>{});
   const {count} = await sb.from('aegis_giveaways_entries').select('*',{count:'exact',head:true}).eq('giveaway_id',giveawayId);
-  return interaction.reply({content:`🎉 You're in! **${count||'?'}** entries so far.`,ephemeral:true});
+  return interaction.reply({content:`🎉 You're in! **${count||'?'}** entries so far.`,flags:64});
 }

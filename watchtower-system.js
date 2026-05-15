@@ -155,13 +155,13 @@ function updateEmbedStatus(oldEmbed, statusKey, actorTag) {
 
 async function handleStaffAction(interaction, statusKey) {
   if (!interaction.member?.permissions?.has?.('ManageMessages') && WATCHTOWER_STAFF_ROLE_ID && !interaction.member?.roles?.cache?.has(WATCHTOWER_STAFF_ROLE_ID)) {
-    await interaction.reply({ content: '⛔ Watchtower staff only.', ephemeral: true });
+    await interaction.reply({ content: '⛔ Watchtower staff only.', flags: 64 });
     return true;
   }
 
   const oldEmbed = interaction.message.embeds?.[0];
   if (!oldEmbed) {
-    await interaction.reply({ content: '⚠️ No Watchtower embed found on this message.', ephemeral: true });
+    await interaction.reply({ content: '⚠️ No Watchtower embed found on this message.', flags: 64 });
     return true;
   }
 
@@ -175,7 +175,7 @@ async function handleStaffAction(interaction, statusKey) {
 
   await interaction.reply({
     content: `✅ Watchtower request updated to **${(STATUS[statusKey] || STATUS.pending).label}**.`,
-    ephemeral: true,
+    flags: 64,
   });
 
   return true;
@@ -259,7 +259,7 @@ async function handleWatchtowerInteraction(interaction, client) {
     if (!WATCHTOWER_PUBLIC_CHANNEL_ID || !WATCHTOWER_ADMIN_LOG_CHANNEL_ID) {
       await interaction.reply({
         content: '⚠️ Watchtower is missing channel IDs. Staff must set WATCHTOWER_PUBLIC_CHANNEL_ID and WATCHTOWER_ADMIN_LOG_CHANNEL_ID in Render.',
-        ephemeral: true,
+        flags: 64,
       });
       return true;
     }
@@ -270,7 +270,7 @@ async function handleWatchtowerInteraction(interaction, client) {
     if (!publicChannel || !adminLog) {
       await interaction.reply({
         content: '⚠️ Watchtower channel lookup failed. Staff should verify the public/admin channel IDs.',
-        ephemeral: true,
+        flags: 64,
       });
       return true;
     }
@@ -335,7 +335,7 @@ async function handleWatchtowerInteraction(interaction, client) {
 
     await interaction.reply({
       content: '✅ Your Base Watch Request has been submitted to the Watchtower.',
-      ephemeral: true,
+      flags: 64,
     });
     return true;
   }

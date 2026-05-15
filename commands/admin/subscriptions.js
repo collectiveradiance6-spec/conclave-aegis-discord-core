@@ -222,7 +222,7 @@ const subCheck = {
 
     // Only the owner can toggle their own checklist
     if (interaction.user.id !== userId) {
-      return interaction.reply({ content: '⛔ This is not your checklist.', ephemeral: true });
+      return interaction.reply({ content: '⛔ This is not your checklist.', flags: 64 });
     }
 
     const t = TIERS.find(t => t.id === tierId);

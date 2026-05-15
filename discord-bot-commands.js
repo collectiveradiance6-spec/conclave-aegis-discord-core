@@ -187,10 +187,10 @@ async function handleForum(interaction) {
   if (channel.isThread() || channel.type === 15) {
     // Forum channel — create thread
     await channel.threads.create({ name: title, message: { embeds: [embed] } });
-    await interaction.editReply({ content: `✅ Forum thread created in <#${channel.id}>`, ephemeral: true });
+    await interaction.editReply({ content: `✅ Forum thread created in <#${channel.id}>`, flags: 64 });
   } else {
     await channel.send({ embeds: [embed] });
-    await interaction.editReply({ content: `✅ Posted to <#${channel.id}>`, ephemeral: true });
+    await interaction.editReply({ content: `✅ Posted to <#${channel.id}>`, flags: 64 });
   }
 }
 
@@ -269,7 +269,7 @@ async function handlePanel(interaction) {
 
   const embed = panels[type] ? panels[type]() : new EmbedBuilder().setTitle('Panel').setDescription('Type not found');
   await channel.send({ embeds: [embed] });
-  await interaction.editReply({ content: `✅ Panel deployed to <#${channel.id}>`, ephemeral: true });
+  await interaction.editReply({ content: `✅ Panel deployed to <#${channel.id}>`, flags: 64 });
 }
 
 async function handleStatus(interaction) {
@@ -305,7 +305,7 @@ async function handleStatus(interaction) {
     .setTimestamp();
 
   await channel.send({ embeds: [embed] });
-  await interaction.editReply({ content: `✅ Status posted to <#${channel.id}>`, ephemeral: true });
+  await interaction.editReply({ content: `✅ Status posted to <#${channel.id}>`, flags: 64 });
 }
 
 async function handleShards(interaction) {
@@ -378,7 +378,7 @@ async function handleAnnounce(interaction) {
 
   const content = ping ? `${ping}` : undefined;
   await channel.send({ content, embeds: [embed] });
-  await interaction.editReply({ content: `✅ Announcement sent to <#${channel.id}>`, ephemeral: true });
+  await interaction.editReply({ content: `✅ Announcement sent to <#${channel.id}>`, flags: 64 });
 }
 
 async function handlePin(interaction) {
@@ -394,7 +394,7 @@ async function handlePin(interaction) {
 
   const msg = await channel.send({ embeds: [embed] });
   try { await msg.pin(); } catch(e) {}
-  await interaction.editReply({ content: `✅ Message pinned in <#${channel.id}>`, ephemeral: true });
+  await interaction.editReply({ content: `✅ Message pinned in <#${channel.id}>`, flags: 64 });
 }
 
 /* ── LOGIN ── */

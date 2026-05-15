@@ -136,7 +136,7 @@ async function handleTriviaButton(interaction) {
   if (customId === 'trivia_submit') {
     const session = activeSessions.get(channelId);
     if (!session || Date.now() >= session.expiresAt || session.winnerId) {
-      await interaction.reply({ content: '⌛ This trivia question has already ended.', ephemeral: true });
+      await interaction.reply({ content: '⌛ This trivia question has already ended.', flags: 64 });
       return true;
     }
     const modal = new ModalBuilder()
@@ -160,22 +160,22 @@ async function handleTriviaButton(interaction) {
   if (customId === 'trivia_hint') {
     const session = activeSessions.get(channelId);
     if (!session) {
-      await interaction.reply({ content: '⚠️ No active trivia here.', ephemeral: true });
+      await interaction.reply({ content: '⚠️ No active trivia here.', flags: 64 });
       return true;
     }
     const hintText = session.hint || generateHint(session.answer);
-    await interaction.reply({ content: `🔍 **Hint:** ${hintText}`, ephemeral: true });
+    await interaction.reply({ content: `🔍 **Hint:** ${hintText}`, flags: 64 });
     return true;
   }
 
   if (customId === 'trivia_skip') {
     const session = activeSessions.get(channelId);
     if (!session) {
-      await interaction.reply({ content: '⚠️ No active trivia here.', ephemeral: true });
+      await interaction.reply({ content: '⚠️ No active trivia here.', flags: 64 });
       return true;
     }
     if (!interaction.member?.permissions?.has('ManageMessages')) {
-      await interaction.reply({ content: '🚫 Staff only.', ephemeral: true });
+      await interaction.reply({ content: '🚫 Staff only.', flags: 64 });
       return true;
     }
     await interaction.deferUpdate();
@@ -202,7 +202,7 @@ async function handleTriviaModalSubmit(interaction) {
   if (!interaction.isModalSubmit()) return false;
   if (!interaction.customId.startsWith('trivia_modal:')) return false;
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: 64 });
 
   const parts     = interaction.customId.split(':');
   const channelId = parts[1];

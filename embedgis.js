@@ -319,20 +319,20 @@ async function handleEmbedgisCommand(interaction) {
   if (!interaction.isChatInputCommand() || interaction.commandName !== 'embedgis') return false;
 
   if (!interaction.member?.permissions?.has('ManageMessages')) {
-    await interaction.reply({ content: '⛔ Staff only — requires Manage Messages.', ephemeral: true });
+    await interaction.reply({ content: '⛔ Staff only — requires Manage Messages.', flags: 64 });
     return true;
   }
 
   let data;
   try { data = JSON.parse(interaction.options.getString('payload')); }
   catch (e) {
-    await interaction.reply({ embeds:[errEmbed(`JSON parse error: \`${e.message.slice(0,200)}\``)], ephemeral:true });
+    await interaction.reply({ embeds:[errEmbed(`JSON parse error: \`${e.message.slice(0,200)}\``)], flags:64 });
     return true;
   }
 
   const errs = validate(data);
   if (errs.length) {
-    await interaction.reply({ embeds:[errEmbed(`**Validation failed:**\n${errs.map(e=>`• ${e}`).join('\n')}`)], ephemeral:true });
+    await interaction.reply({ embeds:[errEmbed(`**Validation failed:**\n${errs.map(e=>`• ${e}`).join('\n')}`)], flags:64 });
     return true;
   }
 
@@ -367,8 +367,8 @@ async function handleEmbedgisSelect(interaction) {
 
   const [action, key] = interaction.customId.split(':');
   const state = pending.get(key);
-  if (!state) { await interaction.reply({ content:'⌛ Setup expired. Run `/embedgis` again.', ephemeral:true }); return true; }
-  if (state.userId !== interaction.user.id) { await interaction.reply({ content:'⛔ Not your broadcast.', ephemeral:true }); return true; }
+  if (!state) { await interaction.reply({ content:'⌛ Setup expired. Run `/embedgis` again.', flags:64 }); return true; }
+  if (state.userId !== interaction.user.id) { await interaction.reply({ content:'⛔ Not your broadcast.', flags:64 }); return true; }
 
   if (action === 'embedgis_ch') {
     state.channelId = interaction.values[0];
@@ -408,11 +408,11 @@ async function handleEmbedgisButton(interaction) {
   }
 
   if (!state) {
-    await interaction.reply({ content:'⌛ Setup expired. Run `/embedgis` again.', ephemeral:true });
+    await interaction.reply({ content:'⌛ Setup expired. Run `/embedgis` again.', flags:64 });
     return true;
   }
   if (state.userId !== interaction.user.id) {
-    await interaction.reply({ content:'⛔ Not your broadcast.', ephemeral:true });
+    await interaction.reply({ content:'⛔ Not your broadcast.', flags:64 });
     return true;
   }
 
@@ -433,7 +433,7 @@ async function handleEmbedgisButton(interaction) {
   // Preview
   if (action === 'embedgis_preview') {
     if (!state.channelId) {
-      await interaction.reply({ content:'⚠️ Pick a channel first.', ephemeral:true });
+      await interaction.reply({ content:'⚠️ Pick a channel first.', flags:64 });
       return true;
     }
     const embeds = renderEmbeds(state.data, state.theme);

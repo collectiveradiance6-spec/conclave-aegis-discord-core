@@ -11,9 +11,14 @@ const aegis = {
   data: new SlashCommandBuilder().setName('aegis').setDescription('🤖 Ask AEGIS anything about the Dominion')
     .addStringOption(o=>o.setName('question').setDescription('Your question').setRequired(true)),
   async execute(interaction) {
-    const q=interaction.options.getString('question');
-    const resp=await ai.ask(q,interaction.user.id,'',interaction.channelId);
-    return interaction.editReply({ embeds:[P.AegisPanel(resp,'AEGIS')] });
+    try {
+      const q = interaction.options.getString('question');
+      const resp = await ai.ask(q, interaction.user.id, '', interaction.channelId);
+      return interaction.editReply({ embeds: [P.AegisPanel(resp, 'AEGIS')] });
+    } catch(e) {
+      console.error('[/aegis]', e.message);
+      return interaction.editReply(`⚠️ AEGIS error: ${e.message?.slice(0,100)||'Unknown'}`);
+    }
   },
 };
 
