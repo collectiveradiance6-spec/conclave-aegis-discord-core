@@ -52,8 +52,11 @@ module.exports = {
     );
     const row1b = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('aegis_setup_roles').setLabel('👥 Roles').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('aegis_setup_monitor').setLabel('📡 Server Monitor').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('aegis_setup_features').setLabel('⚙️ Features').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('aegis_setup_branding').setLabel('🎨 Branding').setStyle(ButtonStyle.Secondary),
+    );
+    const row1c = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('aegis_setup_economy').setLabel('💎 Economy').setStyle(ButtonStyle.Secondary),
     );
     const row2 = new ActionRowBuilder().addComponents(
@@ -70,6 +73,8 @@ module.exports = {
     switch (customId) {
       case 'aegis_setup_channels':
         return showChannelsModal(interaction);
+      case 'aegis_setup_monitor':
+        return showMonitorModal(interaction);
       case 'aegis_setup_ticketcats':
         return showTicketCatsModal(interaction);
       case 'aegis_setup_panels':
@@ -166,6 +171,30 @@ ${Object.entries(patch).filter(([,v])=>v).map(([k,v])=>`• ${k.replace('panel_'
       });
     }
 
+    if (customId === 'aegis_modal_monitor') {
+      const patch = {
+        monitor_category_id:    interaction.fields.getTextInputValue('mon_category').trim()||null,
+        monitor_alert_channel:  interaction.fields.getTextInputValue('mon_alert').trim()||null,
+        monitor_status_channel: interaction.fields.getTextInputValue('mon_status').trim()||null,
+      };
+      await guildManager.update(guildId, patch);
+      return interaction.reply({
+        content: [
+          '✅ **Server Monitor configured!**',
+          '',
+          patch.monitor_category_id ? `• Category: <#${patch.monitor_category_id}>` : '• Category: Not set',
+          patch.monitor_alert_channel ? `• Alert channel: <#${patch.monitor_alert_channel}>` : '• Alert channel: Not set',
+          patch.monitor_status_channel ? `• Status channel: <#${patch.monitor_status_channel}>` : '• Status channel: Not set',
+          '',
+          '**Next steps:**',
+          '1. Add servers with `/monitor-add name: ip: port:`',
+          '2. Create voice channels with `/monitor-channels`',
+          '3. Test with `/monitor-status`',
+        ].join('\n'),
+        flags: 64,
+      });
+    }
+
     if (customId === 'aegis_modal_ticketcats') {
       const patch = {
         ticket_category_support:    interaction.fields.getTextInputValue('cat_support').trim()||null,
@@ -216,6 +245,19 @@ ${Object.entries(patch).filter(([,v])=>v).map(([k,v])=>`• ${k.replace('ticket_
 };
 
 // ── Modal builders ───────────────────────────────────────────────────
+async function showMonitorModal(interaction) {
+  const config = await guildManager.getConfig(interaction.guildId)||{};
+  const modal = new ModalBuilder()
+    .setCustomId('aegis_modal_monitor')
+    .setTitle('📡 Server Monitor Setup');
+  modal.addComponents(
+    row(text('mon_category', 'Voice Channel Category ID', config.monitor_category_id||'', false, 'Category where monitor VCs live — right-click → Copy ID')),
+    row(text('mon_alert',    'Status Alert Channel ID',   config.monitor_alert_channel||'',  false, 'Where online/offline alerts are posted')),
+    row(text('mon_status',   'Status Text Channel ID',    config.monitor_status_channel||'', false, 'Text channel for status embeds (optional)')),
+  );
+  return interaction.showModal(modal);
+}
+
 async function showTicketCatsModal(interaction) {
   const config = await guildManager.getConfig(interaction.guildId)||{};
   const modal = new ModalBuilder()

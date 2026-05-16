@@ -2,6 +2,7 @@
 'use strict';
 const { Events, ActivityType } = require('discord.js');
 const guildManager = require('../managers/guildManager');
+const { startMonitor } = require('../monitors/serverMonitor');
 const wsServer     = require('../launchpad/wsServer');
 
 module.exports = {
@@ -23,6 +24,9 @@ module.exports = {
       const cfg = await guildManager.getConfig(guildId);
       if (!cfg) await guildManager.provision(guildId, guild.name);
     }
+
+    // Start live server monitor
+    startMonitor(client);
 
     // Broadcast ready to launchpad
     wsServer.broadcast({

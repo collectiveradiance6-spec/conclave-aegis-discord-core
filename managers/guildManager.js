@@ -36,6 +36,7 @@ const DEFAULT_CONFIG = {
   admin_role_id:null,mod_role_id:null,helper_role_id:null,member_role_id:null,vip_role_id:null,
   economy_enabled:true,trivia_enabled:true,automod_enabled:true,tickets_enabled:true,
   monitor_enabled:false,ai_enabled:true,giveaway_enabled:true,watchtower_enabled:false,
+  monitor_category_id:null,monitor_alert_channel:null,monitor_status_channel:null,
   server_theme:'dominion',display_name:null,server_icon_url:null,bot_prefix:'/',
   currency_name:'ClaveShard',currency_emoji:'💎',weekly_claim_amount:3,trivia_reward_amount:15000,
   ai_persona:'sovereign',ai_model_preference:'anthropic',
