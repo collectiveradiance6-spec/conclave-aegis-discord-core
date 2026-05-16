@@ -216,6 +216,21 @@ ${Object.entries(patch).filter(([,v])=>v).map(([k,v])=>`• ${k.replace('ticket_
 };
 
 // ── Modal builders ───────────────────────────────────────────────────
+async function showTicketCatsModal(interaction) {
+  const config = await guildManager.getConfig(interaction.guildId)||{};
+  const modal = new ModalBuilder()
+    .setCustomId('aegis_modal_ticketcats')
+    .setTitle('🗂️ Ticket Category IDs');
+  modal.addComponents(
+    row(text('cat_support',    '🛡️ Support Category ID',      config.ticket_category_support||'',    false, 'Right-click category folder → Copy ID')),
+    row(text('cat_starterkit', '🎁 Starter Kit Category ID',  config.ticket_category_starterkit||'', false, 'Category where starter kit tickets open')),
+    row(text('cat_concoin',    '🪙 ConCoin Category ID',      config.ticket_category_concoin||'',    false, 'Category where ConCoin tickets open')),
+    row(text('cat_claveshard', '💎 ClaveShard Category ID',   config.ticket_category_claveshard||'', false, 'Category where ClaveShard order tickets open')),
+    row(text('cat_basewatch',  '👁️ Base Watch Category ID',  config.ticket_category_basewatch||'',  false, 'Category where base watch tickets open')),
+  );
+  return interaction.showModal(modal);
+}
+
 async function showPanelChannelsModal(interaction) {
   const config = await guildManager.getConfig(interaction.guildId)||{};
   const modal = new ModalBuilder()
