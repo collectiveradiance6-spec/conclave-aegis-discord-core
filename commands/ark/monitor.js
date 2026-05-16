@@ -36,12 +36,11 @@ const monitorAdd = {
     const nitradoId = interaction.options.getString('nitrado-id')?.trim() || null;
     const order     = interaction.options.getInteger('order') ?? 99;
 
-    const { count } = await sb.from('aegis_server_monitors')
-      .select('*', { count: 'exact', head: true })
-      .eq('guild_id', interaction.guildId).eq('server_name', name);
-    if (count > 0) return interaction.editReply(`⚠️ A server named **${name}** already exists. Use a different name.`);
+    // Upsert — update existing entry if name matches, create if new
+    const { data:existing } = await sb.from('aegis_server_monitors')
+      .select('id').eq('guild_id', interaction.guildId).eq('server_name', name).maybeSingle();
 
-    const { error } = await sb.from('aegis_server_monitors').insert({
+    const upsertData = {
       guild_id:         interaction.guildId,
       server_name:      name,
       ip, port,
@@ -53,9 +52,20 @@ const monitorAdd = {
       sort_order:       order,
       active:           true,
       created_at:       new Date().toISOString(),
-    });
+    };
 
+    let error;
+    if (existing?.id) {
+      // Update existing record
+      const { error:e } = await sb.from('aegis_server_monitors')
+        .update({ ...upsertData, created_at:undefined }).eq('id', existing.id);
+      error = e;
+    } else {
+      const { error:e } = await sb.from('aegis_server_monitors').insert({ ...upsertData, guild_id: interaction.guildId });
+      error = e;
+    }
     if (error) return interaction.editReply(`⚠️ Database error: ${error.message}`);
+    const action = existing?.id ? 'Updated' : 'Added';
 
     // Test ping
     const { online, players } = await queryServer(ip, port);
@@ -63,7 +73,7 @@ const monitorAdd = {
     const preview = buildVcName({ server_name:name, is_pvp:pvp, is_patreon:patreon }, online, players);
 
     return interaction.editReply({ embeds: [
-      base(`➕ Server Added: ${name}`, C.gr)
+      base(`${existing?.id ? '✏️ Updated' : '➕ Added'}: ${name}`, C.gr)
         .addFields(
           { name: '📡 Server',    value: `${ip}:${port}`, inline: true },
           { name: '🎮 Status',    value: online ? `🟢 Online · ${players}p` : '🔴 Offline', inline: true },
@@ -149,11 +159,16 @@ const monitorChannels = {
     const cfg = await guildManager.getConfig(interaction.guildId) || {};
     const catId = interaction.options.getString('category') || cfg.monitor_category_id;
 
+    const { data } = await sb.from('aegis_server_monitors')
+      .select('voice_channel_id').eq('guild_id', interaction.guildId).eq('active', true);
     const { created, errors } = await createChannels(interaction.guild, interaction.guildId, catId);
 
+    const alreadyHave = data.filter(s => s.voice_channel_id).length;
     let reply = `✅ Created **${created}** voice channel(s).`;
+    if (alreadyHave > 0) reply += `\n📌 **${alreadyHave}** server(s) already had voice channels linked — skipped.`;
     if (errors.length) reply += `\n\n⚠️ **Errors:**\n${errors.map(e=>`• ${e}`).join('\n')}`;
-    if (!catId) reply += '\n\n💡 Tip: Set a category in `/setup-aegis` → 📡 Server Monitor so channels are grouped.';
+    if (!catId) reply += '\n\n💡 Tip: Set a category in `/setup-aegis` → 📡 Server Monitor so channels are grouped together.';
+    if (created === 0 && alreadyHave === 0) reply += '\n\n❌ No servers found or all creation failed. Check bot has **Manage Channels** permission.';
 
     return interaction.editReply(reply);
   },
@@ -206,4 +221,21 @@ const monitorStatus = {
   },
 };
 
-module.exports = [monitorAdd, monitorRemove, monitorList, monitorRefresh, monitorChannels, monitorStatus];
+// ── /monitor-clear ────────────────────────────────────────────────────
+const monitorClear = {
+  data: new SlashCommandBuilder()
+    .setName('monitor-clear')
+    .setDescription('[Admin] 🗑️ Remove ALL servers from this guild\'s monitor (fresh start)')
+    .addBooleanOption(o => o.setName('confirm').setDescription('Type True to confirm').setRequired(true)),
+  async execute(interaction) {
+    if (!isAdmin(interaction.member)) return interaction.editReply('⛔ Admin only.');
+    if (!interaction.options.getBoolean('confirm')) return interaction.editReply('⚠️ Set confirm:True to proceed.');
+    if (!sb || !sbOk()) return interaction.editReply('⚠️ Database unavailable.');
+    const { error, count } = await sb.from('aegis_server_monitors')
+      .delete().eq('guild_id', interaction.guildId);
+    if (error) return interaction.editReply(`⚠️ ${error.message}`);
+    return interaction.editReply('✅ All monitor entries cleared. Re-add servers with `/monitor-add`.');
+  },
+};
+
+module.exports = [monitorAdd, monitorRemove, monitorList, monitorRefresh, monitorChannels, monitorStatus, monitorClear];
