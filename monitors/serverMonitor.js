@@ -111,25 +111,33 @@ async function queryServer(srv, apiKey) {
   // Primary: Nitrado API — works from any cloud host over HTTPS
   if (srv.nitrado_id && apiKey) {
     try {
-      const res = await fetch(
-        `https://api.nitrado.net/services/${srv.nitrado_id}/gameservers`,
-        {
-          headers: { Authorization: `Bearer ${apiKey}` },
-          signal:  AbortSignal.timeout(8000),
-        }
-      );
-      if (res.ok) {
+      const url = `https://api.nitrado.net/services/${srv.nitrado_id}/gameservers`;
+      // Strip "Bearer " prefix if user accidentally included it
+      const token = apiKey.replace(/^Bearer\s+/i, '').trim();
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal:  AbortSignal.timeout(8000),
+      });
+      if (!res.ok) {
+        console.warn(`[Monitor] Nitrado API ${res.status} for ${srv.server_name} (id:${srv.nitrado_id})`);
+      } else {
         const json = await res.json();
         const gs   = json?.data?.gameserver;
         if (gs) {
           const online  = gs.status === 'started';
           const players = parseInt(gs.query?.player_current ?? 0, 10);
+          console.log(`[Monitor] ${srv.server_name}: ${online?'🟢 Online':'🔴 Offline'} (${players}p) via Nitrado`);
           return { online, players };
+        } else {
+          console.warn(`[Monitor] Nitrado API: no gameserver in response for ${srv.server_name}`);
         }
       }
     } catch(e) {
       console.warn(`[Monitor] Nitrado API error for ${srv.server_name}:`, e.message);
     }
+  } else {
+    if (!srv.nitrado_id) console.warn(`[Monitor] ${srv.server_name}: no nitrado_id set`);
+    if (!apiKey)         console.warn(`[Monitor] No API key — set NITRADO_API_KEY env var or use /setup-aegis → Server Monitor`);
   }
 
   // Fallback: gamedig UDP (may fail on restricted networks)
