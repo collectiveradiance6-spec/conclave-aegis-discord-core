@@ -19,6 +19,7 @@ const monitorAdd = {
     .addBooleanOption(o => o.setName('pvp').setDescription('PvP server? (shows ⚔️)'))
     .addBooleanOption(o => o.setName('patreon').setDescription('Patreon exclusive? (shows ⭐)'))
     .addStringOption(o => o.setName('channel').setDescription('Existing voice channel ID (leave blank to auto-create later)'))
+    .addStringOption(o => o.setName('nitrado-id').setDescription('Nitrado service ID (for API status — most accurate)'))
     .addIntegerOption(o => o.setName('order').setDescription('Sort order (1, 2, 3...)').setMinValue(0)),
 
   async execute(interaction) {
@@ -32,7 +33,8 @@ const monitorAdd = {
     const pvp     = interaction.options.getBoolean('pvp') || false;
     const patreon = interaction.options.getBoolean('patreon') || false;
     const vcId    = interaction.options.getString('channel')?.trim() || null;
-    const order   = interaction.options.getInteger('order') ?? 99;
+    const nitradoId = interaction.options.getString('nitrado-id')?.trim() || null;
+    const order     = interaction.options.getInteger('order') ?? 99;
 
     const { count } = await sb.from('aegis_server_monitors')
       .select('*', { count: 'exact', head: true })
@@ -47,6 +49,7 @@ const monitorAdd = {
       is_pvp:           pvp,
       is_patreon:       patreon,
       voice_channel_id: vcId,
+      nitrado_id:       nitradoId,
       sort_order:       order,
       active:           true,
       created_at:       new Date().toISOString(),

@@ -1,28 +1,26 @@
 // ═══════════════════════════════════════════════════════════════════════
-// monitors/serverMonitor.js — Multi-Guild Live Server Monitor v2
-// One voice channel per server, updated every 5 minutes via gamedig
-// Naming: 🟢 ⚔️• Aberration-3p  |  🔴 • The Island-Off
+// monitors/serverMonitor.js — Live Server Monitor v2.1
+// Uses Nitrado API (HTTPS) for accurate status + player count
+// Gamedig UDP is blocked on most cloud hosts (Render) — API is reliable
 // ═══════════════════════════════════════════════════════════════════════
 'use strict';
 
 const { ChannelType, PermissionFlagsBits } = require('discord.js');
 const { sb, sbOk } = require('../services/supabase');
-const guildManager = require('../managers/guildManager');
+const guildManager  = require('../managers/guildManager');
 
-// Discord rate-limits channel renames to 2/10min per channel
-// We stagger updates to avoid hitting the limit
-const POLL_MS       = 5 * 60 * 1000;  // 5 minutes between full sweeps
-const RENAME_DELAY  = 4_000;           // 4s between each rename to avoid rate limit
-const lastState     = new Map();       // guildId:serverId → 'online'|'offline'
+const POLL_MS      = 5 * 60 * 1000;  // 5 min sweep
+const RENAME_DELAY = 5_500;           // 5.5s between renames (Discord: 2/10min per channel)
+const lastState    = new Map();        // guildId:id → 'online'|'offline'
 
-// ── Start ────────────────────────────────────────────────────────────
+// ── Start ─────────────────────────────────────────────────────────────
 function startMonitor(client) {
-  console.log('[Monitor] 🖥️  Server monitor started — polling every 5 min');
+  console.log('[Monitor] 🖥️  Server monitor v2.1 started (Nitrado API mode)');
   const run = async () => {
     try { await pollAll(client); }
     catch(e) { console.error('[Monitor] Poll error:', e.message); }
   };
-  setTimeout(run, 10_000); // initial delay — let bot finish startup
+  setTimeout(run, 15_000);       // wait for bot to fully init
   setInterval(run, POLL_MS);
 }
 
@@ -33,93 +31,129 @@ async function pollAll(client) {
     .from('aegis_server_monitors')
     .select('*')
     .eq('active', true)
-    .order('guild_id')
-    .order('sort_order');
-
+    .order('guild_id').order('sort_order');
   if (!servers?.length) return;
 
-  // Group by guild
   const byGuild = {};
   for (const s of servers) {
     if (!byGuild[s.guild_id]) byGuild[s.guild_id] = [];
     byGuild[s.guild_id].push(s);
   }
-
-  for (const [guildId, guildServers] of Object.entries(byGuild)) {
-    await pollGuild(client, guildId, guildServers);
+  for (const [gid, srvs] of Object.entries(byGuild)) {
+    await pollGuild(client, gid, srvs);
   }
 }
 
-// ── Poll one guild's servers ──────────────────────────────────────────
+// ── Poll one guild ────────────────────────────────────────────────────
 async function pollGuild(client, guildId, servers) {
-  const guild = await client.guilds.fetch(guildId).catch(() => null);
+  const guild = client.guilds.cache.get(guildId)
+    || await client.guilds.fetch(guildId).catch(() => null);
   if (!guild) return;
 
-  const cfg     = await guildManager.getConfig(guildId) || {};
-  const alertCh = cfg.monitor_alert_channel;
+  const cfg      = await guildManager.getConfig(guildId) || {};
+  const apiKey   = cfg.monitor_nitrado_key || process.env.NITRADO_API_KEY;
+  const alertChId = cfg.monitor_alert_channel;
 
   for (const srv of servers) {
-    const { online, players } = await queryServer(srv.ip, srv.port);
-    const stateKey = `${guildId}:${srv.id}`;
-    const prevState = lastState.get(stateKey);
+    const { online, players } = await queryServer(srv, apiKey);
+    const key      = `${guildId}:${srv.id}`;
+    const prevState = lastState.get(key);
     const changed   = prevState !== undefined && prevState !== (online ? 'online' : 'offline');
-    lastState.set(stateKey, online ? 'online' : 'offline');
+    lastState.set(key, online ? 'online' : 'offline');
 
-    // ── Update voice channel name ─────────────────────────────────
+    // ── Rename voice channel ──────────────────────────────────────
     if (srv.voice_channel_id) {
-      const vcName = buildVcName(srv, online, players);
+      const name = buildVcName(srv, online, players);
       try {
-        const vc = await guild.channels.fetch(srv.voice_channel_id).catch(() => null);
-        if (vc && vc.name !== vcName) {
-          await vc.setName(vcName);
+        const vc = guild.channels.cache.get(srv.voice_channel_id)
+          || await guild.channels.fetch(srv.voice_channel_id).catch(() => null);
+        if (vc && vc.name !== name) {
+          await vc.setName(name);
+          console.log(`[Monitor] ✅ ${srv.server_name}: ${name}`);
           await new Promise(r => setTimeout(r, RENAME_DELAY));
         }
       } catch(e) {
-        if (!e.message?.includes('Missing Permissions')) {
+        if (!e.message?.includes('Missing Permissions') && !e.message?.includes('rate limit')) {
           console.warn(`[Monitor] Rename failed ${srv.server_name}:`, e.message);
         }
       }
     }
 
-    // ── Post status change alert ──────────────────────────────────
-    if (changed && alertCh) {
-      const ch = guild.channels.cache.get(alertCh);
+    // ── Status change alert ───────────────────────────────────────
+    if (changed && alertChId) {
+      const ch = guild.channels.cache.get(alertChId);
       if (ch) {
-        ch.send({
-          embeds: [{
-            color: online ? 0x35ED7E : 0xFF4500,
-            description: online
-              ? `🟢 **${srv.server_name}** is back online — ${players} player(s) connected.`
-              : `🔴 **${srv.server_name}** appears to be offline.`,
-            footer: { text: `${cfg.display_name||'Cluster'} · Server Monitor` },
-            timestamp: new Date().toISOString(),
-          }],
-        }).catch(() => {});
+        ch.send({ embeds: [{
+          color:       online ? 0x35ED7E : 0xFF4500,
+          description: online
+            ? `🟢 **${srv.server_name}** is back online${players > 0 ? ` — ${players} player(s) connected` : ''}.`
+            : `🔴 **${srv.server_name}** is offline. Monitoring continues.`,
+          footer:    { text: `${cfg.display_name || 'Cluster'} · Server Monitor` },
+          timestamp: new Date().toISOString(),
+        }]}).catch(() => {});
       }
     }
   }
 }
 
-// ── Voice channel name format ─────────────────────────────────────────
+// ── Voice channel name ────────────────────────────────────────────────
 // 🟢 ⚔️• Aberration-3p  |  🟢 ⭐• Amissa-0p  |  🔴 • The Island-Off
 function buildVcName(srv, online, players) {
   const dot   = online ? '🟢' : '🔴';
   const badge = srv.is_pvp ? '⚔️' : srv.is_patreon ? '⭐' : '';
   const sep   = badge ? `${badge}•` : '•';
-  const count = online ? `${players}p` : 'Off';
-  return `${dot} ${sep} ${srv.server_name}-${count}`.slice(0, 100);
+  const stat  = online ? `${players}p` : 'Off';
+  return `${dot} ${sep} ${srv.server_name}-${stat}`.slice(0, 100);
 }
 
-// ── Auto-create voice channels for a guild ────────────────────────────
+// ── Query via Nitrado API (primary) or gamedig (fallback) ─────────────
+async function queryServer(srv, apiKey) {
+  // Primary: Nitrado API — works from any cloud host over HTTPS
+  if (srv.nitrado_id && apiKey) {
+    try {
+      const res = await fetch(
+        `https://api.nitrado.net/services/${srv.nitrado_id}/gameservers`,
+        {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal:  AbortSignal.timeout(8000),
+        }
+      );
+      if (res.ok) {
+        const json = await res.json();
+        const gs   = json?.data?.gameserver;
+        if (gs) {
+          const online  = gs.status === 'started';
+          const players = parseInt(gs.query?.player_current ?? 0, 10);
+          return { online, players };
+        }
+      }
+    } catch(e) {
+      console.warn(`[Monitor] Nitrado API error for ${srv.server_name}:`, e.message);
+    }
+  }
+
+  // Fallback: gamedig UDP (may fail on restricted networks)
+  if (srv.ip && srv.port) {
+    try {
+      let Gd;
+      try { Gd = require('gamedig').GameDig; } catch { Gd = require('gamedig'); }
+      const state = await Gd.query({
+        type: 'arkse', host: srv.ip, port: Number(srv.port),
+        maxAttempts: 2, socketTimeout: 5000,
+      });
+      return { online: true, players: state.players?.length ?? 0 };
+    } catch { /* offline */ }
+  }
+
+  return { online: false, players: 0 };
+}
+
+// ── Auto-create locked voice channels ────────────────────────────────
 async function createChannels(guild, guildId, categoryId) {
   if (!sb || !sbOk()) return { created: 0, errors: [] };
   const { data: servers } = await sb
     .from('aegis_server_monitors')
-    .select('*')
-    .eq('guild_id', guildId)
-    .eq('active', true)
-    .order('sort_order');
-
+    .select('*').eq('guild_id', guildId).eq('active', true).order('sort_order');
   if (!servers?.length) return { created: 0, errors: [] };
 
   const category = categoryId
@@ -130,7 +164,7 @@ async function createChannels(guild, guildId, categoryId) {
   const errors = [];
 
   for (const srv of servers) {
-    if (srv.voice_channel_id) continue; // already has a channel
+    if (srv.voice_channel_id) continue;
     try {
       const vc = await guild.channels.create({
         name:   buildVcName(srv, false, 0),
@@ -141,8 +175,7 @@ async function createChannels(guild, guildId, categoryId) {
         ],
       });
       await sb.from('aegis_server_monitors')
-        .update({ voice_channel_id: vc.id })
-        .eq('id', srv.id);
+        .update({ voice_channel_id: vc.id }).eq('id', srv.id);
       created++;
       await new Promise(r => setTimeout(r, 800));
     } catch(e) {
@@ -152,23 +185,7 @@ async function createChannels(guild, guildId, categoryId) {
   return { created, errors };
 }
 
-// ── gamedig query ─────────────────────────────────────────────────────
-async function queryServer(ip, port) {
-  if (!ip || !port) return { online: false, players: 0 };
-  try {
-    let GameDig;
-    try { GameDig = require('gamedig').GameDig; } catch { GameDig = require('gamedig'); }
-    const state = await GameDig.query({
-      type: 'arkse', host: ip, port: Number(port),
-      maxAttempts: 2, socketTimeout: 5000,
-    });
-    return { online: true, players: state.players?.length ?? 0 };
-  } catch {
-    return { online: false, players: 0 };
-  }
-}
-
-// ── Force refresh one guild (called from /monitor-refresh) ────────────
+// ── Force refresh one guild ───────────────────────────────────────────
 async function refreshGuild(client, guildId) {
   if (!sb || !sbOk()) return;
   const { data: servers } = await sb

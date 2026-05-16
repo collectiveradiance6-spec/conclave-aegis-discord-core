@@ -174,6 +174,7 @@ ${Object.entries(patch).filter(([,v])=>v).map(([k,v])=>`• ${k.replace('panel_'
     if (customId === 'aegis_modal_monitor') {
       const patch = {
         monitor_category_id:    interaction.fields.getTextInputValue('mon_category').trim()||null,
+        monitor_nitrado_key:    interaction.fields.getTextInputValue('mon_nitrado').trim()||null,
         monitor_alert_channel:  interaction.fields.getTextInputValue('mon_alert').trim()||null,
         monitor_status_channel: interaction.fields.getTextInputValue('mon_status').trim()||null,
       };
@@ -251,9 +252,10 @@ async function showMonitorModal(interaction) {
     .setCustomId('aegis_modal_monitor')
     .setTitle('📡 Server Monitor Setup');
   modal.addComponents(
-    row(text('mon_category', 'Voice Channel Category ID', config.monitor_category_id||'', false, 'Category where monitor VCs live — right-click → Copy ID')),
-    row(text('mon_alert',    'Status Alert Channel ID',   config.monitor_alert_channel||'',  false, 'Where online/offline alerts are posted')),
-    row(text('mon_status',   'Status Text Channel ID',    config.monitor_status_channel||'', false, 'Text channel for status embeds (optional)')),
+    row(text('mon_category', 'Voice Channel Category ID', config.monitor_category_id||'',    false, 'Category where monitor VCs live — right-click → Copy ID')),
+    row(text('mon_nitrado',  'Nitrado API Key',           config.monitor_nitrado_key||'',     false, 'Bearer token from nitrado.net — enables accurate player counts')),
+    row(text('mon_alert',    'Status Alert Channel ID',   config.monitor_alert_channel||'',   false, 'Where online/offline alerts are posted')),
+    row(text('mon_status',   'Status Text Channel ID',    config.monitor_status_channel||'',  false, 'Text channel for status embeds (optional)')),
   );
   return interaction.showModal(modal);
 }
