@@ -8,22 +8,19 @@ const commandHandler = require('./handlers/commandHandler');
 const eventHandler   = require('./handlers/eventHandler');
 const wsServer       = require('./launchpad/wsServer');
 
-// ── Safety hooks ─────────────────────────────────────
-process.on('uncaughtException', (err) => {
-  console.error('[FATAL]', err);
-});
+const { createCommandEngine } = require('./runtime/commandEngine');
 
-process.on('unhandledRejection', (err) => {
-  console.error('[PROMISE ERROR]', err);
-});
+// ── Safety ─────────────────────────────
+process.on('uncaughtException', console.error);
+process.on('unhandledRejection', console.error);
 
-// ── ENV CHECK ────────────────────────────────────────
+// ── ENV ────────────────────────────────
 if (!process.env.DISCORD_BOT_TOKEN) {
-  console.error('❌ DISCORD_BOT_TOKEN missing');
+  console.error('Missing DISCORD_BOT_TOKEN');
   process.exit(1);
 }
 
-// ── DISCORD CLIENT ───────────────────────────────────
+// ── CLIENT ─────────────────────────────
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -38,67 +35,39 @@ const client = new Client({
 
 client.commands = new Collection();
 
-// ── HANDLERS ─────────────────────────────────────────
-try {
-  commandHandler.load(client);
-  eventHandler.load(client);
-} catch (err) {
-  console.error('[BOOT ERROR] handlers failed', err);
-  process.exit(1);
-}
+// ── COMMAND ENGINE ─────────────────────
+const commandEngine = createCommandEngine(client);
 
-// ── HTTP SERVER ──────────────────────────────────────
-const PORT = process.env.BOT_PORT || 3001;
+// message routing
+client.on('messageCreate', (msg) => {
+  commandEngine.handle(msg);
+});
 
+// ── HANDLERS ───────────────────────────
+commandHandler.load(client);
+eventHandler.load(client);
+
+// ── HTTP ───────────────────────────────
 const server = http.createServer((req, res) => {
   if (req.url === '/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
-      status: 'ok',
-      uptime: Math.floor(process.uptime()),
-      guilds: client.guilds?.cache?.size || 0,
-      ts: new Date().toISOString(),
+      ok: true,
+      guilds: client.guilds.cache.size,
+      uptime: process.uptime(),
     }));
     return;
   }
-
-  res.writeHead(404);
-  res.end();
+  res.end('AEGIS ONLINE');
 });
 
-// ── WS ATTACH ────────────────────────────────────────
-try {
-  wsServer.attach(server, client);
-} catch (err) {
-  console.error('[WS ERROR]', err);
-}
+// ── WS ────────────────────────────────
+wsServer.attach(server, client);
 
-// ── START SERVER ─────────────────────────────────────
-server.listen(PORT, () => {
-  console.log(`HTTP + WS running on ${PORT}`);
-});
+// ── START ─────────────────────────────
+server.listen(process.env.BOT_PORT || 3001);
 
-// ── READY ────────────────────────────────────────────
 client.once('ready', () => {
-  console.log(`READY: ${client.user.tag}`);
+  console.log(`🟢 READY: ${client.user.tag}`);
 });
 
-// ── LOGIN ────────────────────────────────────────────
-client.login(process.env.DISCORD_BOT_TOKEN)
-  .catch(err => {
-    console.error('[LOGIN FAILED]', err);
-    process.exit(1);
-  });
-
-// ── SHUTDOWN ─────────────────────────────────────────
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
-
-async function shutdown() {
-  console.log('[SHUTDOWN] closing...');
-  try { client.destroy(); } catch {}
-  try { server.close(); } catch {}
-  process.exit(0);
-}
-
-module.exports = client;
+client.login(process.env.DISCORD_BOT_TOKEN);

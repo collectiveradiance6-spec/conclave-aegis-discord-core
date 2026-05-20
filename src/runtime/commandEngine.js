@@ -1,39 +1,27 @@
 'use strict';
 
-const logger = require('../core/logger');
-const { createContext } = require('./contextFactory');
+function createCommandEngine(client) {
 
-async function execute(client, interaction, command) {
-  const ctx = await createContext(client, interaction);
+  return {
+    handle(message) {
+      if (!message || message.author.bot) return;
 
-  try {
-    await command.execute(interaction, ctx);
+      const prefix = '!';
+      if (!message.content.startsWith(prefix)) return;
 
-    logger.success(
-      'COMMAND',
-      `${command.data?.name || 'unknown'} executed`,
-      {
-        guildId: ctx.guildId,
-        userId: ctx.userId,
+      const args = message.content.slice(prefix.length).trim().split(/\s+/);
+      const cmdName = args.shift()?.toLowerCase();
+
+      const cmd = client.commands.get(cmdName);
+      if (!cmd) return;
+
+      try {
+        cmd.execute(message, args, client);
+      } catch (err) {
+        console.error('[COMMAND ERROR]', err);
       }
-    );
-  } catch (err) {
-    logger.error('COMMAND', err.message);
-
-    if (interaction.deferred || interaction.replied) {
-      await interaction.followUp({
-        content: '❌ Command execution failed.',
-        ephemeral: true,
-      }).catch(() => {});
-    } else {
-      await interaction.reply({
-        content: '❌ Command execution failed.',
-        ephemeral: true,
-      }).catch(() => {});
     }
-  }
+  };
 }
 
-module.exports = {
-  execute,
-};
+module.exports = { createCommandEngine };

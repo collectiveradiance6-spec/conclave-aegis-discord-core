@@ -14,13 +14,4 @@ function del(key) {
   cache.delete(key);
 }
 
-function clear() {
-  cache.clear();
-}
-
-module.exports = {
-  get,
-  set,
-  del,
-  clear,
-};
+module.exports = { get, set, del };
