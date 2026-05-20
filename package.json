@@ -1,7 +1,7 @@
 {
   "name": "conclave-aegis-discord-core",
   "version": "13.0.0",
-  "description": "AEGIS \u2014 Sovereign Platform Edition \u00b7 Multi-guild Discord bot \u00b7 TheConclave Dominion",
+  "description": "AEGIS — Sovereign Platform Edition · Multi-guild Discord bot · TheConclave Dominion",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -12,14 +12,12 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "engines": {
-    "node": ">=18.0.0"
-  },
   "dependencies": {
     "@supabase/supabase-js": "^2.47.0",
     "axios": "^1.7.0",
     "connect-redis": "^9.0.0",
     "cors": "^2.8.5",
+    "discord.js": "^14.26.4",
     "dotenv": "^16.4.0",
     "groq-sdk": "^0.7.0",
     "ws": "^8.18.0"
