@@ -7,7 +7,6 @@ const { Client, GatewayIntentBits, Collection } = require('discord.js');
 const commandHandler = require('./handlers/commandHandler');
 const eventHandler   = require('./handlers/eventHandler');
 const wsServer       = require('./launchpad/wsServer');
-const commandEngine = require('./runtime/commandEngine');
 
 // ── Safety hooks ─────────────────────────────────────
 process.on('uncaughtException', (err) => {
@@ -38,9 +37,6 @@ const client = new Client({
 });
 
 client.commands = new Collection();
-
-// ── COMMAND ENGINE (NEW) ─────────────────────────────
-const commandEngine = createCommandEngine(client);
 
 // ── HANDLERS ─────────────────────────────────────────
 try {
@@ -76,11 +72,6 @@ try {
 } catch (err) {
   console.error('[WS ERROR]', err);
 }
-
-// ── COMMAND ENGINE WIRING ───────────────────────────
-client.on('messageCreate', (msg) => {
-  commandEngine.handle(msg);
-});
 
 // ── START SERVER ─────────────────────────────────────
 server.listen(PORT, () => {
