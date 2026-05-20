@@ -13,7 +13,20 @@ const handleSubChecklist = require('../commands/subscriptions/subHandler');
 // MAIN ROUTER
 // ─────────────────────────────────────────────
 async function handle(interaction, client) {
+async route(interaction, client) {
+  try {
+    // existing logic
+  } catch (err) {
+    console.error('[ROUTER CRASH]', err);
 
+    if (!interaction.replied) {
+      await interaction.reply({
+        content: '⚠️ System temporarily unavailable.',
+        flags: 64,
+      }).catch(() => {});
+    }
+  }
+}
   // ── BUTTONS ───────────────────────────────
   if (interaction.isButton()) {
     const id = interaction.customId;

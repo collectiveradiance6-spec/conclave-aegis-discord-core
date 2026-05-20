@@ -4,23 +4,27 @@ require('dotenv').config();
 const http = require('http');
 const { Client, GatewayIntentBits, Collection } = require('discord.js');
 
-const commandHandler = require('./handlers/commandHandler');
-const eventHandler   = require('./handlers/eventHandler');
-const wsServer       = require('./launchpad/wsServer');
+const commandHandler    = require('./handlers/commandHandler');
+const eventHandler      = require('./handlers/eventHandler');
+const interactionRouter = require('./handlers/interactionRouter');
+const wsServer          = require('./launchpad/wsServer');
 
-const { createCommandEngine } = require('./runtime/commandEngine');
+// ── Safety Hooks ─────────────────────────────────────
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL]', err);
+});
 
-// ── Safety ─────────────────────────────
-process.on('uncaughtException', console.error);
-process.on('unhandledRejection', console.error);
+process.on('unhandledRejection', (err) => {
+  console.error('[PROMISE ERROR]', err);
+});
 
-// ── ENV ────────────────────────────────
+// ── ENV CHECK ────────────────────────────────────────
 if (!process.env.DISCORD_BOT_TOKEN) {
-  console.error('Missing DISCORD_BOT_TOKEN');
+  console.error('❌ Missing DISCORD_BOT_TOKEN');
   process.exit(1);
 }
 
-// ── CLIENT ─────────────────────────────
+// ── DISCORD CLIENT ───────────────────────────────────
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -35,39 +39,79 @@ const client = new Client({
 
 client.commands = new Collection();
 
-// ── COMMAND ENGINE ─────────────────────
-const commandEngine = createCommandEngine(client);
+// ── LOAD HANDLERS ────────────────────────────────────
+try {
+  commandHandler.load(client);
+  eventHandler.load(client);
+} catch (err) {
+  console.error('[BOOT ERROR] handler load failed', err);
+  process.exit(1);
+}
 
-// message routing
-client.on('messageCreate', (msg) => {
-  commandEngine.handle(msg);
+// ── INTERACTION ROUTER (THIS IS THE KEY FIX) ─────────
+client.on('interactionCreate', async (interaction) => {
+  try {
+    await interactionRouter.route(interaction, client);
+  } catch (err) {
+    console.error('[INTERACTION ERROR]', err);
+  }
 });
 
-// ── HANDLERS ───────────────────────────
-commandHandler.load(client);
-eventHandler.load(client);
+// ── HTTP SERVER ──────────────────────────────────────
+const PORT = process.env.BOT_PORT || 3001;
 
-// ── HTTP ───────────────────────────────
 const server = http.createServer((req, res) => {
   if (req.url === '/health') {
-    res.end(JSON.stringify({
-      ok: true,
-      guilds: client.guilds.cache.size,
-      uptime: process.uptime(),
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({
+      status: 'ok',
+      uptime: Math.floor(process.uptime()),
+      guilds: client.guilds?.cache?.size || 0,
+      ts: new Date().toISOString(),
     }));
-    return;
   }
-  res.end('AEGIS ONLINE');
+
+  res.writeHead(404);
+  res.end('Not Found');
 });
 
-// ── WS ────────────────────────────────
-wsServer.attach(server, client);
+// ── WS SERVER ────────────────────────────────────────
+try {
+  wsServer.attach(server, client);
+} catch (err) {
+  console.error('[WS ERROR]', err);
+}
 
-// ── START ─────────────────────────────
-server.listen(process.env.BOT_PORT || 3001);
+// ── SERVER SAFETY SETTINGS ───────────────────────────
+server.keepAliveTimeout = 120000;
+server.headersTimeout    = 120000;
 
+// ── START SERVER ─────────────────────────────────────
+server.listen(PORT, () => {
+  console.log(`HTTP + WS running on port ${PORT}`);
+});
+
+// ── READY EVENT ──────────────────────────────────────
 client.once('ready', () => {
   console.log(`🟢 READY: ${client.user.tag}`);
 });
 
-client.login(process.env.DISCORD_BOT_TOKEN);
+// ── LOGIN ────────────────────────────────────────────
+client.login(process.env.DISCORD_BOT_TOKEN)
+  .catch(err => {
+    console.error('[LOGIN FAILED]', err);
+    process.exit(1);
+  });
+
+// ── SHUTDOWN ─────────────────────────────────────────
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
+
+async function shutdown() {
+  console.log('[SHUTDOWN] closing...');
+  try { client.destroy(); } catch {}
+  try { server.close(); } catch {}
+  process.exit(0);
+}
+
+module.exports = client;

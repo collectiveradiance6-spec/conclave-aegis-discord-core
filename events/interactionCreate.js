@@ -1,20 +1,22 @@
 'use strict';
 
-const router = require('../runtime/interactionRouter');
+const interactionRouter = require('../handlers/interactionRouter');
 
-module.exports = async (interaction, client) => {
-  try {
-    await router.handle(interaction, client);
-  } catch (err) {
-    console.error('[InteractionRouter Error]', err);
+module.exports = {
+  name: 'interactionCreate',
 
-    if (interaction?.isRepliable?.()) {
-      try {
+  async execute(interaction, client) {
+    try {
+      return await interactionRouter.route(interaction, client);
+    } catch (err) {
+      console.error('[interactionCreate ERROR]', err);
+
+      if (!interaction.replied) {
         await interaction.reply({
-          content: '⚠️ Interaction error occurred.',
+          content: '⚠️ Interaction system error.',
           flags: 64,
-        });
-      } catch {}
+        }).catch(() => {});
+      }
     }
-  }
+  },
 };
