@@ -5,18 +5,10 @@
 // ═══════════════════════════════════════════════════════════════
 
 const { createClient } = require('@supabase/supabase-js');
-require('dotenv').config();
-
-const SUPABASE_SERVICE_SECRET = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
-
-if (!process.env.SUPABASE_URL || !SUPABASE_SERVICE_SECRET) {
-  throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY/SUPABASE_SERVICE_KEY');
-}
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  SUPABASE_SERVICE_SECRET,
-  { auth: { persistSession: false } }
+  process.env.SUPABASE_SERVICE_KEY
 );
 
 // ─── STATIC CORE KNOWLEDGE (always injected, never stale) ───────

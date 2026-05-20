@@ -1,30 +1,40 @@
 services:
-  - type: worker
-    name: conclave-aegis-bot
+  - type: web
+    name: conclave-aegis-api
     runtime: node
     buildCommand: npm install
     startCommand: node index.js
     plan: starter
+    healthCheckPath: /health
     envVars:
-      # ── Static config ──────────────────────────────────────────────
       - key: NODE_ENV
         value: production
-      - key: BOT_PORT
-        value: 3001
+      - key: PORT
+        value: 5001
+      - key: FRONTEND_URL
+        value: https://theconclavedominion.com
       - key: DISCORD_GUILD_ID
         value: "1438103556610723922"
-      - key: API_URL
-        value: https://api.theconclavedominion.com
+      - key: DISCORD_REDIRECT_URI
+        value: https://api.theconclavedominion.com/auth/discord/callback
       - key: BEACON_CLIENT_ID
         value: eb9ecdff-4048-4a83-8f40-f2e16d2e9a81
-      # ── Fill in Render Dashboard (sync: false = secret) ──
-      - key: LAUNCHPAD_EDIT_INTERVAL
-        value: "12000"
-
-      # ── Secrets (fill in Render Dashboard → Environment) ───────────
+      - key: SHOP_TICKETS_CHANNEL
+        value: "1492878413533282394"
+      - key: SHOP_LOG_CHANNEL
+        value: "1492870196958859436"
+      # ── Secrets ──────────────────────────────────────────────────
+      - key: JWT_SECRET
+        generateValue: true
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: DISCORD_CLIENT_ID
+        sync: false
+      - key: DISCORD_CLIENT_SECRET
+        sync: false
       - key: DISCORD_BOT_TOKEN
         sync: false
-      - key: DISCORD_CLIENT_ID
+      - key: DISCORD_WEBHOOK_URL
         sync: false
       - key: ROLE_OWNER_ID
         sync: false
@@ -32,17 +42,17 @@ services:
         sync: false
       - key: ROLE_HELPER_ID
         sync: false
-      - key: ADMIN_TOKEN
+      - key: ROLE_BOOSTER_ID
+        sync: false
+      - key: ROLE_DONATOR_ID
+        sync: false
+      - key: ROLE_SURVIVOR_ID
         sync: false
       - key: SUPABASE_URL
         sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        sync: false
       - key: SUPABASE_SERVICE_KEY
         sync: false
-      - key: ANTHROPIC_API_KEY
-        sync: false
-      - key: AEGIS_CHANNEL_ID
+      - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
       - key: BEACON_CLIENT_SECRET
         sync: false
@@ -53,43 +63,8 @@ services:
       - key: BEACON_TOKEN_EXPIRES
         sync: false
       - key: BEACON_GROUP_ID
-        sync: false
-      - key: NITRADO_API_KEY
-        sync: false
-      - key: MONITOR_STATUS_CHANNEL_ID
-        sync: false
-      - key: MONITOR_ACTIVITY_CHANNEL_ID
-        sync: false
-      - key: MONITOR_MESSAGE_ID
-
-      # ── Shop ──────────────────────────────────────────────────────
-      - key: ORDERS_CHANNEL_ID
-        sync: false
-      - key: DISCORD_WEBHOOK_URL
         sync: false
       - key: SHOP_WEBHOOK_URL
         sync: false
-
-      # ── Beacon ────────────────────────────────────────────────────
-      - key: BEACON_CLIENT_SECRET
-        sync: false
-      - key: BEACON_ACCESS_TOKEN
-        sync: false
-      - key: BEACON_REFRESH_TOKEN
-        sync: false
-      - key: BEACON_TOKEN_EXPIRES
-        sync: false
-      - key: BEACON_GROUP_ID
-        sync: false
-
-      # ── Nitrado ───────────────────────────────────────────────────
-      - key: NITRADO_API_KEY
-        sync: false
-
-      # ── Monitor (fill after /setup-monitoring) ────────────────────
-      - key: MONITOR_STATUS_CHANNEL_ID
-        sync: false
-      - key: MONITOR_ACTIVITY_CHANNEL_ID
-        sync: false
-      - key: MONITOR_MESSAGE_ID
+      - key: NITRADO_TOKEN
         sync: false

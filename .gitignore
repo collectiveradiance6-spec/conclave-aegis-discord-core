@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # AI exports
 ChatGPT Image*
 
@@ -14,3 +15,11 @@ Screenshot*
 # misc temp
 CHECKSUMS.txt
 incollage_save.webp
+=======
+node_modules/
+.env
+*.env
+*.log
+.DS_Store
+npm-debug.log*
+>>>>>>> a20a636 (Merge upstream updates and refine deployment configs)
