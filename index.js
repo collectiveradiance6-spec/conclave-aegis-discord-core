@@ -7,7 +7,7 @@ const { Client, GatewayIntentBits, Collection } = require('discord.js');
 const commandHandler = require('./handlers/commandHandler');
 const eventHandler   = require('./handlers/eventHandler');
 const wsServer       = require('./launchpad/wsServer');
-const { createCommandEngine } = require('./src/runtime/commandEngine');
+const commandEngine = require('./runtime/commandEngine');
 
 // ── Safety hooks ─────────────────────────────────────
 process.on('uncaughtException', (err) => {
