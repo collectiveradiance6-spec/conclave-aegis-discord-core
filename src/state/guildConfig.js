@@ -1,6 +1,6 @@
 'use strict';
 
-const { supabase } = require('../services/supabase');
+const { supabase } = require('../../services/supabase');
 const store = require('./store');
 
 const CACHE_PREFIX = 'guild_config:';
